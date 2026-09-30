@@ -1,0 +1,8 @@
+  ASTERISK_MATCH_AFTER_SEC: 20 * 60,
+  ASTERISK_DEFER_SETTLE_SEC: 45,          // llamada contestada diferida por WF2: sólo se espera a que ElevenLabs/CDR se asienten tras colgar
+  ASTERISK_DEFER_GIVEUP_SEC: 6 * 3600,    // sin conversación terminal tras 6 h: se registra igual (una Activity, sin conversación confirmada)
+  CDR_TOL_START_S: 60,                    // la conversación EL empieza al marcar o al contestar (tolerancia)
+  CDR_TOL_END_S: 90,                      // tolerancia entre el fin de la conversación EL y el fin del CDR
+  CDR_UNALIGNED_TOL_S: 240,              // sin datos de la conversación: el CDR debe empezar a ±4 min del despacho
+  CDR_LATE_SEC: 150,                      // CDR tardío (escritura en lotes): hasta 150 s tras colgar se espera antes de usar la duración de ElevenLabs
+  CDR_AMBIGUITY_S: 15,                    // dos CDR igual de plausibles -> ambiguo -> se usa ElevenLabs

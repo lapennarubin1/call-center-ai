@@ -1,0 +1,991 @@
+{
+  "id": "so0zWwX8da3s5jV9",
+  "name": "VZLA WF7 - Payment Link (Binance + Bybit)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-07-27T13:15:02.790Z",
+  "updatedAt": "2026-08-18T10:57:00.763Z",
+  "isArchived": false,
+  "versionId": "51561cce-2456-400b-9c95-0da78f27bdb0",
+  "versionCounter": 32,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phone"
+            },
+            {
+              "name": "full_name"
+            },
+            {
+              "name": "lead_id"
+            },
+            {
+              "name": "amount"
+            },
+            {
+              "name": "currency"
+            },
+            {
+              "name": "risk_disclosure_confirmed"
+            },
+            {
+              "name": "whatsapp_phone"
+            },
+            {
+              "name": "payment_method"
+            }
+          ]
+        }
+      },
+      "id": "cf2b6a63-62a9-4714-a144-b6bc508c0aba",
+      "name": "When Called as Tool",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2608,
+        1520
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "5a8a8558-eb1c-49b3-8025-c1a7286d6130",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        1808
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "okpay-payment-link-vzla",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "bf71c19e-f617-4e2e-b0b5-80818cfe1b17",
+      "name": "📲 ElevenLabs Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        1184
+      ],
+      "webhookId": "301de7f9-8754-4463-be5d-16a112fc0c9a"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }",
+        "options": {}
+      },
+      "id": "ce603504-e315-4763-a684-3fc33215ca62",
+      "name": "✅ Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2608,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst clientPhone = String(b.phone || b.lead_id || '').replace(/^=+/, '').replace(/[^0-9]/g, '');\n\nlet whatsapp_phone = String(b.whatsapp_phone || '').replace(/^=+/, '').replace(/[^0-9]/g, '');\nif (!whatsapp_phone || !whatsapp_phone.startsWith('58')) {\n  whatsapp_phone = clientPhone;\n}\nif (!whatsapp_phone.startsWith('+')) {\n  whatsapp_phone = '+' + whatsapp_phone;\n}\n\nreturn [{ json: {\n  lead_id:                   String(b.lead_id || Date.now()).replace(/^=+/, '').trim(),\n  full_name:                 String(b.full_name || 'friend').replace(/^=+/, '').trim(),\n  phone:                     clientPhone,\n  whatsapp_phone:            whatsapp_phone,\n  currency:                  'USD',\n  amount:                    b.amount || 25,\n  risk_disclosure_confirmed: true,\n  payment_method:            String(b.payment_method || '').replace(/^=+/, '').trim().toLowerCase()\n}}];"
+      },
+      "id": "66aa4320-e4a4-40ca-9b0d-f1261b390135",
+      "name": "🔧 Parse Webhook Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        1328
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// HARD GUARD — LATAM / Multi-Gateway (Binance Pay | Bybit Pay)\nconst j = $input.first().json || {};\nconst lead_id   = String(j.lead_id || '').replace(/^=+/, '').trim();\nconst full_name = String(j.full_name || '').replace(/^=+/, '').trim();\nconst phone     = String(j.phone || '').replace(/^=+/, '').replace(/[^0-9]/g, '');\nconst currency  = 'USD';\nconst amountRaw = j.amount;\nconst amountNum = Number(String(amountRaw || '0').replace(/^=/, '').trim());\nconst riskConfirmed = j.risk_disclosure_confirmed === true || j.risk_disclosure_confirmed === 'true';\n\nconst ALLOWED_METHODS = ['binance', 'bybit'];\nconst payment_method = String(j.payment_method || '').replace(/^=+/, '').trim().toLowerCase();\n\nconst TWILIO_NUMBERS = ['917827796280', '16514170638'];\nlet whatsapp_phone = String(j.whatsapp_phone || '').replace(/^=+/, '').replace(/[^0-9]/g, '');\nif (!whatsapp_phone || TWILIO_NUMBERS.includes(whatsapp_phone)) {\n  whatsapp_phone = phone;\n}\nif (!whatsapp_phone.startsWith('+')) {\n  whatsapp_phone = '+' + whatsapp_phone;\n}\n\nconst errs = [];\nif (!lead_id) errs.push('missing lead_id');\nif (!phone) errs.push('missing phone');\nif (!Number.isFinite(amountNum) || amountNum < 25) errs.push('amount must be >= 25 USD');\nif (amountNum > 10000) errs.push('amount exceeds ceiling 10000 USD');\nif (!riskConfirmed) errs.push('risk_disclosure_confirmed must be true');\nif (!ALLOWED_METHODS.includes(payment_method)) errs.push('payment_method must be one of: binance, bybit');\n\nif (errs.length) {\n  return [{ json: {\n    success: false,\n    refused: true,\n    reason: errs.join('; '),\n    user_message: 'Lo siento, no puedo generar el link de pago. Razón: ' + errs.join(', ')\n  }}];\n}\n\nconst out_trade_no = 'LM_' + lead_id + '_' + Date.now();\nconst idempotency_key = 'pay_' + out_trade_no;\n\nreturn [{ json: {\n  ok: true,\n  lead_id, full_name, phone, whatsapp_phone, currency, payment_method,\n  amount: Math.floor(amountNum),\n  amount_cents: Math.floor(amountNum * 100),\n  out_trade_no, idempotency_key\n}}];"
+      },
+      "id": "8d89fd29-236f-4169-883f-f7efb75a47c7",
+      "name": "Guard + Build Order1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2784,
+        1328
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d23d7958-c98d-4feb-ac75-594113d9321a",
+      "name": "Guard passed?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2976,
+        1328
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "s1",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0a59eb89-f131-4315-982d-f39fdabf9939",
+      "name": "Success?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4096,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit#gid=1999552215"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "full_name": "={{ $json.full_name }}",
+            "phone": "={{ $json.phone }}",
+            "conversion_date": "={{ $now.toISO() }}",
+            "account_opened": "true",
+            "deposit_status": "=PAYMENT_LINK_SENT",
+            "notes": "=USD {{ $json.amount }} | Payment: {{ $json.out_trade_no }} | Method: {{ $json.payment_method }}",
+            "out_trade_no": "=={{ $json.out_trade_no }}",
+            "whatsapp_phone": "{{ $json.whatsapp_phone }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "whatsapp_phone",
+              "displayName": "whatsapp_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "atlantis_username",
+              "displayName": "atlantis_username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "atlantis_password",
+              "displayName": "atlantis_password",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversion_date",
+              "displayName": "conversion_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "deposit_status",
+              "displayName": "deposit_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "paid",
+              "displayName": "paid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "out_trade_no",
+              "displayName": "out_trade_no",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "0301bcc8-7d03-46a7-879e-6d298872cb96",
+      "name": "Update Lead (Success)1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        5296,
+        1120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF7_PAYMENT",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "Payment Link Generation",
+            "message": "={{ $json.reason || 'unknown error' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ed68cc0f-2754-4d9b-9e4e-d0a90e04dbcc",
+      "name": "Audit: Failure1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4816,
+        1504
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return a clean, tool-friendly response to the AI Agent.\nconst j = $input.first().json;\nif (j.success) {\n  return [{ json: {\n    success: true,\n    message_to_user: 'Te enviamos el link de pago por SMS. Revísalo y confírmalo. Recuerda que el trading conlleva riesgo.',\n    out_trade_no: j.out_trade_no,\n    amount: j.amount,\n    currency: j.currency\n  }}];\n}\nreturn [{ json: {\n  success: false,\n  message_to_user: j.user_message || 'Hubo un problema generando el link de pago. Intentemos de nuevo en un momento.',\n  reason: j.reason\n}}];"
+      },
+      "id": "e852c135-4056-447c-bc7f-b35730544f5a",
+      "name": "Respond to AI1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5744,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nreturn [{ json: {\n  success: false,\n  refused: true,\n  message_to_user: j.user_message || ('Payment link refused: ' + j.reason),\n  reason: j.reason\n}}];"
+      },
+      "id": "38435a27-ad36-4d5a-b5a9-9090fe9a727f",
+      "name": "Refuse Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3536,
+        1488
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF7_PAYMENT",
+            "timestamp": "=={{ $now.toISO() }}",
+            "node": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+            "message": "=={{ JSON.stringify($json).slice(0, 5000) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "17d16ed4-3fa5-40c5-814f-75c563ecff01",
+      "name": "Log Error1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2832,
+        1808
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build MonetiX (GTXpoint) hosted-payment-page request — Binance Pay / Bybit Pay only.\n// No email / trading-account collected via voice/SMS — synthesized placeholders used\n// (per instruction: don't add new required fields to the agent's tool call).\n// The signature itself is computed in the next node (Crypto / HMAC-SHA512).\nconst ctx = $input.first().json;\n\nconst METHODS = {\n  // TODO: Binance Pay limits are unconfirmed on project 164622 — per the handover\n  // doc this is a placeholder mirroring Bybit. Confirm with Monetix account manager.\n  binance: { code: 'unify_Binance_Pay', currency: 'USD', language: 'en' },\n  // KNOWN ISSUE (handover doc §11): Bybit renders a valid signed page but declines\n  // instantly with no QR shown — flagged as a gateway/account activation issue on\n  // project 164622, not a code bug. Escalate to Monetix with the payment_id if seen.\n  bybit:   { code: 'bybit',             currency: 'USD', language: 'en' },\n};\n\nconst m = METHODS[ctx.payment_method];\nif (!m) {\n  return [{ json: { ...ctx,\n    success: false,\n    reason: 'invalid payment_method for Monetix branch: ' + ctx.payment_method,\n    user_message: 'Lo siento, ese método de pago no está disponible.'\n  }}];\n}\n\nconst nameParts = String(ctx.full_name || 'Cliente').trim().split(/\\s+/);\nconst firstName = nameParts[0] || 'Cliente';\nconst lastName  = nameParts.slice(1).join(' ') || 'LandmarkMarkets';\n\n// TODO: move project_id / secret / host to n8n environment variables or a\n// credential instead of hardcoding — see the HMAC Sign node below for the secret.\nconst MONETIX_PROJECT_ID = 164622;\nconst FRONTEND_URL = 'https://deposit.lmtrader.net';\n\nconst params = {\n  project_id: MONETIX_PROJECT_ID,\n  payment_id: ctx.out_trade_no,\n  payment_amount: Math.round(Number(ctx.amount) * 100), // minor units\n  payment_currency: m.currency,\n  customer_id: ctx.lead_id,\n  account_customer_name: `${firstName} ${lastName}`.trim(),\n  customer_first_name: firstName,\n  customer_last_name: lastName,\n  // Placeholder — no real email is collected via SMS/voice in this flow.\n  customer_email: `${ctx.lead_id}@landmarkmarkets.com`,\n  force_payment_method: m.code,\n  payment_description: `Landmark Markets Deposit - ${ctx.full_name}`,\n  language_code: m.language,\n  merchant_success_url: `${FRONTEND_URL}/payment/success?payment_id=${ctx.out_trade_no}`,\n  merchant_fail_url: `${FRONTEND_URL}/payment/fail?payment_id=${ctx.out_trade_no}`,\n  merchant_return_url: `${FRONTEND_URL}/payment/return?payment_id=${ctx.out_trade_no}`,\n};\n\n// --- MonetiX signature-base builder ---\n// Flatten every value into \"path:value\" strings (nested objects/arrays expand\n// with ':' , arrays use zero-based indices, empty arrays skipped, booleans -> 1/0),\n// sort alphabetically, join with ';'. This mirrors server/monetix.js exactly.\nfunction flatten(value, prefix, out) {\n  if (Array.isArray(value)) {\n    if (value.length === 0) return;\n    value.forEach((item, index) => {\n      const path = prefix ? `${prefix}:${index}` : String(index);\n      flatten(item, path, out);\n    });\n    return;\n  }\n  if (value !== null && typeof value === 'object') {\n    for (const key of Object.keys(value)) {\n      const path = prefix ? `${prefix}:${key}` : String(key);\n      flatten(value[key], path, out);\n    }\n    return;\n  }\n  let normalized;\n  if (typeof value === 'boolean') normalized = value ? '1' : '0';\n  else if (value === null || value === undefined) normalized = '';\n  else normalized = String(value);\n  out.push(`${prefix}:${normalized}`);\n}\n\nconst parts = [];\nflatten(params, '', parts);\nparts.sort();\nconst signature_base = parts.join(';');\n\nreturn [{ json: { ...ctx, params, signature_base } }];"
+      },
+      "id": "4644f226-a8e9-4b2b-9f70-7aa5ba8edd81",
+      "name": "Build Monetix Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3392,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "action": "hmac",
+        "type": "SHA512",
+        "value": "={{ $json.signature_base }}",
+        "secret": "425137b5d3a47e96b07b716c7c878d40c484a240ba30240cf46b1c482509ac3431d2816cb6de56552e72e44decbaef2be93c1d4e09675e15edacf04d8fb6d94a",
+        "encoding": "base64"
+      },
+      "id": "b1070228-cc4e-4a3d-a6e0-c13d21b6cb01",
+      "name": "🔐 Monetix HMAC Sign",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [
+        3616,
+        1040
+      ],
+      "notes": "TODO: verify against your n8n version — Action=HMAC, Type=SHA512, Encoding=Base64. Also move the secret to an n8n credential/env var instead of hardcoding it here — this file will be shared/version-controlled."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Take the HMAC-SHA512 signature from the Crypto node and assemble the final\n// signed GET link to MonetiX's hosted Payment Page.\n// NOTE: verify the exact output field name from the \"🔐 Monetix HMAC Sign\" node in\n// the n8n UI — this assumes it's \"data\" (the n8n Crypto node's default output\n// field). If your version names it differently (e.g. \"signature\"), change\n// `prev.data` below to match.\nconst prev = $input.first().json;\nconst ctx = $('Build Monetix Request').first().json;\n\nconst signature = prev.data;\nif (!signature) {\n  return [{ json: { ...ctx,\n    success: false,\n    reason: 'HMAC signing produced no output — check the Monetix HMAC Sign node output field name',\n    user_message: 'Lo siento, hubo un problema técnico generando el link de pago.'\n  }}];\n}\n\nconst finalParams = { ...ctx.params, signature };\nconst qs = Object.entries(finalParams)\n  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)\n  .join('&');\n\n// TODO: move to an n8n environment variable instead of hardcoding.\nconst MONETIX_PP_HOST = 'paymentpage.txflux.com';\nconst checkout_url = `https://${MONETIX_PP_HOST}/payment?${qs}`;\n\nreturn [{ json: { ...ctx,\n  success: true,\n  checkout_url,\n  http_status: 200\n}}];"
+      },
+      "id": "2758d03f-2246-4ca4-a1f6-1eeda1d8ca5b",
+      "name": "Build Monetix Signed URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3872,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://tinyurl.com/api-create.php",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.checkout_url }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "994683b8-2024-49a7-a3f2-3393f75b8847",
+      "name": "Shorten Payment Link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4336,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst ctx = $('Build Monetix Signed URL').first().json;\n\nlet shortUrl = '';\nif (typeof resp === 'string') shortUrl = resp;\nelse shortUrl = resp.data || resp.body || resp.text || '';\n\n// Fallback: si TinyURL falla o devuelve algo raro, usar el link original de Monetix\nif (!shortUrl || !shortUrl.startsWith('http')) shortUrl = ctx.checkout_url;\n\nreturn [{ json: { ...ctx, short_url: shortUrl } }];"
+      },
+      "id": "83c50a48-3909-4295-bc74-8518a08efbeb",
+      "name": "Merge Shortened Link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4528,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\n\n// SMS corto — monto + link\nconst link = ctx.short_url || ctx.checkout_url;\nconst text = `Landmark Markets: link de pago por $${ctx.amount} USD: ${link}`;\n\nreturn [{ json: { ...ctx, sms_text: text } }];"
+      },
+      "id": "9a0551f6-bbb8-4b3d-9aec-bdb5314f0628",
+      "name": "Prepare SMS Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4720,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "={{ $json.sms_text }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "c8a6bb6b-8ab2-4cc4-bce4-591e35f39328",
+      "name": "Send SMS Link1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4912,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const smsResponse = $input.first().json;\nconst ctx = $('Build Monetix Signed URL').first().json;\n\nreturn [{ json: { ...ctx, sms_response: smsResponse } }];"
+      },
+      "id": "a0975f27-f696-4005-a0c2-6f41ccaee6fa",
+      "name": "Reattach Context After SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5104,
+        1120
+      ]
+    }
+  ],
+  "connections": {
+    "When Called as Tool": {
+      "main": [
+        [
+          {
+            "node": "Guard + Build Order1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📲 ElevenLabs Webhook": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond 200",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔧 Parse Webhook Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Parse Webhook Input": {
+      "main": [
+        [
+          {
+            "node": "Guard + Build Order1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard + Build Order1": {
+      "main": [
+        [
+          {
+            "node": "Guard passed?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard passed?1": {
+      "main": [
+        [
+          {
+            "node": "Build Monetix Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuse Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Monetix Request": {
+      "main": [
+        [
+          {
+            "node": "🔐 Monetix HMAC Sign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Monetix HMAC Sign": {
+      "main": [
+        [
+          {
+            "node": "Build Monetix Signed URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Monetix Signed URL": {
+      "main": [
+        [
+          {
+            "node": "Success?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Success?1": {
+      "main": [
+        [
+          {
+            "node": "Shorten Payment Link",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit: Failure1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Lead (Success)1": {
+      "main": [
+        [
+          {
+            "node": "Respond to AI1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit: Failure1": {
+      "main": [
+        [
+          {
+            "node": "Respond to AI1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refuse Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond to AI1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shorten Payment Link": {
+      "main": [
+        [
+          {
+            "node": "Merge Shortened Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Shortened Link": {
+      "main": [
+        [
+          {
+            "node": "Prepare SMS Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare SMS Message": {
+      "main": [
+        [
+          {
+            "node": "Send SMS Link1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS Link1": {
+      "main": [
+        [
+          {
+            "node": "Reattach Context After SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reattach Context After SMS": {
+      "main": [
+        [
+          {
+            "node": "Update Lead (Success)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "id": "EWlF9l3b9w6Vq3NA",
+      "name": "landmark",
+      "createdAt": "2026-07-27T09:29:13.383Z",
+      "updatedAt": "2026-07-27T09:29:13.383Z"
+    },
+    {
+      "id": "RV5NkjlkcBjJfgn5",
+      "name": "compliant-v3",
+      "createdAt": "2026-07-27T13:15:00.991Z",
+      "updatedAt": "2026-07-27T13:15:00.991Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "so0zWwX8da3s5jV9",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-07-27T13:15:02.790Z",
+      "updatedAt": "2026-07-27T13:15:02.790Z"
+    }
+  ],
+  "activeVersion": null
+}

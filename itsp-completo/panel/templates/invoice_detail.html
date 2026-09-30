@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% set active='invoices' %}
+{% block heading %}Factura #{{ inv.id }} · {{ inv.client }}{% endblock %}
+{% block content %}
+
+<div class="cards">
+  <div class="card"><div class="k">Periodo</div>
+    <div class="v" style="font-size:15px">{{ inv.period_start }}<br>{{ inv.period_end }}</div></div>
+  <div class="card"><div class="k">Llamadas</div><div class="v">{{ inv.total_calls }}</div></div>
+  <div class="card"><div class="k">Minutos</div><div class="v">{{ '%.2f'|format(inv.total_minutes|float) }}</div></div>
+  <div class="card"><div class="k">Importe</div>
+    <div class="v">{{ '%.2f'|format(inv.total_amount|float) }}<small> {{ inv.currency }}</small></div></div>
+  {% if inv.total_cost is not none %}
+  <div class="card"><div class="k">Margen estimado</div>
+    <div class="v">{{ '%.2f'|format((inv.total_amount|float) - (inv.total_cost|float)) }}<small> {{ inv.currency }}</small></div></div>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel-h"><h2>Estado de la factura</h2>
+    <div style="display:flex;gap:8px">
+      <form method="post" action="{{ url_for('invoice_status', iid=inv.id, status='issued') }}" style="margin:0">
+        <button class="btn btn-sm">Marcar emitida</button></form>
+      <form method="post" action="{{ url_for('invoice_status', iid=inv.id, status='paid') }}" style="margin:0">
+        <button class="btn btn-sm btn-primary">Marcar pagada</button></form>
+    </div>
+  </div>
+  <div class="panel-b flush">
+    <table>
+      <thead><tr><th>Prefijo</th><th class="num">Llamadas</th><th class="num">Minutos</th><th class="num">Importe</th></tr></thead>
+      <tbody>
+      {% for prefix, calls, secs, amount in summary %}
+        <tr>
+          <td class="mono">{{ prefix or 'sin tarifa' }}</td>
+          <td class="num">{{ calls }}</td>
+          <td class="num">{{ '%.2f'|format((secs or 0)/60) }}</td>
+          <td class="num">{{ '%.4f'|format(amount|float) }} {{ inv.currency }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<a class="btn" href="{{ url_for('invoices') }}">Volver a facturas</a>
+{% endblock %}

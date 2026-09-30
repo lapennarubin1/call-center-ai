@@ -1,0 +1,15 @@
+{
+  "legacy_active_before": [
+    "442FDm64j2YTx9mW",
+    "6ods2vlMKHhuhpQS",
+    "TW1CHksqyf66MjQz",
+    "ap50YtvxxjErCPtq",
+    "wNUh5ugIlHCyShyI"
+  ],
+  "route_before": {
+    "country": 0,
+    "provider": 0,
+    "route": 0,
+    "capacity": 6
+  }
+}

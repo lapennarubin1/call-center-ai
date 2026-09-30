@@ -1,0 +1,555 @@
+{
+  "id": "TIDpFuTeThAQOsBw",
+  "name": "VZLA WF8 - Payment Callback",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-07-27T13:17:05.220Z",
+  "updatedAt": "2026-08-18T10:57:21.862Z",
+  "isArchived": false,
+  "versionId": "2d67bb33-d643-40db-9403-ef1b239cde72",
+  "versionCounter": 5,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "SUCCESS",
+        "options": {}
+      },
+      "id": "0125ac0c-c958-4d1f-a915-6ce9bc256f39",
+      "name": "✅ Respond SUCCESS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        320,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst b = raw.body || raw;\n\n// Stripe evento\nconst eventType = String(b.type || '');\nconst session = b.data?.object || {};\n\n// Detectar pago completado\nconst isPaid = eventType === 'checkout.session.completed' || \n               eventType === 'payment_intent.succeeded';\n\nif (!isPaid) {\n  return [{ json: { isPaid: false, eventType } }];\n}\n\nconst leadId    = String(session.metadata?.lead_id || '');\nconst outTradeNo = String(session.metadata?.out_trade_no || '');\nconst phone     = String(session.metadata?.phone || '').replace(/[^0-9]/g, '');\nconst money     = String((session.amount_total || session.amount_received || 0) / 100);\nconst currency  = String(session.currency || 'usd').toUpperCase();\nconst stripeId  = String(session.id || session.payment_intent || '');\n\nconsole.log('💳 Stripe callback | event:', eventType, '| lead:', leadId, '| amount:', money, currency);\n\nreturn [{ json: {\n  isPaid: true,\n  eventType,\n  leadId,\n  outTradeNo,\n  phone,\n  money,\n  currency,\n  stripeId,\n  raw: b\n}}];\n// secret verification whsec_0Ad3m55nS2LOJmdxkXsPz4YRi7pgTUnb"
+      },
+      "id": "d39e64aa-847c-41bf-a2ed-1257da6e661c",
+      "name": "⚙️ Parse Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "paid-check",
+              "leftValue": "={{ $json.isPaid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a8fcfd53-86a6-42a2-8806-3346dea745f9",
+      "name": "💰 Payment Successful?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        544,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit#gid=1999552215"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "deposit_status": "PAID",
+            "paid": "={{ $json.money }}",
+            "notes": "=Paid ${{ $json.money }} USD | Stripe: {{ $json.stripeId }}",
+            "phone": "={{ $json.phone }}",
+            "out_trade_no": "={{ $json.out_trade_no }}",
+            "whatsapp_phone": "="
+          },
+          "matchingColumns": [
+            "out_trade_no"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "whatsapp_phone",
+              "displayName": "whatsapp_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "atlantis_username",
+              "displayName": "atlantis_username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "atlantis_password",
+              "displayName": "atlantis_password",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversion_date",
+              "displayName": "conversion_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "deposit_status",
+              "displayName": "deposit_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "paid",
+              "displayName": "paid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "out_trade_no",
+              "displayName": "out_trade_no",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "39534a6d-2c31-4580-982b-b2511b87c4de",
+      "name": "📊 Update Conversions Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1136,
+        656
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $('📊 Update Conversions Sheet').first().json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "=Landmark Markets: Pago de ${{ $('⚙️ Parse Callback').first().json.money }} USD confirmado. Cuenta activa. Login: crm.lmtrader.net"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "71cd8106-9764-4534-a87b-33b4997de3db",
+      "name": "📲 Send SMS Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "position": [
+        1376,
+        656
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const sheet = $('📊 Update Conversions Sheet').first().json;\nconst sms = $('📲 Send SMS Confirmation').first().json;\nconst ctx = $('⚙️ Parse Callback').first().json;\nconsole.log('✅ Payment processed | money:', ctx.money, '| txn:', ctx.transId, '| sms_http:', sms.statusCode);\nreturn [{ json: {\n  status: 'PROCESSED',\n  money: ctx.money,\n  transId: ctx.transId,\n  outTradeNo: ctx.outTradeNo,\n  sms_status: sms.statusCode\n}}];"
+      },
+      "id": "78f785a2-2e07-47fa-922d-53ef09fff257",
+      "name": "📝 Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconsole.log('⚠️ Payment not successful | status:', ctx.status, '| order:', ctx.outTradeNo);\nreturn [{ json: { status: 'SKIPPED', reason: ctx.status } }];"
+      },
+      "id": "22d49827-94f2-4089-9b1e-1e3f49077089",
+      "name": "📝 Log Skipped",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        1040
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "bf16a13e-f63c-4e08-8363-5786ff00fb66",
+      "name": "🚨 Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        112,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "errors",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF8_CALLBACK",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+            "message": "={{ JSON.stringify($json).slice(0, 5000) }}"
+          },
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "893a8300-716d-4733-9459-a37a07ddf4ee",
+      "name": "📋 Log Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        320,
+        1136
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit#gid=1999552215"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "out_trade_no",
+              "lookupValue": "={{ $json.outTradeNo }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        896,
+        656
+      ],
+      "id": "2133f0ea-c568-4b0d-9588-f01ac588b3df",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stripe-callback-vzla",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "785fd67c-5072-40b5-8b43-9e98468b5d26",
+      "name": "stripe Callback Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        112,
+        880
+      ],
+      "webhookId": "29054821-f463-4341-875d-dcd52ac5892e"
+    }
+  ],
+  "connections": {
+    "⚙️ Parse Callback": {
+      "main": [
+        [
+          {
+            "node": "💰 Payment Successful?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💰 Payment Successful?": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📝 Log Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Update Conversions Sheet": {
+      "main": [
+        [
+          {
+            "node": "📲 Send SMS Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🚨 Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "📋 Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "📊 Update Conversions Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "stripe Callback Webhook": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond SUCCESS",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⚙️ Parse Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📲 Send SMS Confirmation": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "TIDpFuTeThAQOsBw",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-07-27T13:17:05.220Z",
+      "updatedAt": "2026-07-27T13:17:05.220Z"
+    }
+  ],
+  "activeVersion": null
+}

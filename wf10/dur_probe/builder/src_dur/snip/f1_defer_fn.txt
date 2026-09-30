@@ -1,0 +1,19 @@
+// Asterisk contestada (ledger de WF2) cuya conversación de ElevenLabs no existe / no llega a estado terminal:
+// no se deja al lead colgado ni sin Activity. Se registra UNA Activity sin conversación confirmada
+// (misma política que Stringee "contestó pero sin conversación": NO_ANSWER, ciclo 3x3).
+async function deferredWithoutConversation(ev, ctx, why) {
+  const leadId = String(ev.lead_id || '').trim();
+  if (!UUID_RE.test(leadId)) return skip(ev, 'MISSING_OR_LEGACY_LEAD_ID', { provider: 'asterisk' });
+  const startMs = Number(ev.event_at_ms) || Number(ev.dispatched_at_ms) || NOW;
+  const cdr = pickCdr(ev, null, null, 0);
+  const convId = String(ev.external_id || '');
+  const cls = { kind: 'UNSUCCESSFUL', sub: 'ANSWERED_CONVERSATION_MISSING', outcome: 'NO_ANSWER', callStatus: 'NO_ANSWER',
+    durationSec: cdr ? cdr.billsec : 0,
+    note: 'Call answered but the AI conversation record is not available. No customer conversation could be confirmed.', recordingSynced: cdr ? 0 : 1 };
+  console.error('⚠️ Asterisk diferida sin conversación utilizable (' + why + '): ' + convId + ' -> Activity sin conversación confirmada');
+  return applyCall(ev, { provider: 'asterisk', leadId, phone: String(ev.phone || ''), N: ev.call_attempts, refs: ['elevenlabs:' + convId],
+    cls, callStartMs: startMs, callEndMs: startMs + (cdr ? cdr.billsec * 1000 : 0), convId, resolutionPrefix: 'ASTERISK_DEFER',
+    deferred: true, durationSource: cdr ? 'cdr' : 'el', fcfEpochMs: cdr ? cdr.startMs : null }, ctx);
+}
+
+async function processElevenLabs(ev, ctx) {

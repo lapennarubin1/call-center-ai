@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}Panel · Call Center{% endblock %}
+
+{% block content %}
+
+<nav class="countries" aria-label="Call Center">
+  <a class="chip on" href="/callcenter">Call Center</a>
+  <a class="chip" href="/sip">SIP Balance</a>
+  <a class="chip" href="/sip/extensions">Extensions</a>
+</nav>
+
+{% if error %}
+<p class="notice stale-warn">{{ error }}</p>
+{% endif %}
+{% if applied and not error %}
+<p class="notice" style="border-left-color: var(--ok); background:#12392C; color: var(--ink-2)">
+  Done — n8n updated.
+</p>
+{% endif %}
+{% if status_error %}
+<p class="notice stale-warn">Could not read live status from n8n: {{ status_error }}. Switches below still work (they're stored in the panel), you just can't see which workflows are currently on/off until n8n is reachable again.</p>
+{% endif %}
+
+<p class="cap" style="margin: 0 0 16px">
+  Each switch is a group of n8n workflow IDs with a label — turning it on/off turns ALL of those
+  workflows on/off in n8n. Some workflows are shared across countries (they process every region in
+  one run) — grouping those into their own switch avoids accidentally stopping another country's
+  automation.
+</p>
+
+<!-- ══ SWITCHES EXISTENTES ══════════════════════════════════════════ -->
+{% if switches %}
+<div class="grid-2">
+  {% for sw in switches %}
+  <section class="panel">
+    <header class="panel-head">
+      <div>
+        <span class="eyebrow">{{ sw.total_count }} workflow{{ 's' if sw.total_count != 1 }}</span>
+        <h2>
+          {{ sw.label }}
+          {% if status_error %}
+            <span class="pill">unknown</span>
+          {% elif sw.all_on %}
+            <span class="pill good">all on</span>
+          {% elif sw.all_off %}
+            <span class="pill">all off</span>
+          {% else %}
+            <span class="pill mid">{{ sw.active_count }}/{{ sw.total_count }} on</span>
+          {% endif %}
+        </h2>
+        {% if sw.schedule %}
+          <p class="cap" style="margin-top:2px">
+            ⏱ ON {{ sw.schedule.on_time }} · OFF {{ sw.schedule.off_time }} · {{ sw.schedule.timezone }} ·
+            {{ sw.schedule.days | join(', ') }}
+            {% if not sw.schedule.enabled %}<span class="pill" style="margin-left:6px">paused</span>{% endif %}
+            {% if sw.schedule.last_error %}<span class="pill mid" style="margin-left:6px" title="{{ sw.schedule.last_error }}">last run failed</span>{% endif %}
+          </p>
+        {% endif %}
+      </div>
+    </header>
+
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <tbody>
+          {% for w in sw.workflows %}
+          <tr>
+            <td>{{ w.name }} <span class="cap">({{ w.id }})</span></td>
+            <td class="r">
+              {% if w.active is none %}
+                <span class="pill">?</span>
+              {% elif w.active %}
+                <span class="pill good">on</span>
+              {% else %}
+                <span class="pill">off</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pricing-row" style="margin-top: 14px">
+      <form method="post" action="/callcenter/{{ sw.id }}/on" style="display:inline">
+        <button type="submit" class="btn">Turn ON all</button>
+      </form>
+      <form method="post" action="/callcenter/{{ sw.id }}/off" style="display:inline">
+        <button type="submit" class="btn ghost">Turn OFF all</button>
+      </form>
+      <a class="btn ghost" href="#edit-{{ sw.id }}" onclick="toggleEdit({{ sw.id }})">Edit</a>
+      <a class="btn ghost" href="#schedule-{{ sw.id }}" onclick="toggleEdit('schedule-{{ sw.id }}')">Schedule</a>
+      <form method="post" action="/callcenter/{{ sw.id }}/delete" style="display:inline"
+            onsubmit="return confirm('Delete switch {{ sw.label }}? This does not touch n8n, only removes it from the panel.')">
+        <button type="submit" class="btn ghost">Delete</button>
+      </form>
+    </div>
+
+    <!-- Formulario de horario, oculto por defecto -->
+    <div id="edit-schedule-{{ sw.id }}" style="display:none; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line)">
+      <form method="post" action="/callcenter/{{ sw.id }}/schedule">
+        <div class="pricing-row">
+          <select name="timezone" required>
+            {% for tz in common_timezones %}
+              <option value="{{ tz }}" {{ 'selected' if sw.schedule and sw.schedule.timezone == tz }}>{{ tz }}</option>
+            {% endfor %}
+          </select>
+          <label class="cap">ON <input type="time" name="on_time" value="{{ sw.schedule.on_time if sw.schedule else '10:30' }}" required></label>
+          <label class="cap">OFF <input type="time" name="off_time" value="{{ sw.schedule.off_time if sw.schedule else '17:30' }}" required></label>
+        </div>
+        <div class="pricing-row" style="margin-top:8px">
+          {% for d in weekday_codes %}
+            <label class="cap">
+              <input type="checkbox" name="days" value="{{ d }}"
+                     {{ 'checked' if (not sw.schedule and d in ['mon','tue','wed','thu','fri']) or (sw.schedule and d in sw.schedule.days) }}>
+              {{ d }}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="pricing-row" style="margin-top:8px">
+          <label class="cap"><input type="checkbox" name="enabled" value="1" {{ 'checked' if (not sw.schedule) or (sw.schedule and sw.schedule.enabled) }}> Enabled</label>
+          <button type="submit" class="btn">Save schedule</button>
+          {% if sw.schedule %}
+          <button type="submit" form="delete-schedule-{{ sw.id }}" class="btn ghost">Remove schedule</button>
+          {% endif %}
+        </div>
+      </form>
+      {% if sw.schedule %}
+      <form id="delete-schedule-{{ sw.id }}" method="post" action="/callcenter/{{ sw.id }}/schedule/delete"></form>
+      {% endif %}
+    </div>
+
+    <!-- Formulario de edición, oculto por defecto -->
+    <div id="edit-{{ sw.id }}" style="display:none; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line)">
+      <form method="post" action="/callcenter/{{ sw.id }}/edit">
+        <div class="pricing-row">
+          <input name="label" value="{{ sw.label }}" required style="max-width:220px">
+        </div>
+        {% if available_workflows %}
+        <div class="tbl-wrap" style="max-height:220px; overflow-y:auto; margin-top:10px">
+          <table class="tbl">
+            <tbody>
+              {% for w in available_workflows %}
+              <tr>
+                <td>
+                  <label>
+                    <input type="checkbox" name="workflow_ids" value="{{ w.id }}"
+                           {{ 'checked' if w.id in sw.workflow_ids }}>
+                    {{ w.name }} <span class="cap">({{ w.id }}, {{ 'active' if w.active else 'inactive' }})</span>
+                  </label>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+        <p class="cap" style="margin:8px 0 4px">
+          {{ 'Or add' if available_workflows else 'Add' }} workflow IDs manually (comma or space separated) — useful if n8n is unreachable or the workflow isn't in the list above:
+        </p>
+        <div class="pricing-row">
+          <input name="workflow_ids_manual" placeholder="e.g. AbC123, XyZ789" style="max-width:320px">
+          <button type="submit" class="btn">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+  <p class="empty">No switches yet. Create one below.</p>
+{% endif %}
+
+<!-- ══ NUEVO SWITCH ═════════════════════════════════════════════════ -->
+<section class="panel" style="margin-top: 16px">
+  <header class="panel-head">
+    <div><span class="eyebrow">Call Center</span><h2>New switch</h2></div>
+  </header>
+  <form method="post" action="/callcenter/new">
+    <div class="pricing-row">
+      <input name="label" placeholder="Label (e.g. India, México, Compartido WF9-14)" required style="max-width:280px">
+    </div>
+
+    {% if fetch_error %}
+      <p class="notice stale-warn" style="margin-top:10px">Could not load the workflow picker from n8n: {{ fetch_error }}. Add workflow IDs manually below (find them in the URL when you open a workflow in n8n, e.g. .../workflow/<b>AbC123XyZ</b>).</p>
+    {% elif available_workflows %}
+      <div class="tbl-wrap" style="max-height:260px; overflow-y:auto; margin-top:10px">
+        <table class="tbl">
+          <tbody>
+            {% for w in available_workflows %}
+            <tr>
+              <td>
+                <label>
+                  <input type="checkbox" name="workflow_ids" value="{{ w.id }}">
+                  {{ w.name }} <span class="cap">({{ w.id }}, {{ 'active' if w.active else 'inactive' }})</span>
+                </label>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">No workflows found in n8n.</p>
+    {% endif %}
+
+    <p class="cap" style="margin:8px 0 4px">
+      {{ 'Or add' if available_workflows else 'Add' }} workflow IDs manually (comma or space separated):
+    </p>
+    <div class="pricing-row">
+      <input name="workflow_ids_manual" placeholder="e.g. AbC123, XyZ789" style="max-width:320px">
+      <button type="submit" class="btn">Create switch</button>
+    </div>
+  </form>
+</section>
+
+<script>
+function toggleEdit(id) {
+  var el = document.getElementById('edit-' + id);
+  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+}
+</script>
+
+{% endblock %}

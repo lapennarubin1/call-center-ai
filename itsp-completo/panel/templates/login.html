@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block guest %}
+<div class="login-wrap">
+  <div class="login-box">
+    <div class="brand" style="font-family:var(--mono);font-weight:600;font-size:18px">
+      itsp·core
+      <small style="display:block;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;margin-top:4px">consola de operaciones</small>
+    </div>
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% for cat,msg in msgs %}
+        <div class="flash flash-error">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    <form method="post">
+      <div class="field" style="margin-bottom:14px">
+        <label>Usuario</label>
+        <input name="username" autofocus required>
+      </div>
+      <div class="field" style="margin-bottom:20px">
+        <label>Contraseña</label>
+        <input name="password" type="password" required>
+      </div>
+      <button class="btn btn-primary" style="width:100%;justify-content:center" type="submit">Entrar</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

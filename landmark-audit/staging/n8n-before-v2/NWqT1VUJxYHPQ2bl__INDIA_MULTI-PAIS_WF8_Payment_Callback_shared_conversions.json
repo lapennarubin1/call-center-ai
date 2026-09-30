@@ -1,0 +1,589 @@
+{
+  "id": "NWqT1VUJxYHPQ2bl",
+  "name": "INDIA MULTI-PAIS WF8 — Payment Callback (shared conversions)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-08T13:17:46.556Z",
+  "updatedAt": "2026-09-09T08:28:37.074Z",
+  "isArchived": false,
+  "versionId": "7fe69111-33de-47a7-abb0-182b03044a00",
+  "versionCounter": 8,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $('📊 Update Conversions Sheet1').first().json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "=Capital Atlantis: Payment of Rs{{ $('⚙️ Parse Callback1').first().json.money }} confirmed! Trading account active. Login: crm.capitalatlantis.net"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "ad7952ca-2455-47de-b3c5-4d3a8ec8b96b",
+      "name": "📲 Send SMS Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1024,
+        816
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "okpay-callback",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f75c959b-0eef-4a8e-a798-d44bb32fb6de",
+      "name": "📥 OkPay Callback Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        1040
+      ],
+      "webhookId": "e9cfe8dc-d32e-4f21-9da6-1ed63384da8f"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "SUCCESS",
+        "options": {}
+      },
+      "id": "52a58a3c-b861-4d15-8b6a-245e75841308",
+      "name": "✅ Respond SUCCESS1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -32,
+        896
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst b = raw.body || raw;\n\n// OkPay sends flat form fields\nconst status     = String(b.status || b.trade_status || '').toUpperCase();\nconst money      = String(b.money || b.amount || '');\nconst outTradeNo = String(b.out_trade_no || '');\nconst transId    = String(b.transaction_id || b.transactionId || b.trade_no || '');\nconst attach     = String(b.attach || ''); // echoed lead_id\nconst phone      = String(b.phone || '').replace(/[^0-9]/g, '');\nconst mchId      = String(b.mchId || b.mch_id || '');\n\nconsole.log('📥 OkPay callback | status:', status, '| money:', money, '| out_trade_no:', outTradeNo, '| attach:', attach);\n\n// OkPay success statuses\nconst isPaid = status === 'SUCCESS' || status === 'PAID' || status === '1' || status === 'COMPLETED';\n\nif (!isPaid) {\n  console.log('⚠️ Payment not successful, status:', status);\n  return [{ json: { isPaid: false, status, outTradeNo, transId } }];\n}\n\n// Extract lead_id from attach or out_trade_no\nlet leadId = attach || outTradeNo;\n\nreturn [{ json: {\n  isPaid: true,\n  status,\n  money,\n  outTradeNo,\n  transId,\n  leadId,\n  phone,\n  mchId,\n  raw: b\n}}];"
+      },
+      "id": "f2322115-e3b9-4473-b32d-429450414948",
+      "name": "⚙️ Parse Callback1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "paid-check",
+              "leftValue": "={{ $json.isPaid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3ecb2e24-ffc7-461e-a7ed-de36cb62b765",
+      "name": "💰 Payment Successful?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        192,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1999552215"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "deposit_status": "PAID",
+            "paid": "={{ $json.money }}",
+            "notes": "=Paid ₹{{ $json.money }} | OkPay: {{ $json.outTradeNo }}",
+            "phone": "={{ $json.phone }}",
+            "out_trade_no": "={{ $json.out_trade_no }}",
+            "whatsapp_phone": "="
+          },
+          "matchingColumns": [
+            "out_trade_no"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "whatsapp_phone",
+              "displayName": "whatsapp_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "atlantis_username",
+              "displayName": "atlantis_username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "atlantis_password",
+              "displayName": "atlantis_password",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversion_date",
+              "displayName": "conversion_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "deposit_status",
+              "displayName": "deposit_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "paid",
+              "displayName": "paid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "out_trade_no",
+              "displayName": "out_trade_no",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "c788b226-3fcd-4a36-bbab-ca8bfeb84dd6",
+      "name": "📊 Update Conversions Sheet1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        784,
+        816
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sheet = $('📊 Update Conversions Sheet1').first().json;\nconst sms = $('📲 Send SMS Confirmation').first().json;\nconst ctx = $('⚙️ Parse Callback1').first().json;\nconsole.log('✅ Payment processed | money:', ctx.money, '| txn:', ctx.transId, '| sms_http:', sms.statusCode);\nreturn [{ json: {\n  status: 'PROCESSED',\n  money: ctx.money,\n  transId: ctx.transId,\n  outTradeNo: ctx.outTradeNo,\n  sms_status: sms.statusCode\n}}];"
+      },
+      "id": "5a79523c-4413-4ead-8abc-e108a4ce38e5",
+      "name": "📝 Log Success1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconsole.log('⚠️ Payment not successful | status:', ctx.status, '| order:', ctx.outTradeNo);\nreturn [{ json: { status: 'SKIPPED', reason: ctx.status } }];"
+      },
+      "id": "b12dac92-8603-4bf9-9830-3513892d950b",
+      "name": "📝 Log Skipped1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF8_CALLBACK",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+            "message": "={{ JSON.stringify($json).slice(0, 5000) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "2a04c561-c714-4397-8370-e8ce53dc9f4c",
+      "name": "📋 Log Error1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -32,
+        1296
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1999552215"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "out_trade_no",
+              "lookupValue": "={{ $json.outTradeNo }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        544,
+        816
+      ],
+      "id": "572844c8-9089-4d5b-aa07-6d0ab9751378",
+      "name": "Get row(s) in sheet1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Este WF permanece compartido porque actualiza `conversions`, no las pestañas `leads`.\n\nMientras Nepal payment está bloqueado en WF7, este callback procesa únicamente pagos emitidos por la ruta India existente. No requiere duplicar una pestaña por país.",
+        "height": 250,
+        "width": 620,
+        "color": 5
+      },
+      "id": "70df476f-4f66-4b83-a3da-589210f67ee8",
+      "name": "🌍 Payment Callback",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "📲 Send SMS Confirmation": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Success1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 OkPay Callback Webhook1": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond SUCCESS1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⚙️ Parse Callback1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Parse Callback1": {
+      "main": [
+        [
+          {
+            "node": "💰 Payment Successful?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💰 Payment Successful?1": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📝 Log Skipped1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Update Conversions Sheet1": {
+      "main": [
+        [
+          {
+            "node": "📲 Send SMS Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet1": {
+      "main": [
+        [
+          {
+            "node": "📊 Update Conversions Sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "NWqT1VUJxYHPQ2bl",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-08T13:17:46.556Z",
+      "updatedAt": "2026-09-08T13:17:46.556Z"
+    }
+  ],
+  "activeVersion": null
+}

@@ -1,0 +1,224 @@
+{
+  "$contract": "SUITE_V2_BUILD_CONTRACT",
+  "$version": "2.0.0",
+  "$generated": "generado por tools/build_workflows.py a partir de los JSON entregados",
+  "$note": "Este archivo describe lo que el suite CONSTRUIDO expone e implementa. Los cuatro contratos de la FUNDACIÓN V2.2 (TEMPLATE_DATA, PROVIDER_ADAPTER, FOLLOWUP_ENGINE, ANALYTICS_EVENT) siguen siendo normativos y no se modificaron.",
+  "workflows": {
+    "TEMPLATE_FOLLOWUP_ENGINE_V2": {
+      "file": "TEMPLATE_FOLLOWUP_ENGINE_V2.json",
+      "nodes": 60,
+      "sticky_notes": 11,
+      "sql_statements": 18,
+      "is_sub_workflow": true,
+      "schedule_minutes": null,
+      "webhooks": null,
+      "calls_sub_workflows": null,
+      "active_on_import": false
+    },
+    "TEMPLATE_WF10_RECORDINGS_V2": {
+      "file": "TEMPLATE_WF10_RECORDINGS_V2.json",
+      "nodes": 34,
+      "sticky_notes": 8,
+      "sql_statements": 11,
+      "is_sub_workflow": false,
+      "schedule_minutes": [
+        5
+      ],
+      "webhooks": null,
+      "calls_sub_workflows": null,
+      "active_on_import": false
+    },
+    "TEMPLATE_WF14_RECONCILIATION_ANALYTICS_V2": {
+      "file": "TEMPLATE_WF14_RECONCILIATION_ANALYTICS_V2.json",
+      "nodes": 27,
+      "sticky_notes": 10,
+      "sql_statements": 16,
+      "is_sub_workflow": false,
+      "schedule_minutes": [
+        5
+      ],
+      "webhooks": null,
+      "calls_sub_workflows": null,
+      "active_on_import": false
+    },
+    "TEMPLATE_WF2_CALL_DISPATCHER_V2": {
+      "file": "TEMPLATE_WF2_CALL_DISPATCHER_V2.json",
+      "nodes": 58,
+      "sticky_notes": 14,
+      "sql_statements": 14,
+      "is_sub_workflow": false,
+      "schedule_minutes": [
+        1
+      ],
+      "webhooks": [
+        "dispatch-now-v2"
+      ],
+      "calls_sub_workflows": [
+        "TEMPLATE_FOLLOWUP_ENGINE_V2"
+      ],
+      "active_on_import": false,
+      "operating_mode_lock": "WF2 lee operating_mode de /api/routes/active y termina antes de pedir leads si el despacho V2 no está permitido. Segunda linea de defensa: el panel ya devuelve cero rutas invocables en LEGACY_BACKUP."
+    },
+    "TEMPLATE_WF3_ACCOUNT_CREATION_V2": {
+      "file": "TEMPLATE_WF3_ACCOUNT_CREATION_V2.json",
+      "nodes": 38,
+      "sticky_notes": 9,
+      "sql_statements": 9,
+      "is_sub_workflow": true,
+      "schedule_minutes": null,
+      "webhooks": [
+        "create-account-v2"
+      ],
+      "calls_sub_workflows": null,
+      "active_on_import": false
+    },
+    "TEMPLATE_WF7_8_PAYMENT_CALLBACK_V2": {
+      "file": "TEMPLATE_WF7_8_PAYMENT_CALLBACK_V2.json",
+      "nodes": 55,
+      "sticky_notes": 9,
+      "sql_statements": 10,
+      "is_sub_workflow": false,
+      "schedule_minutes": null,
+      "webhooks": [
+        "payment-link-v2",
+        "callback-request-v2",
+        "payment-callback-v2"
+      ],
+      "calls_sub_workflows": null,
+      "active_on_import": false
+    },
+    "TEMPLATE_WF9_POST_CALL_HANDLER_V2": {
+      "file": "TEMPLATE_WF9_POST_CALL_HANDLER_V2.json",
+      "nodes": 27,
+      "sticky_notes": 8,
+      "sql_statements": 3,
+      "is_sub_workflow": false,
+      "schedule_minutes": [
+        2
+      ],
+      "webhooks": [
+        "elevenlabs-postcall-v2",
+        "stringee-callback-v2"
+      ],
+      "calls_sub_workflows": [
+        "TEMPLATE_FOLLOWUP_ENGINE_V2"
+      ],
+      "active_on_import": false
+    }
+  },
+  "webhooks": {
+    "dispatch-now-v2": "TEMPLATE_WF2_CALL_DISPATCHER_V2",
+    "create-account-v2": "TEMPLATE_WF3_ACCOUNT_CREATION_V2",
+    "payment-link-v2": "TEMPLATE_WF7_8_PAYMENT_CALLBACK_V2",
+    "callback-request-v2": "TEMPLATE_WF7_8_PAYMENT_CALLBACK_V2",
+    "payment-callback-v2": "TEMPLATE_WF7_8_PAYMENT_CALLBACK_V2",
+    "elevenlabs-postcall-v2": "TEMPLATE_WF9_POST_CALL_HANDLER_V2",
+    "stringee-callback-v2": "TEMPLATE_WF9_POST_CALL_HANDLER_V2"
+  },
+  "credentials_required": {
+    "__PANEL_TOKEN_CREDENTIAL__": {
+      "type": "HTTP Header Auth",
+      "name": "Landmark Panel API",
+      "header": "X-Service-Token",
+      "value": "LM_ROUTES_API_TOKEN del panel"
+    },
+    "__LEADSTUDIO_LOGIN_CREDENTIAL__": {
+      "type": "HTTP Custom Auth",
+      "name": "LeadStudio Login",
+      "content": "{\"body\":{\"email\":\"...\",\"password\":\"...\"}}"
+    },
+    "__ELEVENLABS_CREDENTIAL__": {
+      "type": "HTTP Header Auth",
+      "name": "ElevenLabs API",
+      "header": "xi-api-key"
+    },
+    "__MYSQL_CREDENTIAL__": {
+      "type": "MySQL",
+      "name": "Landmark MySQL"
+    },
+    "__TELEGRAM_CREDENTIAL__": {
+      "type": "Telegram",
+      "name": "Landmark Telegram"
+    },
+    "__COUNTRY_TOOL_CREDENTIAL__": {
+      "type": "HTTP Header Auth",
+      "name": "Country Tool API",
+      "when": "solo si algún país usa CREATE_ACCOUNT en modo CUSTOM_ENDPOINT"
+    },
+    "__SMS_CREDENTIAL__": {
+      "type": "HTTP Header Auth",
+      "name": "SMS Gateway",
+      "when": "solo si se entrega el link de pago por SMS"
+    },
+    "__PAYMENT_ROUTER_CREDENTIAL__": {
+      "type": "HTTP Header Auth",
+      "name": "Payment Router API",
+      "when": "solo si algún país usa CREATE_PAYMENT_LINK en modo UNIVERSAL_ROUTER"
+    }
+  },
+  "environment_required": {
+    "LM_PANEL_URL": "http://172.18.0.1:8080 — base de la API del panel (red interna)",
+    "LM_LEADSTUDIO_URL": "base de la API de LeadStudio",
+    "LM_STRINGEE_WORKER_URL": "base del worker Stringee (respaldo del endpoint del proveedor)",
+    "LM_WF9_CALLBACK_URL": "URL del webhook stringee-callback-v2, que WF2 manda al worker",
+    "LM_WORKER_CALLBACK_TOKEN": "opcional: autentica el callback del worker",
+    "ELEVENLABS_API_KEY": "polling de respaldo de WF9 y descarga de audio de WF10",
+    "ELEVENLABS_WEBHOOK_SECRET": "HMAC del post-call. SIN ESTO, WF9 RECHAZA TODO (fail-closed)",
+    "LM_OKPAY_MCH_ID": "merchant id de OkPay. Credencial, NUNCA en la base ni en el workflow",
+    "LM_OKPAY_SIGN_KEY": "clave de firma de OkPay. Sin ella WF7 devuelve CONFIG_ERROR"
+  },
+  "panel_api": {
+    "GET /api/routes/active": "rutas que deben llamar AHORA (los 3 interruptores + READY + horario)",
+    "GET /api/routes/active?all=1": "todas las no archivadas, con blocked_by",
+    "GET /api/routes/active?include_archived=1": "también las archivadas (WF10, reconciliación)",
+    "GET /api/routes/by-key/{route_key}": "una ruta, AUNQUE esté archivada (WF9, motor)",
+    "GET /api/countries/{iso}/tools": "tools habilitadas del país + country_enabled/country_ready",
+    "GET /api/settings": "umbrales operativos del suite (NUEVO en V2)",
+    "GET /api/issues": "issues de reconciliación (NUEVO en V2)",
+    "GET /api/analytics/summary.json": "el corte de analytics, para tableros externos (NUEVO en V2)",
+    "$auth": "X-Service-Token · solo red interna o HTTPS; HTTP plano desde IP pública -> 403",
+    "GET /api/billing/providers.json": "facturación por proveedor (NUEVO en r2)",
+    "GET /api/legacy/mode.json": "modo de operación y estado del Plan B (NUEVO en r2)",
+    "POST /callcenter/billing/<code>/link": "vincula un proveedor V2 con su ficha de SIP Balance (NUEVO en r2-final)",
+    "POST /callcenter/billing/new": "alta de proveedor + identidad de facturación en un paso (NUEVO en r2-final)"
+  },
+  "database_tables_written": {
+    "wf_call_jobs": "WF2 (claim, transiciones), motor (resultado), WF9 (conversation_id), WF14",
+    "wf_conversation_ledger": "motor (claim de idempotencia), WF14",
+    "wf_events": "todos, append-only, INSERT IGNORE por event_key",
+    "wf_tool_requests": "WF3, WF7/8 (claim de tools), WF14",
+    "wf_recording_ledger": "WF10 (claim de grabaciones), WF14",
+    "wf_reconciliation_issues": "motor, WF3, WF14",
+    "crm_leads / stringee_calls / panel_sync_log": "WF14 — sincronización legacy",
+    "$never_written_by_v2": [
+      "wf_call_followups",
+      "wf10_sent_recordings",
+      "wf2_provider_config",
+      "countries",
+      "voice_providers",
+      "call_routes",
+      "country_tool_configs",
+      "followup_policies",
+      "n8n_switches",
+      "n8n_switch_schedules",
+      "sip_providers",
+      "sip_provider_pricing",
+      "sip_deposits",
+      "sip_extensions",
+      "support_actions",
+      "telegram_sessions"
+    ],
+    "wf_payment_orders": "WF7/8 — un pedido por link de pago, UNIQUE(out_trade_no)",
+    "billing_audit": "panel — cambios de facturación y de modo de operación",
+    "legacy_group_classification": "panel — clasificación de los grupos legacy"
+  },
+  "$interlock": {
+    "operating_mode": "app_settings.lm_operating_mode — V2_PRIMARY | LEGACY_BACKUP",
+    "enforced_at": [
+      "panel: guard_legacy_activation envuelve analytics.n8n_switch_set_state (cubre encendido manual, masivo y programado)",
+      "panel: /api/routes/active devuelve cero rutas invocables en LEGACY_BACKUP",
+      "WF2: lee operating_mode y aborta con OPERATING_MODE_BLOCKED"
+    ],
+    "verified_against_n8n": "volver a V2_PRIMARY comprueba el estado real de los workflows legacy; si n8n no responde, se bloquea"
+  }
+}

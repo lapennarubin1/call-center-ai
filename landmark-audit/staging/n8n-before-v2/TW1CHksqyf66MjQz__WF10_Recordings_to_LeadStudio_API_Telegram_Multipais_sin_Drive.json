@@ -1,0 +1,1904 @@
+{
+  "id": "TW1CHksqyf66MjQz",
+  "name": "WF10 — Recordings to LeadStudio API + Telegram (Multipais, sin Drive)",
+  "description": null,
+  "active": true,
+  "activeVersionId": "4e82e67b-2281-4814-a2e5-15c1ca2815ae",
+  "createdAt": "2026-09-17T08:22:16.599Z",
+  "updatedAt": "2026-09-18T12:30:59.675Z",
+  "isArchived": false,
+  "versionId": "4e82e67b-2281-4814-a2e5-15c1ca2815ae",
+  "versionCounter": 58,
+  "sourceWorkflowId": null,
+  "triggerCount": 2,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-recording",
+        "options": {}
+      },
+      "id": "834bf983-1201-4a79-93f0-532314894e3f",
+      "name": "Webhook2",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        19392,
+        1472
+      ],
+      "webhookId": "send-recording"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst body = item.body || item;\n\nconst base64 = body.audio_base64;\nconst buffer = Buffer.from(base64, 'base64');\n\nconst phoneRaw = String(body.phone || '');\nconst phoneDigits = phoneRaw.replace(/[^0-9]/g, '');\n\nlet country = 'unknown';\n\nif (phoneDigits.startsWith('91')) {\n  country = 'india';\n}\nelse if (phoneDigits.startsWith('977')) {\n  country = 'nepal';\n}\nelse if (phoneDigits.startsWith('58')) {\n  country = 'venezuela';\n}\nelse if (phoneDigits.startsWith('52')) {\n  country = 'mexico';\n}\nelse if (phoneDigits.startsWith('57')) {\n  country = 'colombia';\n}\n\nreturn [{\n  json: {\n    phone: body.phone,\n    date: body.date,\n    filename: body.filename,\n    country: country\n  },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'audio/wav',\n      fileName: body.filename\n    }\n  }\n}];"
+      },
+      "id": "3d194dc3-3dae-4852-8f0c-57c8bffdacfc",
+      "name": "Convert Base64 to Binary2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19616,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ ({india: '-1004454561082', nepal: '-1004454561082', mexico: '-1003616406932'})[$('Convert Base64 to Binary2').item.json.country] || '-1003984044945' }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📞 {{ $('Convert Base64 to Binary2').item.json.phone }} — {{ $('Convert Base64 to Binary2').item.json.country.toUpperCase() }} — {{ $('Convert Base64 to Binary2').item.json.date }}"
+        }
+      },
+      "id": "f88f5eca-253f-476c-9484-5c1d14731ff8",
+      "name": "Send to Telegram5",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        22656,
+        1536
+      ],
+      "webhookId": "telegram-send",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const driveData = $input.first().json;\nconst originalBinary = $('Convert Base64 to Binary2').first().binary;\n\nreturn [{\n  json: driveData,\n  binary: originalBinary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22480,
+        1536
+      ],
+      "id": "dd9404e2-fade-4584-b3be-954971d08ab3",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ ({india: '-1003984044945', nepal: '-1003984044945', mexico: '-1003616406932'})[$('Convert Base64 to Binary2').item.json.country] || '-1003984044945' }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📞 {{ $('Convert Base64 to Binary2').item.json.phone }} — {{ $('Convert Base64 to Binary2').item.json.country.toUpperCase() }} — {{ $('Convert Base64 to Binary2').item.json.date }}"
+        }
+      },
+      "id": "cdca97d0-dce6-4102-8701-6ab9593233ac",
+      "name": "Send to Telegram6",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        22656,
+        1344
+      ],
+      "webhookId": "telegram-send",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        18928,
+        2160
+      ],
+      "id": "e954b249-9749-4a75-8ed6-1eab5495c46d",
+      "name": "⏰ Schedule Stringee Recordings3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lee grabaciones del worker Stringee y deja pasar SOLO las que\n// corresponde procesar en esta corrida. Tres filtros, en este orden:\n//\n//   1. YA ENVIADAS  -> el worker devuelve TODO su historial en cada\n//      llamada a /recordings, sin filtro de fecha. Sin este control,\n//      cada corrida reenviaba el historial completo a Telegram y\n//      reintentaba subir al CRM lo ya subido.\n//   2. SOLO DE HOY  -> WF10 corre para las conversaciones del día.\n//   3. DURACION >= MIN_SECS -> se lee del header del WAV, no del\n//      tamaño en bytes (que depende del sample rate y daría mal).\n//\n// La duracion queda en duration_secs, que es lo que usan los captions\n// de Telegram. Antes el caption leia .duration, un campo que nunca\n// existio: por eso todos los mensajes terminaban en \"— s\".\n\nconst MIN_SECS = 60;\n\n// Lista de lo ya enviado, del nodo MySQL anterior.\nconst yaEnviadas = new Set(\n  $input.all()\n    .map(i => i.json && i.json.filename)\n    .filter(Boolean)\n);\n\n// Fecha de hoy en UTC (el worker sella timestamp_ms en epoch UTC).\nconst hoy = new Date().toISOString().split('T')[0];\n\nfunction wavDurationSecs(b64, sizeBytes) {\n  // Header WAV canonico: byteRate en el offset 28 (uint32 LE).\n  // duracion = (bytes de audio) / byteRate.\n  try {\n    const head = Buffer.from(b64.slice(0, 120), 'base64');\n    if (head.length < 44) return null;\n    if (head.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = head.readUInt32LE(28);\n    if (!byteRate) return null;\n    const dataBytes = Math.max(0, (sizeBytes || head.length) - 44);\n    return Math.round(dataBytes / byteRate);\n  } catch (e) {\n    return null;\n  }\n}\n\nconst listData = await this.helpers.httpRequest({\n  method: 'GET',\n  url: 'http://172.18.0.1:8091/recordings',\n  json: true\n});\nconst files = listData.recordings || [];\n\nconst results = [];\nlet skipEnviada = 0, skipVieja = 0, skipCorta = 0, skipError = 0;\n\nfor (const rec of files) {\n  try {\n    if (yaEnviadas.has(rec.filename)) { skipEnviada++; continue; }\n\n    const fecha = new Date(rec.timestamp_ms).toISOString().split('T')[0];\n    if (fecha !== hoy) { skipVieja++; continue; }\n\n    const dlData = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `http://172.18.0.1:8091/recordings/${rec.filename}`,\n      json: true\n    });\n    if (!dlData.ok || !dlData.audio_base64) { skipError++; continue; }\n\n    const secs = wavDurationSecs(dlData.audio_base64, rec.size_bytes);\n    // Si el header no se pudo leer (secs === null) la grabacion NO se\n    // descarta: se deja pasar y se marca para revisar. Descartar por no\n    // poder medir perderia conversaciones reales en silencio.\n    if (secs !== null && secs < MIN_SECS) { skipCorta++; continue; }\n\n    const digits = String(rec.phone).replace(/[^0-9]/g, '');\n    let country = 'unknown';\n    if (digits.startsWith('977')) country = 'nepal';\n    else if (digits.startsWith('52')) country = 'mexico';\n    else if (digits.startsWith('91')) country = 'india';\n\n    results.push({\n      json: {\n        phone: rec.phone,\n        date: fecha,\n        filename: rec.filename,\n        country: country,\n        size_bytes: rec.size_bytes,\n        duration_secs: secs === null ? 0 : secs,\n        duration_unknown: secs === null\n      },\n      binary: {\n        data: { data: dlData.audio_base64, mimeType: 'audio/wav', fileName: rec.filename }\n      }\n    });\n  } catch (e) {\n    skipError++;\n  }\n}\n\nconsole.log(`WF10 Stringee: ${files.length} en el worker -> ${results.length} a procesar ` +\n            `| ya enviadas: ${skipEnviada} | no son de hoy: ${skipVieja} ` +\n            `| < ${MIN_SECS}s: ${skipCorta} | error: ${skipError}`);\n\nreturn results;\n"
+      },
+      "id": "7722b277-7b49-4163-b225-7b94104efc39",
+      "name": "🔄 Fetch & Convert Stringee Recordings2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19520,
+        2128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  const driveData = item.json;\n  const originalBinary = $('🔄 Fetch & Convert Stringee Recordings2').itemMatching(index).binary;\n\n  return {\n    json: driveData,\n    binary: originalBinary\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22640,
+        2128
+      ],
+      "id": "f1e4839f-0329-4d27-9de2-175a7580c6b8",
+      "name": "Code in JavaScript (Stringee)3"
+    },
+    {
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ ({india: '-1004454561082', nepal: '-1004454561082', mexico: '-1003616406932'})[$('🔄 Fetch & Convert Stringee Recordings2').item.json.country] || '-1003984044945' }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📞 STRINGEE {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.phone }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.country.toUpperCase() }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.date }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.duration_secs }}s"
+        }
+      },
+      "id": "1975d3ad-cf77-43aa-bc53-fd1a40877085",
+      "name": "Send to Telegram (Stringee)3",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        22880,
+        2128
+      ],
+      "webhookId": "telegram-send-stringee-1",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ ({india: '-1003984044945', nepal: '-1003984044945', mexico: '-1003616406932'})[$('🔄 Fetch & Convert Stringee Recordings2').item.json.country] || '-1003984044945' }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📞 STRINGEE {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.phone }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.country.toUpperCase() }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.date }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.duration_secs }}s"
+        }
+      },
+      "id": "b660159f-a577-4cf3-9177-90c7949637de",
+      "name": "Send to Telegram1 (Stringee)3",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        22880,
+        1888
+      ],
+      "webhookId": "telegram-send-stringee-2",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT followup_id FROM wf_call_followups\n     WHERE RIGHT(phone, 10) = RIGHT('{{ $json.phone }}', 10)\n       AND (recording_synced IS NULL OR recording_synced = 0)\n     ORDER BY created_at DESC LIMIT 1) AS followup_id,\n  (SELECT lead_id FROM wf_call_followups\n     WHERE RIGHT(phone, 10) = RIGHT('{{ $json.phone }}', 10)\n       AND (recording_synced IS NULL OR recording_synced = 0)\n     ORDER BY created_at DESC LIMIT 1) AS lead_id;",
+        "options": {}
+      },
+      "id": "167fd062-9b8e-47e5-98f0-dcb35b21f166",
+      "name": "🔍 Lookup Followup ID (Asterisk)2",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        20528,
+        1504
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "followup-found",
+              "leftValue": "={{ $json.followup_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8fe672d6-de21-49f8-a816-16d8a2025d28",
+      "name": "🔀 Followup Encontrado? (Asterisk)2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        20752,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "027bddf6-070b-4428-995a-a00dfbe7cdb6",
+      "name": "🔐 Login LeadStudio (WF10-Asterisk)2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21312,
+        1312
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "try {\n  const token = $input.item.json.accessToken;\n  const lookup = $('🔍 Lookup Followup ID (Asterisk)2').item.json;\n  const original = $('Convert Base64 to Binary2').item;\n  return [{\n    json: { ...original.json, accessToken: token, followup_id: lookup.followup_id, lead_id: lookup.lead_id },\n    binary: original.binary\n  }];\n} catch (e) {\n  console.log('Attach Audio + Token fallo: ' + e.message + ' -- se deja pasar para que Telegram no se corte');\n  return { json: { _attach_error: e.message } };\n}"
+      },
+      "id": "5e424624-e1c7-490d-88c2-5fa41d9f4e17",
+      "name": "🔗 Attach Audio + Token (Asterisk)2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21536,
+        1312
+      ],
+      "retryOnFail": true,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/calls/recording/' + $json.followup_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "751848bc-69e8-4c63-bc55-5b4e38db8d27",
+      "name": "📤 PUT Recording — LeadStudio (Asterisk)2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21760,
+        1312
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_followups SET recording_synced = 1 WHERE followup_id = '{{ $json.followup_id }}';",
+        "options": {}
+      },
+      "id": "518b8d09-1676-4149-8074-cf358fea8779",
+      "name": "💾 Mark Recording Synced (Asterisk)2",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        21984,
+        1312
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT followup_id FROM wf_call_followups\n     WHERE RIGHT(phone, 10) = RIGHT('{{ $json.phone }}', 10)\n       AND (recording_synced IS NULL OR recording_synced = 0)\n     ORDER BY created_at DESC LIMIT 1) AS followup_id,\n  (SELECT lead_id FROM wf_call_followups\n     WHERE RIGHT(phone, 10) = RIGHT('{{ $json.phone }}', 10)\n       AND (recording_synced IS NULL OR recording_synced = 0)\n     ORDER BY created_at DESC LIMIT 1) AS lead_id;",
+        "options": {}
+      },
+      "id": "c9cdaafd-7f5a-45ba-8292-b3edab25f185",
+      "name": "🔍 Lookup Followup ID (Stringee)2",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        20528,
+        2096
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "followup-found",
+              "leftValue": "={{ $json.followup_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "30b5d46c-a8af-42b7-9ded-f471921b38dd",
+      "name": "🔀 Followup Encontrado? (Stringee)2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        20992,
+        2096
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "e4b04cf7-e5ff-46ad-ae6a-696c6f47b7f4",
+      "name": "🔐 Login LeadStudio (WF10-Stringee)2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21280,
+        1904
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  const token = $input.item.json.accessToken;\n  const lookup = $('🔍 Lookup Followup ID (Stringee)2').item.json;\n  const original = $('🔄 Fetch & Convert Stringee Recordings2').item;\n  return {\n    json: { ...original.json, accessToken: token, followup_id: lookup.followup_id, lead_id: lookup.lead_id },\n    binary: original.binary\n  };\n} catch (e) {\n  console.log('Attach Audio + Token fallo: ' + e.message + ' -- se deja pasar para que Telegram no se corte');\n  return { json: { _attach_error: e.message } };\n}"
+      },
+      "id": "317b0321-9158-49f8-84a5-427a29ace241",
+      "name": "🔗 Attach Audio + Token (Stringee)2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21504,
+        1904
+      ],
+      "retryOnFail": true,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/calls/recording/' + $json.followup_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "41e94788-44f3-4927-a96e-a81fea75f69c",
+      "name": "📤 PUT Recording — LeadStudio (Stringee)2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21728,
+        1904
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_followups SET recording_synced = 1 WHERE followup_id = '{{ $json.followUpId }}';",
+        "options": {}
+      },
+      "id": "226e3ded-fd02-40bd-8de4-b76f720602b8",
+      "name": "💾 Mark Recording Synced (Stringee)3",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        21952,
+        1904
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT filename FROM wf10_sent_recordings WHERE sent_at >= DATE_SUB(NOW(), INTERVAL 14 DAY);",
+        "options": {}
+      },
+      "id": "5148be0b-8e18-4a26-97bc-8a8c4bb9c59f",
+      "name": "🔎 Ya Enviadas (ledger)1",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        19200,
+        2128
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Arma un solo INSERT con todas las grabaciones de esta corrida.\n// Se lee del nodo Fetch (no de $input) porque los nodos de Telegram\n// reemplazan el json del item con la respuesta de su API y pierden\n// filename/phone.\nfunction esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }\n\nconst items = $('🔄 Fetch & Convert Stringee Recordings2').all();\nif (!items.length) {\n  console.log('WF10: nada que registrar en el ledger');\n  return [];\n}\n\nconst values = items.map(it => {\n  const r = it.json;\n  return '(' + [esc(r.filename), esc(r.phone), esc(r.country), num(r.duration_secs)].join(',') + ')';\n}).join(',\\n');\n\n// ON DUPLICATE KEY: si por una carrera dos corridas tomaran el mismo\n// archivo, la segunda no explota ni crea una fila duplicada.\nconst sql = `INSERT INTO wf10_sent_recordings (filename, phone, country, duration_secs)\nVALUES\n${values}\nON DUPLICATE KEY UPDATE sent_at = sent_at;`;\n\nconsole.log(`WF10: registrando ${items.length} grabacion(es) en el ledger`);\nreturn [{ json: { sql, n: items.length } }];\n"
+      },
+      "id": "44741d5b-e55d-455d-adf3-be408182653f",
+      "name": "⚙️ SQL Registrar Enviadas1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        23120,
+        1888
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "b5411c69-5498-4194-9d59-9bc4f71bd953",
+      "name": "💾 Registrar Enviadas (ledger)1",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        23360,
+        1888
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook2": {
+      "main": [
+        [
+          {
+            "node": "Convert Base64 to Binary2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Base64 to Binary2": {
+      "main": [
+        [
+          {
+            "node": "🔍 Lookup Followup ID (Asterisk)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram6",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send to Telegram5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Schedule Stringee Recordings3": {
+      "main": [
+        [
+          {
+            "node": "🔎 Ya Enviadas (ledger)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔄 Fetch & Convert Stringee Recordings2": {
+      "main": [
+        [
+          {
+            "node": "🔍 Lookup Followup ID (Stringee)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript (Stringee)3": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram (Stringee)3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send to Telegram1 (Stringee)3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Telegram (Stringee)3": {
+      "main": [
+        [
+          {
+            "node": "⚙️ SQL Registrar Enviadas1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Telegram1 (Stringee)3": {
+      "main": [
+        [
+          {
+            "node": "⚙️ SQL Registrar Enviadas1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Lookup Followup ID (Asterisk)2": {
+      "main": [
+        [
+          {
+            "node": "🔀 Followup Encontrado? (Asterisk)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Followup Encontrado? (Asterisk)2": {
+      "main": [
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF10-Asterisk)2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF10-Asterisk)2": {
+      "main": [
+        [
+          {
+            "node": "🔗 Attach Audio + Token (Asterisk)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Attach Audio + Token (Asterisk)2": {
+      "main": [
+        [
+          {
+            "node": "📤 PUT Recording — LeadStudio (Asterisk)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📤 PUT Recording — LeadStudio (Asterisk)2": {
+      "main": [
+        [
+          {
+            "node": "💾 Mark Recording Synced (Asterisk)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Mark Recording Synced (Asterisk)2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Lookup Followup ID (Stringee)2": {
+      "main": [
+        [
+          {
+            "node": "🔀 Followup Encontrado? (Stringee)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Followup Encontrado? (Stringee)2": {
+      "main": [
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF10-Stringee)2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript (Stringee)3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF10-Stringee)2": {
+      "main": [
+        [
+          {
+            "node": "🔗 Attach Audio + Token (Stringee)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Attach Audio + Token (Stringee)2": {
+      "main": [
+        [
+          {
+            "node": "📤 PUT Recording — LeadStudio (Stringee)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📤 PUT Recording — LeadStudio (Stringee)2": {
+      "main": [
+        [
+          {
+            "node": "💾 Mark Recording Synced (Stringee)3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Mark Recording Synced (Stringee)3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript (Stringee)3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Ya Enviadas (ledger)1": {
+      "main": [
+        [
+          {
+            "node": "🔄 Fetch & Convert Stringee Recordings2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ SQL Registrar Enviadas1": {
+      "main": [
+        [
+          {
+            "node": "💾 Registrar Enviadas (ledger)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:⏰ Schedule Stringee Recordings2": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    },
+    "node:⏰ Schedule Stringee Recordings": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    },
+    "node:⏰ Schedule Stringee Recordings3": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {
+    "⏰ Schedule Stringee Recordings3": [
+      {
+        "json": {
+          "timestamp": "2026-09-18T04:34:11.005-04:00",
+          "Readable date": "September 18th 2026, 4:34:11 am",
+          "Readable time": "4:34:11 am",
+          "Day of week": "Friday",
+          "Year": "2026",
+          "Month": "September",
+          "Day of month": "18",
+          "Hour": "04",
+          "Minute": "34",
+          "Second": "11",
+          "Timezone": "America/New_York (UTC-04:00)"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "TW1CHksqyf66MjQz",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-17T08:22:16.599Z",
+      "updatedAt": "2026-09-17T08:22:16.599Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "4e82e67b-2281-4814-a2e5-15c1ca2815ae",
+    "workflowId": "TW1CHksqyf66MjQz",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "send-recording",
+          "options": {}
+        },
+        "id": "834bf983-1201-4a79-93f0-532314894e3f",
+        "name": "Webhook2",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          19392,
+          1472
+        ],
+        "webhookId": "send-recording"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first().json;\nconst body = item.body || item;\n\nconst base64 = body.audio_base64;\nconst buffer = Buffer.from(base64, 'base64');\n\nconst phoneRaw = String(body.phone || '');\nconst phoneDigits = phoneRaw.replace(/[^0-9]/g, '');\n\nlet country = 'unknown';\n\nif (phoneDigits.startsWith('91')) {\n  country = 'india';\n}\nelse if (phoneDigits.startsWith('977')) {\n  country = 'nepal';\n}\nelse if (phoneDigits.startsWith('58')) {\n  country = 'venezuela';\n}\nelse if (phoneDigits.startsWith('52')) {\n  country = 'mexico';\n}\nelse if (phoneDigits.startsWith('57')) {\n  country = 'colombia';\n}\n\nreturn [{\n  json: {\n    phone: body.phone,\n    date: body.date,\n    filename: body.filename,\n    country: country\n  },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'audio/wav',\n      fileName: body.filename\n    }\n  }\n}];"
+        },
+        "id": "3d194dc3-3dae-4852-8f0c-57c8bffdacfc",
+        "name": "Convert Base64 to Binary2",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          19616,
+          1472
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "sendAudio",
+          "chatId": "={{ ({india: '-1004454561082', nepal: '-1004454561082', mexico: '-1003616406932'})[$('Convert Base64 to Binary2').item.json.country] || '-1003984044945' }}",
+          "binaryData": true,
+          "additionalFields": {
+            "caption": "=📞 {{ $('Convert Base64 to Binary2').item.json.phone }} — {{ $('Convert Base64 to Binary2').item.json.country.toUpperCase() }} — {{ $('Convert Base64 to Binary2').item.json.date }}"
+          }
+        },
+        "id": "f88f5eca-253f-476c-9484-5c1d14731ff8",
+        "name": "Send to Telegram5",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          22656,
+          1536
+        ],
+        "webhookId": "telegram-send",
+        "credentials": {
+          "telegramApi": {
+            "id": "aZWABzEfC4SEy3oC",
+            "name": "Telegram account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const driveData = $input.first().json;\nconst originalBinary = $('Convert Base64 to Binary2').first().binary;\n\nreturn [{\n  json: driveData,\n  binary: originalBinary\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          22480,
+          1536
+        ],
+        "id": "dd9404e2-fade-4584-b3be-954971d08ab3",
+        "name": "Code in JavaScript2"
+      },
+      {
+        "parameters": {
+          "operation": "sendAudio",
+          "chatId": "={{ ({india: '-1003984044945', nepal: '-1003984044945', mexico: '-1003616406932'})[$('Convert Base64 to Binary2').item.json.country] || '-1003984044945' }}",
+          "binaryData": true,
+          "additionalFields": {
+            "caption": "=📞 {{ $('Convert Base64 to Binary2').item.json.phone }} — {{ $('Convert Base64 to Binary2').item.json.country.toUpperCase() }} — {{ $('Convert Base64 to Binary2').item.json.date }}"
+          }
+        },
+        "id": "cdca97d0-dce6-4102-8701-6ab9593233ac",
+        "name": "Send to Telegram6",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          22656,
+          1344
+        ],
+        "webhookId": "telegram-send",
+        "credentials": {
+          "telegramApi": {
+            "id": "aZWABzEfC4SEy3oC",
+            "name": "Telegram account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes"
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          18928,
+          2160
+        ],
+        "id": "e954b249-9749-4a75-8ed6-1eab5495c46d",
+        "name": "⏰ Schedule Stringee Recordings3"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Lee grabaciones del worker Stringee y deja pasar SOLO las que\n// corresponde procesar en esta corrida. Tres filtros, en este orden:\n//\n//   1. YA ENVIADAS  -> el worker devuelve TODO su historial en cada\n//      llamada a /recordings, sin filtro de fecha. Sin este control,\n//      cada corrida reenviaba el historial completo a Telegram y\n//      reintentaba subir al CRM lo ya subido.\n//   2. SOLO DE HOY  -> WF10 corre para las conversaciones del día.\n//   3. DURACION >= MIN_SECS -> se lee del header del WAV, no del\n//      tamaño en bytes (que depende del sample rate y daría mal).\n//\n// La duracion queda en duration_secs, que es lo que usan los captions\n// de Telegram. Antes el caption leia .duration, un campo que nunca\n// existio: por eso todos los mensajes terminaban en \"— s\".\n\nconst MIN_SECS = 60;\n\n// Lista de lo ya enviado, del nodo MySQL anterior.\nconst yaEnviadas = new Set(\n  $input.all()\n    .map(i => i.json && i.json.filename)\n    .filter(Boolean)\n);\n\n// Fecha de hoy en UTC (el worker sella timestamp_ms en epoch UTC).\nconst hoy = new Date().toISOString().split('T')[0];\n\nfunction wavDurationSecs(b64, sizeBytes) {\n  // Header WAV canonico: byteRate en el offset 28 (uint32 LE).\n  // duracion = (bytes de audio) / byteRate.\n  try {\n    const head = Buffer.from(b64.slice(0, 120), 'base64');\n    if (head.length < 44) return null;\n    if (head.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = head.readUInt32LE(28);\n    if (!byteRate) return null;\n    const dataBytes = Math.max(0, (sizeBytes || head.length) - 44);\n    return Math.round(dataBytes / byteRate);\n  } catch (e) {\n    return null;\n  }\n}\n\nconst listData = await this.helpers.httpRequest({\n  method: 'GET',\n  url: 'http://172.18.0.1:8091/recordings',\n  json: true\n});\nconst files = listData.recordings || [];\n\nconst results = [];\nlet skipEnviada = 0, skipVieja = 0, skipCorta = 0, skipError = 0;\n\nfor (const rec of files) {\n  try {\n    if (yaEnviadas.has(rec.filename)) { skipEnviada++; continue; }\n\n    const fecha = new Date(rec.timestamp_ms).toISOString().split('T')[0];\n    if (fecha !== hoy) { skipVieja++; continue; }\n\n    const dlData = await this.helpers.httpRequest({\n      method: 'GET',\n      url: `http://172.18.0.1:8091/recordings/${rec.filename}`,\n      json: true\n    });\n    if (!dlData.ok || !dlData.audio_base64) { skipError++; continue; }\n\n    const secs = wavDurationSecs(dlData.audio_base64, rec.size_bytes);\n    // Si el header no se pudo leer (secs === null) la grabacion NO se\n    // descarta: se deja pasar y se marca para revisar. Descartar por no\n    // poder medir perderia conversaciones reales en silencio.\n    if (secs !== null && secs < MIN_SECS) { skipCorta++; continue; }\n\n    const digits = String(rec.phone).replace(/[^0-9]/g, '');\n    let country = 'unknown';\n    if (digits.startsWith('977')) country = 'nepal';\n    else if (digits.startsWith('52')) country = 'mexico';\n    else if (digits.startsWith('91')) country = 'india';\n\n    results.push({\n      json: {\n        phone: rec.phone,\n        date: fecha,\n        filename: rec.filename,\n        country: country,\n        size_bytes: rec.size_bytes,\n        duration_secs: secs === null ? 0 : secs,\n        duration_unknown: secs === null\n      },\n      binary: {\n        data: { data: dlData.audio_base64, mimeType: 'audio/wav', fileName: rec.filename }\n      }\n    });\n  } catch (e) {\n    skipError++;\n  }\n}\n\nconsole.log(`WF10 Stringee: ${files.length} en el worker -> ${results.length} a procesar ` +\n            `| ya enviadas: ${skipEnviada} | no son de hoy: ${skipVieja} ` +\n            `| < ${MIN_SECS}s: ${skipCorta} | error: ${skipError}`);\n\nreturn results;\n"
+        },
+        "id": "7722b277-7b49-4163-b225-7b94104efc39",
+        "name": "🔄 Fetch & Convert Stringee Recordings2",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          19520,
+          2128
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return $input.all().map((item, index) => {\n  const driveData = item.json;\n  const originalBinary = $('🔄 Fetch & Convert Stringee Recordings2').itemMatching(index).binary;\n\n  return {\n    json: driveData,\n    binary: originalBinary\n  };\n});"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          22640,
+          2128
+        ],
+        "id": "f1e4839f-0329-4d27-9de2-175a7580c6b8",
+        "name": "Code in JavaScript (Stringee)3"
+      },
+      {
+        "parameters": {
+          "operation": "sendAudio",
+          "chatId": "={{ ({india: '-1004454561082', nepal: '-1004454561082', mexico: '-1003616406932'})[$('🔄 Fetch & Convert Stringee Recordings2').item.json.country] || '-1003984044945' }}",
+          "binaryData": true,
+          "additionalFields": {
+            "caption": "=📞 STRINGEE {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.phone }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.country.toUpperCase() }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.date }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.duration_secs }}s"
+          }
+        },
+        "id": "1975d3ad-cf77-43aa-bc53-fd1a40877085",
+        "name": "Send to Telegram (Stringee)3",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          22880,
+          2128
+        ],
+        "webhookId": "telegram-send-stringee-1",
+        "credentials": {
+          "telegramApi": {
+            "id": "aZWABzEfC4SEy3oC",
+            "name": "Telegram account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "sendAudio",
+          "chatId": "={{ ({india: '-1003984044945', nepal: '-1003984044945', mexico: '-1003616406932'})[$('🔄 Fetch & Convert Stringee Recordings2').item.json.country] || '-1003984044945' }}",
+          "binaryData": true,
+          "additionalFields": {
+            "caption": "=📞 STRINGEE {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.phone }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.country.toUpperCase() }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.date }} — {{ $('🔄 Fetch & Convert Stringee Recordings2').item.json.duration_secs }}s"
+          }
+        },
+        "id": "b660159f-a577-4cf3-9177-90c7949637de",
+        "name": "Send to Telegram1 (Stringee)3",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          22880,
+          1888
+        ],
+        "webhookId": "telegram-send-stringee-2",
+        "credentials": {
+          "telegramApi": {
+            "id": "aZWABzEfC4SEy3oC",
+            "name": "Telegram account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n  (SELECT followup_id FROM wf_call_followups\n     WHERE RIGHT(phone, 10) = RIGHT('{{ $json.phone }}', 10)\n       AND (recording_synced IS NULL OR recording_synced = 0)\n     ORDER BY created_at DESC LIMIT 1) AS followup_id,\n  (SELECT lead_id FROM wf_call_followups\n     WHERE RIGHT(phone, 10) = RIGHT('{{ $json.phone }}', 10)\n       AND (recording_synced IS NULL OR recording_synced = 0)\n     ORDER BY created_at DESC LIMIT 1) AS lead_id;",
+          "options": {}
+        },
+        "id": "167fd062-9b8e-47e5-98f0-dcb35b21f166",
+        "name": "🔍 Lookup Followup ID (Asterisk)2",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.4,
+        "position": [
+          20528,
+          1504
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "credentials": {
+          "mySql": {
+            "id": "4NiWyzzJ4JbMkIjT",
+            "name": "MySQL account"
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": false,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "id": "followup-found",
+                "leftValue": "={{ $json.followup_id }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEquals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "8fe672d6-de21-49f8-a816-16d8a2025d28",
+        "name": "🔀 Followup Encontrado? (Asterisk)2",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          20752,
+          1504
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "027bddf6-070b-4428-995a-a00dfbe7cdb6",
+        "name": "🔐 Login LeadStudio (WF10-Asterisk)2",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          21312,
+          1312
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "try {\n  const token = $input.item.json.accessToken;\n  const lookup = $('🔍 Lookup Followup ID (Asterisk)2').item.json;\n  const original = $('Convert Base64 to Binary2').item;\n  return [{\n    json: { ...original.json, accessToken: token, followup_id: lookup.followup_id, lead_id: lookup.lead_id },\n    binary: original.binary\n  }];\n} catch (e) {\n  console.log('Attach Audio + Token fallo: ' + e.message + ' -- se deja pasar para que Telegram no se corte');\n  return { json: { _attach_error: e.message } };\n}"
+        },
+        "id": "5e424624-e1c7-490d-88c2-5fa41d9f4e17",
+        "name": "🔗 Attach Audio + Token (Asterisk)2",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          21536,
+          1312
+        ],
+        "retryOnFail": true,
+        "continueOnFail": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/calls/recording/' + $json.followup_id }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $json.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "multipart-form-data",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "parameterType": "formBinaryData",
+                "name": "file",
+                "inputDataFieldName": "data"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 30000
+          }
+        },
+        "id": "751848bc-69e8-4c63-bc55-5b4e38db8d27",
+        "name": "📤 PUT Recording — LeadStudio (Asterisk)2",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          21760,
+          1312
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE wf_call_followups SET recording_synced = 1 WHERE followup_id = '{{ $json.followup_id }}';",
+          "options": {}
+        },
+        "id": "518b8d09-1676-4149-8074-cf358fea8779",
+        "name": "💾 Mark Recording Synced (Asterisk)2",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.4,
+        "position": [
+          21984,
+          1312
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "credentials": {
+          "mySql": {
+            "id": "4NiWyzzJ4JbMkIjT",
+            "name": "MySQL account"
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n  (SELECT followup_id FROM wf_call_followups\n     WHERE RIGHT(phone, 10) = RIGHT('{{ $json.phone }}', 10)\n       AND (recording_synced IS NULL OR recording_synced = 0)\n     ORDER BY created_at DESC LIMIT 1) AS followup_id,\n  (SELECT lead_id FROM wf_call_followups\n     WHERE RIGHT(phone, 10) = RIGHT('{{ $json.phone }}', 10)\n       AND (recording_synced IS NULL OR recording_synced = 0)\n     ORDER BY created_at DESC LIMIT 1) AS lead_id;",
+          "options": {}
+        },
+        "id": "c9cdaafd-7f5a-45ba-8292-b3edab25f185",
+        "name": "🔍 Lookup Followup ID (Stringee)2",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.4,
+        "position": [
+          20528,
+          2096
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "credentials": {
+          "mySql": {
+            "id": "4NiWyzzJ4JbMkIjT",
+            "name": "MySQL account"
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "followup-found",
+                "leftValue": "={{ $json.followup_id }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEquals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "30b5d46c-a8af-42b7-9ded-f471921b38dd",
+        "name": "🔀 Followup Encontrado? (Stringee)2",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          20992,
+          2096
+        ],
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "e4b04cf7-e5ff-46ad-ae6a-696c6f47b7f4",
+        "name": "🔐 Login LeadStudio (WF10-Stringee)2",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          21280,
+          1904
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "jsCode": "try {\n  const token = $input.item.json.accessToken;\n  const lookup = $('🔍 Lookup Followup ID (Stringee)2').item.json;\n  const original = $('🔄 Fetch & Convert Stringee Recordings2').item;\n  return {\n    json: { ...original.json, accessToken: token, followup_id: lookup.followup_id, lead_id: lookup.lead_id },\n    binary: original.binary\n  };\n} catch (e) {\n  console.log('Attach Audio + Token fallo: ' + e.message + ' -- se deja pasar para que Telegram no se corte');\n  return { json: { _attach_error: e.message } };\n}"
+        },
+        "id": "317b0321-9158-49f8-84a5-427a29ace241",
+        "name": "🔗 Attach Audio + Token (Stringee)2",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          21504,
+          1904
+        ],
+        "retryOnFail": true,
+        "continueOnFail": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/calls/recording/' + $json.followup_id }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $json.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "multipart-form-data",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "parameterType": "formBinaryData",
+                "name": "file",
+                "inputDataFieldName": "data"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 30000
+          }
+        },
+        "id": "41e94788-44f3-4927-a96e-a81fea75f69c",
+        "name": "📤 PUT Recording — LeadStudio (Stringee)2",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          21728,
+          1904
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE wf_call_followups SET recording_synced = 1 WHERE followup_id = '{{ $json.followUpId }}';",
+          "options": {}
+        },
+        "id": "226e3ded-fd02-40bd-8de4-b76f720602b8",
+        "name": "💾 Mark Recording Synced (Stringee)3",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.4,
+        "position": [
+          21952,
+          1904
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "credentials": {
+          "mySql": {
+            "id": "4NiWyzzJ4JbMkIjT",
+            "name": "MySQL account"
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT filename FROM wf10_sent_recordings WHERE sent_at >= DATE_SUB(NOW(), INTERVAL 14 DAY);",
+          "options": {}
+        },
+        "id": "5148be0b-8e18-4a26-97bc-8a8c4bb9c59f",
+        "name": "🔎 Ya Enviadas (ledger)1",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.4,
+        "position": [
+          19200,
+          2128
+        ],
+        "alwaysOutputData": true,
+        "retryOnFail": true,
+        "credentials": {
+          "mySql": {
+            "id": "4NiWyzzJ4JbMkIjT",
+            "name": "MySQL account"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Arma un solo INSERT con todas las grabaciones de esta corrida.\n// Se lee del nodo Fetch (no de $input) porque los nodos de Telegram\n// reemplazan el json del item con la respuesta de su API y pierden\n// filename/phone.\nfunction esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }\n\nconst items = $('🔄 Fetch & Convert Stringee Recordings2').all();\nif (!items.length) {\n  console.log('WF10: nada que registrar en el ledger');\n  return [];\n}\n\nconst values = items.map(it => {\n  const r = it.json;\n  return '(' + [esc(r.filename), esc(r.phone), esc(r.country), num(r.duration_secs)].join(',') + ')';\n}).join(',\\n');\n\n// ON DUPLICATE KEY: si por una carrera dos corridas tomaran el mismo\n// archivo, la segunda no explota ni crea una fila duplicada.\nconst sql = `INSERT INTO wf10_sent_recordings (filename, phone, country, duration_secs)\nVALUES\n${values}\nON DUPLICATE KEY UPDATE sent_at = sent_at;`;\n\nconsole.log(`WF10: registrando ${items.length} grabacion(es) en el ledger`);\nreturn [{ json: { sql, n: items.length } }];\n"
+        },
+        "id": "44741d5b-e55d-455d-adf3-be408182653f",
+        "name": "⚙️ SQL Registrar Enviadas1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          23120,
+          1888
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "{{ $json.sql }}",
+          "options": {}
+        },
+        "id": "b5411c69-5498-4194-9d59-9bc4f71bd953",
+        "name": "💾 Registrar Enviadas (ledger)1",
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.4,
+        "position": [
+          23360,
+          1888
+        ],
+        "retryOnFail": true,
+        "credentials": {
+          "mySql": {
+            "id": "4NiWyzzJ4JbMkIjT",
+            "name": "MySQL account"
+          }
+        },
+        "onError": "continueRegularOutput"
+      }
+    ],
+    "connections": {
+      "Webhook2": {
+        "main": [
+          [
+            {
+              "node": "Convert Base64 to Binary2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Convert Base64 to Binary2": {
+        "main": [
+          [
+            {
+              "node": "🔍 Lookup Followup ID (Asterisk)2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript2": {
+        "main": [
+          [
+            {
+              "node": "Send to Telegram6",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Send to Telegram5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "⏰ Schedule Stringee Recordings3": {
+        "main": [
+          [
+            {
+              "node": "🔎 Ya Enviadas (ledger)1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔄 Fetch & Convert Stringee Recordings2": {
+        "main": [
+          [
+            {
+              "node": "🔍 Lookup Followup ID (Stringee)2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript (Stringee)3": {
+        "main": [
+          [
+            {
+              "node": "Send to Telegram (Stringee)3",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Send to Telegram1 (Stringee)3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send to Telegram (Stringee)3": {
+        "main": [
+          [
+            {
+              "node": "⚙️ SQL Registrar Enviadas1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send to Telegram1 (Stringee)3": {
+        "main": [
+          [
+            {
+              "node": "⚙️ SQL Registrar Enviadas1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔍 Lookup Followup ID (Asterisk)2": {
+        "main": [
+          [
+            {
+              "node": "🔀 Followup Encontrado? (Asterisk)2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔀 Followup Encontrado? (Asterisk)2": {
+        "main": [
+          [
+            {
+              "node": "🔐 Login LeadStudio (WF10-Asterisk)2",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Code in JavaScript2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔐 Login LeadStudio (WF10-Asterisk)2": {
+        "main": [
+          [
+            {
+              "node": "🔗 Attach Audio + Token (Asterisk)2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔗 Attach Audio + Token (Asterisk)2": {
+        "main": [
+          [
+            {
+              "node": "📤 PUT Recording — LeadStudio (Asterisk)2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📤 PUT Recording — LeadStudio (Asterisk)2": {
+        "main": [
+          [
+            {
+              "node": "💾 Mark Recording Synced (Asterisk)2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "💾 Mark Recording Synced (Asterisk)2": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔍 Lookup Followup ID (Stringee)2": {
+        "main": [
+          [
+            {
+              "node": "🔀 Followup Encontrado? (Stringee)2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔀 Followup Encontrado? (Stringee)2": {
+        "main": [
+          [
+            {
+              "node": "🔐 Login LeadStudio (WF10-Stringee)2",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Code in JavaScript (Stringee)3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔐 Login LeadStudio (WF10-Stringee)2": {
+        "main": [
+          [
+            {
+              "node": "🔗 Attach Audio + Token (Stringee)2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔗 Attach Audio + Token (Stringee)2": {
+        "main": [
+          [
+            {
+              "node": "📤 PUT Recording — LeadStudio (Stringee)2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📤 PUT Recording — LeadStudio (Stringee)2": {
+        "main": [
+          [
+            {
+              "node": "💾 Mark Recording Synced (Stringee)3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "💾 Mark Recording Synced (Stringee)3": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript (Stringee)3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔎 Ya Enviadas (ledger)1": {
+        "main": [
+          [
+            {
+              "node": "🔄 Fetch & Convert Stringee Recordings2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "⚙️ SQL Registrar Enviadas1": {
+        "main": [
+          [
+            {
+              "node": "💾 Registrar Enviadas (ledger)1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Land Market",
+    "name": "Version 4e82e67b",
+    "description": "",
+    "autosaved": false,
+    "createdAt": "2026-09-18T12:30:59.678Z",
+    "updatedAt": "2026-09-18T12:31:01.324Z",
+    "workflowPublishHistory": [
+      {
+        "id": 1877,
+        "workflowId": "TW1CHksqyf66MjQz",
+        "versionId": "4e82e67b-2281-4814-a2e5-15c1ca2815ae",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-18T12:31:01.320Z"
+      },
+      {
+        "id": 1961,
+        "workflowId": "TW1CHksqyf66MjQz",
+        "versionId": "4e82e67b-2281-4814-a2e5-15c1ca2815ae",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-22T06:30:10.193Z"
+      },
+      {
+        "id": 1882,
+        "workflowId": "TW1CHksqyf66MjQz",
+        "versionId": "4e82e67b-2281-4814-a2e5-15c1ca2815ae",
+        "event": "deactivated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-18T13:30:11.344Z"
+      },
+      {
+        "id": 1907,
+        "workflowId": "TW1CHksqyf66MjQz",
+        "versionId": "4e82e67b-2281-4814-a2e5-15c1ca2815ae",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-21T06:30:09.834Z"
+      },
+      {
+        "id": 1931,
+        "workflowId": "TW1CHksqyf66MjQz",
+        "versionId": "4e82e67b-2281-4814-a2e5-15c1ca2815ae",
+        "event": "deactivated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-21T13:30:12.965Z"
+      }
+    ]
+  }
+}

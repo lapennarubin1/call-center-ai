@@ -1,0 +1,2738 @@
+{
+  "id": "442FDm64j2YTx9mW",
+  "name": "WF7+WF8 MULTI-PAIS — Payment Link + Callback (100% LeadStudio API)",
+  "description": null,
+  "active": true,
+  "activeVersionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+  "createdAt": "2026-09-16T12:13:23.412Z",
+  "updatedAt": "2026-09-18T08:21:43.133Z",
+  "isArchived": false,
+  "versionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+  "versionCounter": 28,
+  "sourceWorkflowId": null,
+  "triggerCount": 3,
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json || {};\n\nconst link = ctx.short_url || ctx.checkout_url || '';\n\nconst country = String(ctx.country || '').toLowerCase();\nconst currency = String(ctx.currency || '').toUpperCase();\nconst amount = String(ctx.amount || '');\n\nlet amountLabel = `${currency} ${amount}`.trim();\n\nif (country === 'india' && currency === 'INR') {\n  amountLabel = `Rs${amount}`;\n}\n\nif (country === 'nepal' && currency === 'NPR') {\n  amountLabel = `Rs${amount}`;\n}\n\nlet brand = 'Landmark Markets';\n\nconst text = `${brand}: ${amountLabel} payment link: ${link}`;\n\nreturn [{\n  json: {\n    ...ctx,\n    sms_text: text\n  }\n}];"
+      },
+      "id": "e2bae9eb-29bf-43d3-81c3-923a56b6e606",
+      "name": "💬 Prepare SMS Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2496,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "={{ $json.sms_text }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "b13d0e2c-aa11-44e5-a63b-32a2dd122875",
+      "name": "📲 Send SMS Link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2256,
+        720
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const smsResponse = $input.first().json;\n\nlet ctx = null;\n\ntry {\n  ctx = $('🇮🇳 Parse OkPay Response').first().json;\n} catch (e) {}\n\nif (!ctx) {\n  try {\n    ctx = $('🇳🇵 Parse Monetix Response [CONFIG REQUIRED]').first().json;\n  } catch (e) {}\n}\n\nctx = ctx || {};\n\nreturn [{\n  json: {\n    ...ctx,\n    sms_response: smsResponse\n  }\n}];"
+      },
+      "id": "1fc8d9b6-5da9-4805-b150-f45ed5aa1bdb",
+      "name": "🔗 Reattach Context After SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2016,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "okpay-payment-link",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "93975320-cff7-48b8-ab81-a13cb0e11ac2",
+      "name": "📲 ElevenLabs Webhook India",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -4688,
+        720
+      ],
+      "webhookId": "fb21d318-bc42-46de-a1f9-bdf3347bb4ab"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }",
+        "options": {}
+      },
+      "id": "25a49e4f-6c39-459a-b38a-f5542c34be1f",
+      "name": "✅ Respond ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -4432,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\n\nfunction canonicalCountry(rawCountry, rawPhone='') {\n  const c = String(rawCountry || '').trim().toLowerCase();\n\n  if (['india','in'].includes(c)) return 'india';\n  if (['nepal','np'].includes(c)) return 'nepal';\n\n  const p = String(rawPhone || '').replace(/[^0-9+]/g,'');\n\n  if (p.startsWith('+977') || p.startsWith('977')) return 'nepal';\n  if (p.startsWith('+91') || p.startsWith('91')) return 'india';\n\n  return '';\n}\n\nfunction normalizeDigits(rawPhone, country) {\n  let d = String(rawPhone || '')\n    .replace(/^=+/, '')\n    .replace(/[^0-9]/g, '');\n\n  if (!d) return '';\n\n  if (country === 'india') {\n    if (d.startsWith('91') && d.length === 12) return d;\n    if (d.length === 10) return '91' + d;\n  }\n\n  if (country === 'nepal') {\n    if (d.startsWith('977') && d.length >= 11 && d.length <= 15) return d;\n    if (d.length >= 8 && d.length <= 10) return '977' + d;\n  }\n\n  return d;\n}\n\nconst rawPhone = b.phone || b.lead_id || '';\nconst country = canonicalCountry(b.country, rawPhone);\nconst clientPhone = normalizeDigits(rawPhone, country);\n\nlet whatsapp_phone = String(b.whatsapp_phone || '')\n  .replace(/^=+/, '')\n  .replace(/[^0-9]/g, '');\n\nif (whatsapp_phone) {\n  whatsapp_phone = normalizeDigits(whatsapp_phone, country);\n} else {\n  whatsapp_phone = clientPhone;\n}\n\nif (whatsapp_phone) whatsapp_phone = '+' + whatsapp_phone;\n\n// Multi-country default currency.\n// India -> INR\n// Nepal -> NPR\nconst defaultCurrency =\n  country === 'india' ? 'INR' :\n  country === 'nepal' ? 'NPR' :\n  '';\n\nreturn [{\n  json: {\n    lead_id: String(b.lead_id || Date.now()).replace(/^=+/, '').trim(),\n    full_name: String(b.full_name || 'friend').replace(/^=+/, '').trim(),\n    phone: clientPhone,\n    whatsapp_phone,\n    country,\n    _source_sheet: ({\n      india: 'leads',\n      nepal: 'leads nepal',\n      slot3: 'leads slot3',\n      slot4: 'leads slot4'\n    })[country] || '',\n    currency: String(b.currency || defaultCurrency).toUpperCase(),\n    amount: b.amount || 2000,\n    risk_disclosure_confirmed: true\n  }\n}];"
+      },
+      "id": "7f00a2bb-9379-4538-ace3-e60a6a8c3ab7",
+      "name": "🔧 Parse Webhook Input1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4432,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MULTI-COUNTRY PAYMENT GUARD + ORDER BUILDER\n// India -> OkPay\n// Nepal -> Monetix\n//\n// IMPORTANT:\n// Nepal gateway credentials, endpoint, signing method and final minimum amount\n// are intentionally NOT invented here. The Monetix branch is created separately\n// and remains safe until its technical configuration is completed.\n\nconst j = $input.first().json || {};\n\nconst lead_id   = String(j.lead_id || '').trim();\nconst full_name = String(j.full_name || '').trim();\nconst phone     = String(j.phone || '').replace(/[^0-9]/g, '');\nconst country   = String(j.country || '').trim().toLowerCase();\nconst currency  = String(j.currency || '').trim().toUpperCase();\nconst amountNum = Number(String(j.amount || '0').replace(/^=/, '').trim());\n\nconst riskConfirmed =\n  j.risk_disclosure_confirmed === true ||\n  j.risk_disclosure_confirmed === 'true';\n\nlet whatsapp_phone = String(j.whatsapp_phone || '').replace(/[^0-9+]/g, '');\nif (!whatsapp_phone) whatsapp_phone = phone ? ('+' + phone) : '';\nif (whatsapp_phone && !whatsapp_phone.startsWith('+')) {\n  whatsapp_phone = '+' + whatsapp_phone;\n}\n\nconst payment_provider =\n  country === 'india' ? 'okpay' :\n  country === 'nepal' ? 'monetix' :\n  '';\n\nconst errs = [];\n\nif (!lead_id) errs.push('missing lead_id');\nif (!phone) errs.push('missing phone');\nif (!country) errs.push('unsupported/missing country');\n\nif (!['india', 'nepal'].includes(country)) {\n  errs.push('unsupported country: ' + country);\n}\n\nif (!payment_provider) {\n  errs.push('payment provider not configured');\n}\n\nif (country === 'india' && currency !== 'INR') {\n  errs.push('India payment currency must be INR');\n}\n\nif (country === 'nepal' && currency !== 'NPR') {\n  errs.push('Nepal payment currency must be NPR');\n}\n\n// Preserve the existing India minimum exactly.\n// Nepal minimum is still pending Monetix confirmation, therefore only require > 0 here.\n// The Monetix request branch remains blocked until its API details are configured.\nif (country === 'india' && (!Number.isFinite(amountNum) || amountNum < 2000)) {\n  errs.push('India amount must be >= 2000');\n}\n\nif (country === 'nepal' && (!Number.isFinite(amountNum) || amountNum <= 0)) {\n  errs.push('Nepal amount must be greater than 0');\n}\n\nif (Number.isFinite(amountNum) && amountNum > 500000) {\n  errs.push('amount exceeds sanity ceiling 500000');\n}\n\nif (!riskConfirmed) {\n  errs.push('risk_disclosure_confirmed must be true');\n}\n\nif (errs.length) {\n  return [{\n    json: {\n      success: false,\n      refused: true,\n      country,\n      payment_provider,\n      reason: errs.join('; '),\n      user_message: 'Payment link unavailable: ' + errs.join(', ')\n    }\n  }];\n}\n\nconst out_trade_no = 'LM_' + lead_id + '_' + Date.now();\nconst idempotency_key = 'pay_' + out_trade_no;\n\nreturn [{\n  json: {\n    ok: true,\n    lead_id,\n    full_name,\n    phone,\n    whatsapp_phone,\n    country,\n    currency,\n    payment_provider,\n    amount: String(Math.floor(amountNum)),\n    out_trade_no,\n    idempotency_key\n  }\n}];"
+      },
+      "id": "909b1087-22a1-4410-a628-352936f50a78",
+      "name": "Guard + Build Order",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4192,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4b23899a-298e-4774-8b59-2c4d25f598eb",
+      "name": "Guard passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3952,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function md5(str) {\n  function rh(n) {\n    var j,s=\"\";\n    for(j=0;j<=3;j++) s+=\"0123456789abcdef\".charAt((n>>(j*8+4))&0xF)+\"0123456789abcdef\".charAt((n>>(j*8))&0xF);\n    return s;\n  }\n  function ad(x,y) {var l=(x&0xFFFF)+(y&0xFFFF);var m=(x>>16)+(y>>16)+(l>>16);return(m<<16)|(l&0xFFFF);}\n  function rl(n,c){return(n<<c)|(n>>>(32-c));}\n  function cm(q,a,b,x,s,t){return ad(rl(ad(ad(a,q),ad(x,t)),s),b);}\n  function ff(a,b,c,d,x,s,t){return cm((b&c)|((~b)&d),a,b,x,s,t);}\n  function gg(a,b,c,d,x,s,t){return cm((b&d)|(c&(~d)),a,b,x,s,t);}\n  function hh(a,b,c,d,x,s,t){return cm(b^c^d,a,b,x,s,t);}\n  function ii(a,b,c,d,x,s,t){return cm(c^(b|(~d)),a,b,x,s,t);}\n  function sb(x) {\n    var i,nblk=((x.length+8)>>6)+1,blks=new Array(nblk*16);\n    for(i=0;i<nblk*16;i++) blks[i]=0;\n    for(i=0;i<x.length;i++) blks[i>>2]|=x.charCodeAt(i)<<((i%4)*8);\n    blks[i>>2]|=0x80<<((i%4)*8);\n    blks[nblk*16-2]=x.length*8;\n    return blks;\n  }\n  var i,x=sb(str),a=1732584193,b=-271733879,c=-1732584194,d=271733878,olda,oldb,oldc,oldd;\n  for(i=0;i<x.length;i+=16){\n    olda=a;oldb=b;oldc=c;oldd=d;\n    a=ff(a,b,c,d,x[i+0],7,-680876936);d=ff(d,a,b,c,x[i+1],12,-389564586);c=ff(c,d,a,b,x[i+2],17,606105819);b=ff(b,c,d,a,x[i+3],22,-1044525330);\n    a=ff(a,b,c,d,x[i+4],7,-176418897);d=ff(d,a,b,c,x[i+5],12,1200080426);c=ff(c,d,a,b,x[i+6],17,-1473231341);b=ff(b,c,d,a,x[i+7],22,-45705983);\n    a=ff(a,b,c,d,x[i+8],7,1770035416);d=ff(d,a,b,c,x[i+9],12,-1958414417);c=ff(c,d,a,b,x[i+10],17,-42063);b=ff(b,c,d,a,x[i+11],22,-1990404162);\n    a=ff(a,b,c,d,x[i+12],7,1804603682);d=ff(d,a,b,c,x[i+13],12,-40341101);c=ff(c,d,a,b,x[i+14],17,-1502002290);b=ff(b,c,d,a,x[i+15],22,1236535329);\n    a=gg(a,b,c,d,x[i+1],5,-165796510);d=gg(d,a,b,c,x[i+6],9,-1069501632);c=gg(c,d,a,b,x[i+11],14,643717713);b=gg(b,c,d,a,x[i+0],20,-373897302);\n    a=gg(a,b,c,d,x[i+5],5,-701558691);d=gg(d,a,b,c,x[i+10],9,38016083);c=gg(c,d,a,b,x[i+15],14,-660478335);b=gg(b,c,d,a,x[i+4],20,-405537848);\n    a=gg(a,b,c,d,x[i+9],5,568446438);d=gg(d,a,b,c,x[i+14],9,-1019803690);c=gg(c,d,a,b,x[i+3],14,-187363961);b=gg(b,c,d,a,x[i+8],20,1163531501);\n    a=gg(a,b,c,d,x[i+13],5,-1444681467);d=gg(d,a,b,c,x[i+2],9,-51403784);c=gg(c,d,a,b,x[i+7],14,1735328473);b=gg(b,c,d,a,x[i+12],20,-1926607734);\n    a=hh(a,b,c,d,x[i+5],4,-378558);d=hh(d,a,b,c,x[i+8],11,-2022574463);c=hh(c,d,a,b,x[i+11],16,1839030562);b=hh(b,c,d,a,x[i+14],23,-35309556);\n    a=hh(a,b,c,d,x[i+1],4,-1530992060);d=hh(d,a,b,c,x[i+4],11,1272893353);c=hh(c,d,a,b,x[i+7],16,-155497632);b=hh(b,c,d,a,x[i+10],23,-1094730640);\n    a=hh(a,b,c,d,x[i+13],4,681279174);d=hh(d,a,b,c,x[i+0],11,-358537222);c=hh(c,d,a,b,x[i+3],16,-722521979);b=hh(b,c,d,a,x[i+6],23,76029189);\n    a=hh(a,b,c,d,x[i+9],4,-640364487);d=hh(d,a,b,c,x[i+12],11,-421815835);c=hh(c,d,a,b,x[i+15],16,530742520);b=hh(b,c,d,a,x[i+2],23,-995338651);\n    a=ii(a,b,c,d,x[i+0],6,-198630844);d=ii(d,a,b,c,x[i+7],10,1126891415);c=ii(c,d,a,b,x[i+14],15,-1416354905);b=ii(b,c,d,a,x[i+5],21,-57434055);\n    a=ii(a,b,c,d,x[i+12],6,1700485571);d=ii(d,a,b,c,x[i+3],10,-1894986606);c=ii(c,d,a,b,x[i+10],15,-1051523);b=ii(b,c,d,a,x[i+1],21,-2054922799);\n    a=ii(a,b,c,d,x[i+8],6,1873313359);d=ii(d,a,b,c,x[i+15],10,-30611744);c=ii(c,d,a,b,x[i+6],15,-1560198380);b=ii(b,c,d,a,x[i+13],21,1309151649);\n    a=ii(a,b,c,d,x[i+4],6,-145523070);d=ii(d,a,b,c,x[i+11],10,-1120210379);c=ii(c,d,a,b,x[i+2],15,718787259);b=ii(b,c,d,a,x[i+9],21,-343485551);\n    a=ad(a,olda);b=ad(b,oldb);c=ad(c,oldc);d=ad(d,oldd);\n  }\n  return rh(a)+rh(b)+rh(c)+rh(d);\n}\n\nfunction clean(v) {\n  return String(v || '').replace(/=/g, '').trim();\n}\n\nconst ctx = $input.first().json;\n\n// E.164 already normalized upstream; do not force +91 in a multi-country workflow.\nlet whatsapp_phone = String(ctx.whatsapp_phone || ctx.phone || '').replace(/[^0-9+]/g, '');\nif (whatsapp_phone && !whatsapp_phone.startsWith('+')) whatsapp_phone = '+' + whatsapp_phone;\n\nconst params = {\n  mchId:        '2764',\n  currency:     clean(ctx.currency),\n  out_trade_no: clean(ctx.out_trade_no),\n  pay_type:     'UPI',\n  money:        clean(ctx.amount),\n  notify_url:   'https://landmarket-n8n.dhsoig.easypanel.host/webhook/okpay-callback',\n  returnUrl:    'https://www.landmarkmarkets.in/sign-in',\n  phone:        clean(ctx.phone),\n  attach:       clean(ctx.lead_id),\n};\n\nconst filtered = {};\nfor (const k of Object.keys(params)) {\n  const v = params[k];\n  if (v !== '' && v !== null && v !== undefined) filtered[k] = v;\n}\n\nconst sortedKeys = Object.keys(filtered).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));\nconst baseString = sortedKeys.map(k => k + '=' + filtered[k]).join('&');\nconst toSign = baseString + '&key=' + 'a421742f0b404661b8ddb323c51cc99b';\nconst sign = md5(toSign);\n\nconst bodyParts = sortedKeys.map(k => encodeURIComponent(k) + '=' + encodeURIComponent(filtered[k]));\nbodyParts.push('sign=' + sign);\nconst formBody = bodyParts.join('&');\n\nreturn [{ json: { ...ctx, ...filtered, whatsapp_phone, sign, formBody } }];"
+      },
+      "id": "dc630b15-6fb3-4343-990d-a8e9523fb61a",
+      "name": "🇮🇳 Build OkPay Signed Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3472,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.wpay.one/v1/Collect",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            },
+            {
+              "name": "X-Idempotency-Key",
+              "value": "={{ $json.idempotency_key }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json.formBody }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "f63a37f8-840d-4b13-b33c-722869121e8a",
+      "name": "🇮🇳 POST OkPay /v1/Collect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3232,
+        688
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json || {};\nconst ctx = $('🇮🇳 Build OkPay Signed Request').first().json;\n\nconst code = resp.statusCode ?? resp.status ?? null;\nconst body = resp.body || resp;\n\nconst okpayCode = body.code;\nconst url = body.data && body.data.url;\nconst txnId = body.data && (body.data.transaction_Id || body.data.transactionId);\n\nconst success =\n  code &&\n  code >= 200 &&\n  code < 300 &&\n  okpayCode === 0 &&\n  url;\n\nif (success) {\n  return [{\n    json: {\n      ...ctx,\n      success: true,\n      payment_provider: 'okpay',\n      checkout_url: url,\n      payment_transaction_id: txnId,\n      okpay_transaction_id: txnId,\n      http_status: code\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    success: false,\n    refused: false,\n    payment_provider: 'okpay',\n    reason:\n      'OkPay error code=' + okpayCode +\n      ' msg=' + (body.msg || '') +\n      ' http=' + code,\n    user_message:\n      'Payment link generate karne mein technical issue aaya. Thodi der baad try karte hain.'\n  }\n}];"
+      },
+      "id": "7a0e5e01-c87d-4616-b199-2bf2e26844f7",
+      "name": "🇮🇳 Parse OkPay Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2992,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "s1",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "89fb50fb-8742-40b3-8001-9a04d32dc84f",
+      "name": "Payment Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2736,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return a clean, tool-friendly response to the AI Agent.\nconst j = $input.first().json || {};\n\nif (j.success) {\n  const isNepal = String(j.country || '').toLowerCase() === 'nepal';\n\n  return [{\n    json: {\n      success: true,\n      country: j.country,\n      payment_provider: j.payment_provider,\n      message_to_user: isNepal\n        ? 'Your payment link has been sent by SMS. Please check it and confirm. Trading involves risk.'\n        : 'Payment link aapko SMS pe bhej diya hai. Check kar ke confirm karein. Yaad rahe — trading mein risk hota hai.',\n      out_trade_no: j.out_trade_no,\n      amount: j.amount,\n      currency: j.currency\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    success: false,\n    country: j.country,\n    payment_provider: j.payment_provider,\n    message_to_user:\n      j.user_message ||\n      'Payment link generate karne mein issue aaya. Thodi der baad try karte hain.',\n    reason: j.reason\n  }\n}];"
+      },
+      "id": "997845a8-c47c-4685-9ca0-f9572bf4e55f",
+      "name": "🤖 Respond to AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1232,
+        896
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nreturn [{ json: {\n  success: false,\n  refused: true,\n  message_to_user: j.user_message || ('Payment link refused: ' + j.reason),\n  reason: j.reason\n}}];"
+      },
+      "id": "9019bf17-db1b-44c8-94c3-3df859bac2a1",
+      "name": "⛔ Refuse Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3664,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🌍 WF7 MULTI-COUNTRY PAYMENT ROUTING\n\n**India** → OkPay / INR / existing production flow preserved.\n\n**Nepal** → Monetix / NPR / separate branch created.\n\n⚠️ Monetix HTTP node is intentionally **DISABLED** until the technical team provides the real endpoint, merchant/account ID, authentication/signature method, secret/API key, callback requirements, request fields, response format and amount limits.\n\nDo not enable the Monetix HTTP node until those values are configured.",
+        "height": 340,
+        "width": 700,
+        "color": 5
+      },
+      "id": "7b922033-5fca-4d1d-a949-8758aaecf9b7",
+      "name": "🌍 Payment Country Rules",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -4448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "monetix-payment-link-nepal",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b0842fbc-217b-41bc-9acd-839ae2b6376a",
+      "name": "📲 ElevenLabs Webhook Nepal",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -4688,
+        960
+      ],
+      "webhookId": "6e09e343-2802-4cd1-af91-3189c4f9560c"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fd5e5289-7968-441c-be68-13f19d17d88e",
+              "leftValue": "={{ $json.payment_provider }}",
+              "rightValue": "okpay",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "13d06663-4973-4b66-a5bc-22c3c53912bb",
+      "name": "🌍 Payment Provider Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3712,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// NEPAL / MONETIX REQUEST BUILDER — STRUCTURE READY\n// This node is intentionally safe until the Monetix technical team provides:\n// - API endpoint\n// - merchant/account identifier\n// - authentication/signature method\n// - secret/API key\n// - exact request field names\n// - callback/notify URL requirements\n// - success response format\n// - minimum/maximum amount rules\n//\n// Once those details arrive, replace ONLY the configuration/payload section\n// in this node and then configure/enable the HTTP node that follows.\n\nconst ctx = $input.first().json || {};\n\nif (ctx.country !== 'nepal' || ctx.payment_provider !== 'monetix') {\n  throw new Error('MONETIX_BRANCH_RECEIVED_NON_NEPAL_REQUEST');\n}\n\nconst monetix_request = {\n  // PLACEHOLDERS — DO NOT GUESS VALUES\n  merchant_id: '',\n  currency: ctx.currency || 'NPR',\n  amount: ctx.amount,\n  order_id: ctx.out_trade_no,\n  phone: ctx.phone,\n  callback_url: '',\n  return_url: 'https://crm.lmtradermarkets.com/'\n};\n\nreturn [{\n  json: {\n    ...ctx,\n    monetix_configured: false,\n    monetix_request,\n    monetix_configuration_status: 'WAITING_FOR_TECHNICAL_DETAILS'\n  }\n}];"
+      },
+      "id": "4cc43566-6391-40e7-aa08-16fd3c22a4be",
+      "name": "🇳🇵 Build Monetix Request [CONFIG REQUIRED]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3472,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://example.invalid/monetix-config-required",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Idempotency-Key",
+              "value": "={{ $json.idempotency_key }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.monetix_request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "5a86d579-f99b-476c-a9b2-3b289c558055",
+      "name": "🇳🇵 POST Monetix Payment [DISABLED - CONFIGURE]",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3232,
+        1088
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "disabled": true,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MONETIX RESPONSE NORMALIZER — SAFE PLACEHOLDER\n// While the Monetix HTTP node is disabled/unconfigured, this returns a clean\n// non-success response and NEVER falls through to the OkPay branch.\n//\n// Replace the response parsing section after the Monetix team provides\n// the exact API response format.\n\nlet ctx = {};\ntry {\n  ctx = $('🇳🇵 Build Monetix Request [CONFIG REQUIRED]').first().json || {};\n} catch (e) {\n  ctx = $input.first().json || {};\n}\n\nif (!ctx.monetix_configured) {\n  return [{\n    json: {\n      ...ctx,\n      success: false,\n      refused: true,\n      payment_provider: 'monetix',\n      reason: 'MONETIX_CONFIGURATION_PENDING',\n      user_message: 'Nepal payment link is temporarily unavailable while the payment gateway configuration is being completed.'\n    }\n  }];\n}\n\n// PLACEHOLDER FOR FUTURE LIVE RESPONSE PARSING\nconst resp = $input.first().json || {};\n\nreturn [{\n  json: {\n    ...ctx,\n    success: false,\n    refused: false,\n    payment_provider: 'monetix',\n    raw_response: resp,\n    reason: 'MONETIX_RESPONSE_PARSER_NOT_CONFIGURED',\n    user_message: 'Nepal payment gateway response parser is not configured yet.'\n  }\n}];"
+      },
+      "id": "50ee9107-26fe-492a-b8c8-b5b6401ac468",
+      "name": "🇳🇵 Parse Monetix Response [CONFIG REQUIRED]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2992,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🇳🇵 MONETIX — CONFIGURATION PENDING\n\nFill these 3 nodes only when the technical documentation arrives:\n\n1. **🇳🇵 Build Monetix Request [CONFIG REQUIRED]**\n2. **🇳🇵 POST Monetix Payment [DISABLED - CONFIGURE]**\n3. **🇳🇵 Parse Monetix Response [CONFIG REQUIRED]**\n\nCurrent Nepal branch is safe: it cannot send a live payment request.",
+        "height": 280,
+        "width": 560,
+        "color": 5
+      },
+      "id": "cfbb2ae7-378b-4fb3-9994-79ff6b38faca",
+      "name": "📌 Monetix Setup Pending",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3504,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "44a3a075-4c7a-479f-ace5-0a477c78272f",
+      "name": "🔐 Login LeadStudio (WF7)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1776,
+        720
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/leads/' + ($('🔗 Reattach Context After SMS').first().json.lead_id) + '/followups' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'NOTE', notes: `Payment link sent — ${$('🔗 Reattach Context After SMS').first().json.currency} ${$('🔗 Reattach Context After SMS').first().json.amount} via ${$('🔗 Reattach Context After SMS').first().json.payment_provider}. Order: ${$('🔗 Reattach Context After SMS').first().json.out_trade_no}` }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "22db7890-6962-4a83-b616-b4d7f9f51790",
+      "name": "📝 POST Followup — Payment Link Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1536,
+        720
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "e6f1ae43-38b7-4a78-90c6-87247451c7b0",
+      "name": "🔐 Login LeadStudio (WF7-Fail)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2496,
+        1136
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/leads/' + $('Payment Success?').item.json.lead_id + '/followups' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'NOTE', notes: `Payment link FAILED — ${$json.payment_provider || 'unknown provider'}: ${$json.reason || 'unknown error'}` }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "ade3849d-9035-4d31-9fab-679769f1d3f0",
+      "name": "📝 POST Followup — Payment Link Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2256,
+        1136
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $('⚙️ Parse Callback1').first().json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "=Capital Atlantis: Payment of Rs{{ $('⚙️ Parse Callback1').first().json.money }} confirmed! Trading account active. Login: crm.capitalatlantis.net"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "d9688990-1713-493d-94b9-3c15749d8a5f",
+      "name": "📲 Send SMS Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1472,
+        896
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "okpay-callback",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "caa2fbd4-975c-44e0-8401-6eb28f93c8a1",
+      "name": "📥 OkPay Callback Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        208,
+        1120
+      ],
+      "webhookId": "e9cfe8dc-d32e-4f21-9da6-1ed63384da8f"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "SUCCESS",
+        "options": {}
+      },
+      "id": "abd8b357-d5b9-42ad-acb0-abb1b8516c63",
+      "name": "✅ Respond SUCCESS1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        416,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst b = raw.body || raw;\n\n// OkPay sends flat form fields\nconst status     = String(b.status || b.trade_status || '').toUpperCase();\nconst money      = String(b.money || b.amount || '');\nconst outTradeNo = String(b.out_trade_no || '');\nconst transId    = String(b.transaction_id || b.transactionId || b.trade_no || '');\nconst attach     = String(b.attach || ''); // echoed lead_id\nconst phone      = String(b.phone || '').replace(/[^0-9]/g, '');\nconst mchId      = String(b.mchId || b.mch_id || '');\n\nconsole.log('📥 OkPay callback | status:', status, '| money:', money, '| out_trade_no:', outTradeNo, '| attach:', attach);\n\n// OkPay success statuses\nconst isPaid = status === 'SUCCESS' || status === 'PAID' || status === '1' || status === 'COMPLETED';\n\nif (!isPaid) {\n  console.log('⚠️ Payment not successful, status:', status);\n  return [{ json: { isPaid: false, status, outTradeNo, transId } }];\n}\n\n// Extract lead_id from attach or out_trade_no\nlet leadId = attach || outTradeNo;\n\nreturn [{ json: {\n  isPaid: true,\n  status,\n  money,\n  outTradeNo,\n  transId,\n  leadId,\n  phone,\n  mchId,\n  raw: b\n}}];"
+      },
+      "id": "e224af01-0e96-4ffb-a8c1-707c37fd8977",
+      "name": "⚙️ Parse Callback1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "paid-check",
+              "leftValue": "={{ $json.isPaid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0a944ebb-5670-4f41-b2c0-1622c40a5d98",
+      "name": "💰 Payment Successful?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sms = $('📲 Send SMS Confirmation').first().json;\nconst ctx = $('⚙️ Parse Callback1').first().json;\nconsole.log('✅ Payment processed | money:', ctx.money, '| txn:', ctx.transId, '| sms_http:', sms.statusCode);\nreturn [{ json: {\n  status: 'PROCESSED',\n  money: ctx.money,\n  transId: ctx.transId,\n  outTradeNo: ctx.outTradeNo,\n  sms_status: sms.statusCode\n}}];"
+      },
+      "id": "37af9930-1fe8-4d04-83f8-08c935637b7d",
+      "name": "📝 Log Success1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        1056
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconsole.log('⚠️ Payment not successful | status:', ctx.status, '| order:', ctx.outTradeNo);\nreturn [{ json: { status: 'SKIPPED', reason: ctx.status } }];"
+      },
+      "id": "a03c5e35-74ee-4405-9dfb-24c29c0a11d2",
+      "name": "📝 Log Skipped1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        1280
+      ]
+    },
+    {
+      "parameters": {
+        "content": "Este WF permanece compartido porque actualiza `conversions`, no las pestañas `leads`.\n\nMientras Nepal payment está bloqueado en WF7, este callback procesa únicamente pagos emitidos por la ruta India existente. No requiere duplicar una pestaña por país.",
+        "height": 250,
+        "width": 620,
+        "color": 5
+      },
+      "id": "a97f64bf-2b3e-471f-9579-970855317df8",
+      "name": "🌍 Payment Callback",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        448,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "ec764d35-bdf0-479f-a483-2944590c1bd5",
+      "name": "🔐 Login LeadStudio (WF8)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        1056
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/leads/' + ($('⚙️ Parse Callback1').first().json.leadId) + '/followups' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'NOTE', notes: `Payment CONFIRMED — amount ${$('⚙️ Parse Callback1').first().json.money}. Txn: ${$('⚙️ Parse Callback1').first().json.transId}. Order: ${$('⚙️ Parse Callback1').first().json.outTradeNo}` }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "6a6d743d-c5c1-4132-97a6-b18f17dffc1c",
+      "name": "📝 POST Followup — Payment Confirmed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2144,
+        1056
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $('Guard + Build Order').item.json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "={{ $json.message_to_user }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "735d12cd-578c-4b4b-98fa-0c08be706569",
+      "name": "📲 Send SMS Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -976,
+        896
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "📲 ElevenLabs Webhook India": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond ",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔧 Parse Webhook Input1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📲 ElevenLabs Webhook Nepal": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond ",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔧 Parse Webhook Input1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Parse Webhook Input1": {
+      "main": [
+        [
+          {
+            "node": "Guard + Build Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard + Build Order": {
+      "main": [
+        [
+          {
+            "node": "Guard passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard passed?": {
+      "main": [
+        [
+          {
+            "node": "🌍 Payment Provider Router",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⛔ Refuse Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⛔ Refuse Response": {
+      "main": [
+        [
+          {
+            "node": "🤖 Respond to AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌍 Payment Provider Router": {
+      "main": [
+        [
+          {
+            "node": "🇮🇳 Build OkPay Signed Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🇳🇵 Build Monetix Request [CONFIG REQUIRED]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🇮🇳 Build OkPay Signed Request": {
+      "main": [
+        [
+          {
+            "node": "🇮🇳 POST OkPay /v1/Collect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🇮🇳 POST OkPay /v1/Collect": {
+      "main": [
+        [
+          {
+            "node": "🇮🇳 Parse OkPay Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🇮🇳 Parse OkPay Response": {
+      "main": [
+        [
+          {
+            "node": "Payment Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🇳🇵 Build Monetix Request [CONFIG REQUIRED]": {
+      "main": [
+        [
+          {
+            "node": "🇳🇵 POST Monetix Payment [DISABLED - CONFIGURE]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🇳🇵 POST Monetix Payment [DISABLED - CONFIGURE]": {
+      "main": [
+        [
+          {
+            "node": "🇳🇵 Parse Monetix Response [CONFIG REQUIRED]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🇳🇵 Parse Monetix Response [CONFIG REQUIRED]": {
+      "main": [
+        [
+          {
+            "node": "Payment Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payment Success?": {
+      "main": [
+        [
+          {
+            "node": "💬 Prepare SMS Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF7-Fail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💬 Prepare SMS Message": {
+      "main": [
+        [
+          {
+            "node": "📲 Send SMS Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📲 Send SMS Link": {
+      "main": [
+        [
+          {
+            "node": "🔗 Reattach Context After SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Reattach Context After SMS": {
+      "main": [
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF7)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF7)": {
+      "main": [
+        [
+          {
+            "node": "📝 POST Followup — Payment Link Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 POST Followup — Payment Link Sent": {
+      "main": [
+        [
+          {
+            "node": "🤖 Respond to AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF7-Fail)": {
+      "main": [
+        [
+          {
+            "node": "📝 POST Followup — Payment Link Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 POST Followup — Payment Link Failed": {
+      "main": [
+        [
+          {
+            "node": "🤖 Respond to AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📲 Send SMS Confirmation": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Success1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 OkPay Callback Webhook1": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond SUCCESS1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⚙️ Parse Callback1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Parse Callback1": {
+      "main": [
+        [
+          {
+            "node": "💰 Payment Successful?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💰 Payment Successful?1": {
+      "main": [
+        [
+          {
+            "node": "📲 Send SMS Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📝 Log Skipped1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Log Success1": {
+      "main": [
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF8)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF8)": {
+      "main": [
+        [
+          {
+            "node": "📝 POST Followup — Payment Confirmed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Respond to AI": {
+      "main": [
+        [
+          {
+            "node": "📲 Send SMS Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {
+    "📲 ElevenLabs Webhook India": [
+      {
+        "json": {
+          "headers": {
+            "host": "landmarket-n8n.dhsoig.easypanel.host",
+            "user-agent": "ElevenLabs/1.0",
+            "content-length": "139",
+            "accept": "*/*",
+            "accept-encoding": "gzip",
+            "content-type": "application/json",
+            "x-forwarded-for": "34.59.11.47",
+            "x-forwarded-host": "landmarket-n8n.dhsoig.easypanel.host",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "b248a70a7af0",
+            "x-real-ip": "34.59.11.47"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "phone": "+919872163680",
+            "full_name": "vivek",
+            "amount": "5000",
+            "lead_id": "85d4286f-2366-49f0-af2d-d8bfbb7fc870",
+            "whatsapp_phone": ""
+          },
+          "webhookUrl": "https://landmarket-n8n.dhsoig.easypanel.host/webhook/okpay-payment-link",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "🇮🇳 Parse OkPay Response": [
+      {
+        "json": {
+          "ok": true,
+          "lead_id": "85d4286f-2366-49f0-af2d-d8bfbb7fc870",
+          "full_name": "vivek",
+          "phone": "919872163680",
+          "whatsapp_phone": "+919872163680",
+          "country": "india",
+          "currency": "INR",
+          "payment_provider": "okpay",
+          "amount": "5000",
+          "out_trade_no": "LM_85d4286f-2366-49f0-af2d-d8bfbb7fc870_1789561372962",
+          "idempotency_key": "pay_LM_85d4286f-2366-49f0-af2d-d8bfbb7fc870_1789561372962",
+          "mchId": "2764",
+          "pay_type": "UPI",
+          "money": "5000",
+          "notify_url": "https://landmarket-n8n.dhsoig.easypanel.host/webhook/okpay-callback",
+          "returnUrl": "https://www.landmarkmarkets.in/sign-in",
+          "attach": "85d4286f-2366-49f0-af2d-d8bfbb7fc870",
+          "sign": "6d49ac585e7564ecd762290ed7c28bc0",
+          "formBody": "attach=85d4286f-2366-49f0-af2d-d8bfbb7fc870&currency=INR&mchId=2764&money=5000&notify_url=https%3A%2F%2Flandmarket-n8n.dhsoig.easypanel.host%2Fwebhook%2Fokpay-callback&out_trade_no=LM_85d4286f-2366-49f0-af2d-d8bfbb7fc870_1789561372962&pay_type=UPI&phone=919872163680&returnUrl=https%3A%2F%2Fwww.landmarkmarkets.in%2Fsign-in&sign=6d49ac585e7564ecd762290ed7c28bc0",
+          "success": false,
+          "refused": false,
+          "reason": "OkPay error code=1 msg=fail http=200",
+          "user_message": "Payment link generate karne mein technical issue aaya. Thodi der baad try karte hain."
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "meta": null,
+  "tags": [
+    {
+      "id": "EWlF9l3b9w6Vq3NA",
+      "name": "landmark",
+      "createdAt": "2026-07-27T09:29:13.383Z",
+      "updatedAt": "2026-07-27T09:29:13.383Z"
+    },
+    {
+      "id": "RV5NkjlkcBjJfgn5",
+      "name": "compliant-v3",
+      "createdAt": "2026-07-27T13:15:00.991Z",
+      "updatedAt": "2026-07-27T13:15:00.991Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "442FDm64j2YTx9mW",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-16T12:13:23.412Z",
+      "updatedAt": "2026-09-16T12:13:23.412Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+    "workflowId": "442FDm64j2YTx9mW",
+    "nodes": [
+      {
+        "parameters": {
+          "jsCode": "const ctx = $input.first().json || {};\n\nconst link = ctx.short_url || ctx.checkout_url || '';\n\nconst country = String(ctx.country || '').toLowerCase();\nconst currency = String(ctx.currency || '').toUpperCase();\nconst amount = String(ctx.amount || '');\n\nlet amountLabel = `${currency} ${amount}`.trim();\n\nif (country === 'india' && currency === 'INR') {\n  amountLabel = `Rs${amount}`;\n}\n\nif (country === 'nepal' && currency === 'NPR') {\n  amountLabel = `Rs${amount}`;\n}\n\nlet brand = 'Landmark Markets';\n\nconst text = `${brand}: ${amountLabel} payment link: ${link}`;\n\nreturn [{\n  json: {\n    ...ctx,\n    sms_text: text\n  }\n}];"
+        },
+        "id": "e2bae9eb-29bf-43d3-81c3-923a56b6e606",
+        "name": "💬 Prepare SMS Message",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -2496,
+          720
+        ]
+      },
+      {
+        "parameters": {
+          "url": "http://api2.santo.cc/submit",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "command",
+                "value": "MT_REQUEST"
+              },
+              {
+                "name": "cpid",
+                "value": "zUg8Dhgb"
+              },
+              {
+                "name": "cppwd",
+                "value": "vduAtccg"
+              },
+              {
+                "name": "da",
+                "value": "={{ $json.phone }}"
+              },
+              {
+                "name": "sm",
+                "value": "={{ $json.sms_text }}"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "text"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "b13d0e2c-aa11-44e5-a63b-32a2dd122875",
+        "name": "📲 Send SMS Link",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -2256,
+          720
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "jsCode": "const smsResponse = $input.first().json;\n\nlet ctx = null;\n\ntry {\n  ctx = $('🇮🇳 Parse OkPay Response').first().json;\n} catch (e) {}\n\nif (!ctx) {\n  try {\n    ctx = $('🇳🇵 Parse Monetix Response [CONFIG REQUIRED]').first().json;\n  } catch (e) {}\n}\n\nctx = ctx || {};\n\nreturn [{\n  json: {\n    ...ctx,\n    sms_response: smsResponse\n  }\n}];"
+        },
+        "id": "1fc8d9b6-5da9-4805-b150-f45ed5aa1bdb",
+        "name": "🔗 Reattach Context After SMS",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -2016,
+          720
+        ]
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "okpay-payment-link",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "93975320-cff7-48b8-ab81-a13cb0e11ac2",
+        "name": "📲 ElevenLabs Webhook India",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          -4688,
+          720
+        ],
+        "webhookId": "fb21d318-bc42-46de-a1f9-bdf3347bb4ab"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={ \"ok\": true }",
+          "options": {}
+        },
+        "id": "25a49e4f-6c39-459a-b38a-f5542c34be1f",
+        "name": "✅ Respond ",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          -4432,
+          608
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const b = $input.first().json.body || $input.first().json;\n\nfunction canonicalCountry(rawCountry, rawPhone='') {\n  const c = String(rawCountry || '').trim().toLowerCase();\n\n  if (['india','in'].includes(c)) return 'india';\n  if (['nepal','np'].includes(c)) return 'nepal';\n\n  const p = String(rawPhone || '').replace(/[^0-9+]/g,'');\n\n  if (p.startsWith('+977') || p.startsWith('977')) return 'nepal';\n  if (p.startsWith('+91') || p.startsWith('91')) return 'india';\n\n  return '';\n}\n\nfunction normalizeDigits(rawPhone, country) {\n  let d = String(rawPhone || '')\n    .replace(/^=+/, '')\n    .replace(/[^0-9]/g, '');\n\n  if (!d) return '';\n\n  if (country === 'india') {\n    if (d.startsWith('91') && d.length === 12) return d;\n    if (d.length === 10) return '91' + d;\n  }\n\n  if (country === 'nepal') {\n    if (d.startsWith('977') && d.length >= 11 && d.length <= 15) return d;\n    if (d.length >= 8 && d.length <= 10) return '977' + d;\n  }\n\n  return d;\n}\n\nconst rawPhone = b.phone || b.lead_id || '';\nconst country = canonicalCountry(b.country, rawPhone);\nconst clientPhone = normalizeDigits(rawPhone, country);\n\nlet whatsapp_phone = String(b.whatsapp_phone || '')\n  .replace(/^=+/, '')\n  .replace(/[^0-9]/g, '');\n\nif (whatsapp_phone) {\n  whatsapp_phone = normalizeDigits(whatsapp_phone, country);\n} else {\n  whatsapp_phone = clientPhone;\n}\n\nif (whatsapp_phone) whatsapp_phone = '+' + whatsapp_phone;\n\n// Multi-country default currency.\n// India -> INR\n// Nepal -> NPR\nconst defaultCurrency =\n  country === 'india' ? 'INR' :\n  country === 'nepal' ? 'NPR' :\n  '';\n\nreturn [{\n  json: {\n    lead_id: String(b.lead_id || Date.now()).replace(/^=+/, '').trim(),\n    full_name: String(b.full_name || 'friend').replace(/^=+/, '').trim(),\n    phone: clientPhone,\n    whatsapp_phone,\n    country,\n    _source_sheet: ({\n      india: 'leads',\n      nepal: 'leads nepal',\n      slot3: 'leads slot3',\n      slot4: 'leads slot4'\n    })[country] || '',\n    currency: String(b.currency || defaultCurrency).toUpperCase(),\n    amount: b.amount || 2000,\n    risk_disclosure_confirmed: true\n  }\n}];"
+        },
+        "id": "7f00a2bb-9379-4538-ace3-e60a6a8c3ab7",
+        "name": "🔧 Parse Webhook Input1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -4432,
+          880
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// MULTI-COUNTRY PAYMENT GUARD + ORDER BUILDER\n// India -> OkPay\n// Nepal -> Monetix\n//\n// IMPORTANT:\n// Nepal gateway credentials, endpoint, signing method and final minimum amount\n// are intentionally NOT invented here. The Monetix branch is created separately\n// and remains safe until its technical configuration is completed.\n\nconst j = $input.first().json || {};\n\nconst lead_id   = String(j.lead_id || '').trim();\nconst full_name = String(j.full_name || '').trim();\nconst phone     = String(j.phone || '').replace(/[^0-9]/g, '');\nconst country   = String(j.country || '').trim().toLowerCase();\nconst currency  = String(j.currency || '').trim().toUpperCase();\nconst amountNum = Number(String(j.amount || '0').replace(/^=/, '').trim());\n\nconst riskConfirmed =\n  j.risk_disclosure_confirmed === true ||\n  j.risk_disclosure_confirmed === 'true';\n\nlet whatsapp_phone = String(j.whatsapp_phone || '').replace(/[^0-9+]/g, '');\nif (!whatsapp_phone) whatsapp_phone = phone ? ('+' + phone) : '';\nif (whatsapp_phone && !whatsapp_phone.startsWith('+')) {\n  whatsapp_phone = '+' + whatsapp_phone;\n}\n\nconst payment_provider =\n  country === 'india' ? 'okpay' :\n  country === 'nepal' ? 'monetix' :\n  '';\n\nconst errs = [];\n\nif (!lead_id) errs.push('missing lead_id');\nif (!phone) errs.push('missing phone');\nif (!country) errs.push('unsupported/missing country');\n\nif (!['india', 'nepal'].includes(country)) {\n  errs.push('unsupported country: ' + country);\n}\n\nif (!payment_provider) {\n  errs.push('payment provider not configured');\n}\n\nif (country === 'india' && currency !== 'INR') {\n  errs.push('India payment currency must be INR');\n}\n\nif (country === 'nepal' && currency !== 'NPR') {\n  errs.push('Nepal payment currency must be NPR');\n}\n\n// Preserve the existing India minimum exactly.\n// Nepal minimum is still pending Monetix confirmation, therefore only require > 0 here.\n// The Monetix request branch remains blocked until its API details are configured.\nif (country === 'india' && (!Number.isFinite(amountNum) || amountNum < 2000)) {\n  errs.push('India amount must be >= 2000');\n}\n\nif (country === 'nepal' && (!Number.isFinite(amountNum) || amountNum <= 0)) {\n  errs.push('Nepal amount must be greater than 0');\n}\n\nif (Number.isFinite(amountNum) && amountNum > 500000) {\n  errs.push('amount exceeds sanity ceiling 500000');\n}\n\nif (!riskConfirmed) {\n  errs.push('risk_disclosure_confirmed must be true');\n}\n\nif (errs.length) {\n  return [{\n    json: {\n      success: false,\n      refused: true,\n      country,\n      payment_provider,\n      reason: errs.join('; '),\n      user_message: 'Payment link unavailable: ' + errs.join(', ')\n    }\n  }];\n}\n\nconst out_trade_no = 'LM_' + lead_id + '_' + Date.now();\nconst idempotency_key = 'pay_' + out_trade_no;\n\nreturn [{\n  json: {\n    ok: true,\n    lead_id,\n    full_name,\n    phone,\n    whatsapp_phone,\n    country,\n    currency,\n    payment_provider,\n    amount: String(Math.floor(amountNum)),\n    out_trade_no,\n    idempotency_key\n  }\n}];"
+        },
+        "id": "909b1087-22a1-4410-a628-352936f50a78",
+        "name": "Guard + Build Order",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -4192,
+          880
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "ok1",
+                "leftValue": "={{ $json.ok }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "4b23899a-298e-4774-8b59-2c4d25f598eb",
+        "name": "Guard passed?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -3952,
+          880
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "function md5(str) {\n  function rh(n) {\n    var j,s=\"\";\n    for(j=0;j<=3;j++) s+=\"0123456789abcdef\".charAt((n>>(j*8+4))&0xF)+\"0123456789abcdef\".charAt((n>>(j*8))&0xF);\n    return s;\n  }\n  function ad(x,y) {var l=(x&0xFFFF)+(y&0xFFFF);var m=(x>>16)+(y>>16)+(l>>16);return(m<<16)|(l&0xFFFF);}\n  function rl(n,c){return(n<<c)|(n>>>(32-c));}\n  function cm(q,a,b,x,s,t){return ad(rl(ad(ad(a,q),ad(x,t)),s),b);}\n  function ff(a,b,c,d,x,s,t){return cm((b&c)|((~b)&d),a,b,x,s,t);}\n  function gg(a,b,c,d,x,s,t){return cm((b&d)|(c&(~d)),a,b,x,s,t);}\n  function hh(a,b,c,d,x,s,t){return cm(b^c^d,a,b,x,s,t);}\n  function ii(a,b,c,d,x,s,t){return cm(c^(b|(~d)),a,b,x,s,t);}\n  function sb(x) {\n    var i,nblk=((x.length+8)>>6)+1,blks=new Array(nblk*16);\n    for(i=0;i<nblk*16;i++) blks[i]=0;\n    for(i=0;i<x.length;i++) blks[i>>2]|=x.charCodeAt(i)<<((i%4)*8);\n    blks[i>>2]|=0x80<<((i%4)*8);\n    blks[nblk*16-2]=x.length*8;\n    return blks;\n  }\n  var i,x=sb(str),a=1732584193,b=-271733879,c=-1732584194,d=271733878,olda,oldb,oldc,oldd;\n  for(i=0;i<x.length;i+=16){\n    olda=a;oldb=b;oldc=c;oldd=d;\n    a=ff(a,b,c,d,x[i+0],7,-680876936);d=ff(d,a,b,c,x[i+1],12,-389564586);c=ff(c,d,a,b,x[i+2],17,606105819);b=ff(b,c,d,a,x[i+3],22,-1044525330);\n    a=ff(a,b,c,d,x[i+4],7,-176418897);d=ff(d,a,b,c,x[i+5],12,1200080426);c=ff(c,d,a,b,x[i+6],17,-1473231341);b=ff(b,c,d,a,x[i+7],22,-45705983);\n    a=ff(a,b,c,d,x[i+8],7,1770035416);d=ff(d,a,b,c,x[i+9],12,-1958414417);c=ff(c,d,a,b,x[i+10],17,-42063);b=ff(b,c,d,a,x[i+11],22,-1990404162);\n    a=ff(a,b,c,d,x[i+12],7,1804603682);d=ff(d,a,b,c,x[i+13],12,-40341101);c=ff(c,d,a,b,x[i+14],17,-1502002290);b=ff(b,c,d,a,x[i+15],22,1236535329);\n    a=gg(a,b,c,d,x[i+1],5,-165796510);d=gg(d,a,b,c,x[i+6],9,-1069501632);c=gg(c,d,a,b,x[i+11],14,643717713);b=gg(b,c,d,a,x[i+0],20,-373897302);\n    a=gg(a,b,c,d,x[i+5],5,-701558691);d=gg(d,a,b,c,x[i+10],9,38016083);c=gg(c,d,a,b,x[i+15],14,-660478335);b=gg(b,c,d,a,x[i+4],20,-405537848);\n    a=gg(a,b,c,d,x[i+9],5,568446438);d=gg(d,a,b,c,x[i+14],9,-1019803690);c=gg(c,d,a,b,x[i+3],14,-187363961);b=gg(b,c,d,a,x[i+8],20,1163531501);\n    a=gg(a,b,c,d,x[i+13],5,-1444681467);d=gg(d,a,b,c,x[i+2],9,-51403784);c=gg(c,d,a,b,x[i+7],14,1735328473);b=gg(b,c,d,a,x[i+12],20,-1926607734);\n    a=hh(a,b,c,d,x[i+5],4,-378558);d=hh(d,a,b,c,x[i+8],11,-2022574463);c=hh(c,d,a,b,x[i+11],16,1839030562);b=hh(b,c,d,a,x[i+14],23,-35309556);\n    a=hh(a,b,c,d,x[i+1],4,-1530992060);d=hh(d,a,b,c,x[i+4],11,1272893353);c=hh(c,d,a,b,x[i+7],16,-155497632);b=hh(b,c,d,a,x[i+10],23,-1094730640);\n    a=hh(a,b,c,d,x[i+13],4,681279174);d=hh(d,a,b,c,x[i+0],11,-358537222);c=hh(c,d,a,b,x[i+3],16,-722521979);b=hh(b,c,d,a,x[i+6],23,76029189);\n    a=hh(a,b,c,d,x[i+9],4,-640364487);d=hh(d,a,b,c,x[i+12],11,-421815835);c=hh(c,d,a,b,x[i+15],16,530742520);b=hh(b,c,d,a,x[i+2],23,-995338651);\n    a=ii(a,b,c,d,x[i+0],6,-198630844);d=ii(d,a,b,c,x[i+7],10,1126891415);c=ii(c,d,a,b,x[i+14],15,-1416354905);b=ii(b,c,d,a,x[i+5],21,-57434055);\n    a=ii(a,b,c,d,x[i+12],6,1700485571);d=ii(d,a,b,c,x[i+3],10,-1894986606);c=ii(c,d,a,b,x[i+10],15,-1051523);b=ii(b,c,d,a,x[i+1],21,-2054922799);\n    a=ii(a,b,c,d,x[i+8],6,1873313359);d=ii(d,a,b,c,x[i+15],10,-30611744);c=ii(c,d,a,b,x[i+6],15,-1560198380);b=ii(b,c,d,a,x[i+13],21,1309151649);\n    a=ii(a,b,c,d,x[i+4],6,-145523070);d=ii(d,a,b,c,x[i+11],10,-1120210379);c=ii(c,d,a,b,x[i+2],15,718787259);b=ii(b,c,d,a,x[i+9],21,-343485551);\n    a=ad(a,olda);b=ad(b,oldb);c=ad(c,oldc);d=ad(d,oldd);\n  }\n  return rh(a)+rh(b)+rh(c)+rh(d);\n}\n\nfunction clean(v) {\n  return String(v || '').replace(/=/g, '').trim();\n}\n\nconst ctx = $input.first().json;\n\n// E.164 already normalized upstream; do not force +91 in a multi-country workflow.\nlet whatsapp_phone = String(ctx.whatsapp_phone || ctx.phone || '').replace(/[^0-9+]/g, '');\nif (whatsapp_phone && !whatsapp_phone.startsWith('+')) whatsapp_phone = '+' + whatsapp_phone;\n\nconst params = {\n  mchId:        '2764',\n  currency:     clean(ctx.currency),\n  out_trade_no: clean(ctx.out_trade_no),\n  pay_type:     'UPI',\n  money:        clean(ctx.amount),\n  notify_url:   'https://landmarket-n8n.dhsoig.easypanel.host/webhook/okpay-callback',\n  returnUrl:    'https://www.landmarkmarkets.in/sign-in',\n  phone:        clean(ctx.phone),\n  attach:       clean(ctx.lead_id),\n};\n\nconst filtered = {};\nfor (const k of Object.keys(params)) {\n  const v = params[k];\n  if (v !== '' && v !== null && v !== undefined) filtered[k] = v;\n}\n\nconst sortedKeys = Object.keys(filtered).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));\nconst baseString = sortedKeys.map(k => k + '=' + filtered[k]).join('&');\nconst toSign = baseString + '&key=' + 'a421742f0b404661b8ddb323c51cc99b';\nconst sign = md5(toSign);\n\nconst bodyParts = sortedKeys.map(k => encodeURIComponent(k) + '=' + encodeURIComponent(filtered[k]));\nbodyParts.push('sign=' + sign);\nconst formBody = bodyParts.join('&');\n\nreturn [{ json: { ...ctx, ...filtered, whatsapp_phone, sign, formBody } }];"
+        },
+        "id": "dc630b15-6fb3-4343-990d-a8e9523fb61a",
+        "name": "🇮🇳 Build OkPay Signed Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -3472,
+          688
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.wpay.one/v1/Collect",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              },
+              {
+                "name": "X-Idempotency-Key",
+                "value": "={{ $json.idempotency_key }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "string",
+          "body": "={{ $json.formBody }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 20000
+          }
+        },
+        "id": "f63a37f8-840d-4b13-b33c-722869121e8a",
+        "name": "🇮🇳 POST OkPay /v1/Collect",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -3232,
+          688
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000,
+        "continueOnFail": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const resp = $input.first().json || {};\nconst ctx = $('🇮🇳 Build OkPay Signed Request').first().json;\n\nconst code = resp.statusCode ?? resp.status ?? null;\nconst body = resp.body || resp;\n\nconst okpayCode = body.code;\nconst url = body.data && body.data.url;\nconst txnId = body.data && (body.data.transaction_Id || body.data.transactionId);\n\nconst success =\n  code &&\n  code >= 200 &&\n  code < 300 &&\n  okpayCode === 0 &&\n  url;\n\nif (success) {\n  return [{\n    json: {\n      ...ctx,\n      success: true,\n      payment_provider: 'okpay',\n      checkout_url: url,\n      payment_transaction_id: txnId,\n      okpay_transaction_id: txnId,\n      http_status: code\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    success: false,\n    refused: false,\n    payment_provider: 'okpay',\n    reason:\n      'OkPay error code=' + okpayCode +\n      ' msg=' + (body.msg || '') +\n      ' http=' + code,\n    user_message:\n      'Payment link generate karne mein technical issue aaya. Thodi der baad try karte hain.'\n  }\n}];"
+        },
+        "id": "7a0e5e01-c87d-4616-b199-2bf2e26844f7",
+        "name": "🇮🇳 Parse OkPay Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -2992,
+          688
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "s1",
+                "leftValue": "={{ $json.success }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "89fb50fb-8742-40b3-8001-9a04d32dc84f",
+        "name": "Payment Success?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -2736,
+          880
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Return a clean, tool-friendly response to the AI Agent.\nconst j = $input.first().json || {};\n\nif (j.success) {\n  const isNepal = String(j.country || '').toLowerCase() === 'nepal';\n\n  return [{\n    json: {\n      success: true,\n      country: j.country,\n      payment_provider: j.payment_provider,\n      message_to_user: isNepal\n        ? 'Your payment link has been sent by SMS. Please check it and confirm. Trading involves risk.'\n        : 'Payment link aapko SMS pe bhej diya hai. Check kar ke confirm karein. Yaad rahe — trading mein risk hota hai.',\n      out_trade_no: j.out_trade_no,\n      amount: j.amount,\n      currency: j.currency\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    success: false,\n    country: j.country,\n    payment_provider: j.payment_provider,\n    message_to_user:\n      j.user_message ||\n      'Payment link generate karne mein issue aaya. Thodi der baad try karte hain.',\n    reason: j.reason\n  }\n}];"
+        },
+        "id": "997845a8-c47c-4685-9ca0-f9572bf4e55f",
+        "name": "🤖 Respond to AI",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -1232,
+          896
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const j = $input.first().json;\nreturn [{ json: {\n  success: false,\n  refused: true,\n  message_to_user: j.user_message || ('Payment link refused: ' + j.reason),\n  reason: j.reason\n}}];"
+        },
+        "id": "9019bf17-db1b-44c8-94c3-3df859bac2a1",
+        "name": "⛔ Refuse Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -3664,
+          1216
+        ]
+      },
+      {
+        "parameters": {
+          "content": "## 🌍 WF7 MULTI-COUNTRY PAYMENT ROUTING\n\n**India** → OkPay / INR / existing production flow preserved.\n\n**Nepal** → Monetix / NPR / separate branch created.\n\n⚠️ Monetix HTTP node is intentionally **DISABLED** until the technical team provides the real endpoint, merchant/account ID, authentication/signature method, secret/API key, callback requirements, request fields, response format and amount limits.\n\nDo not enable the Monetix HTTP node until those values are configured.",
+          "height": 340,
+          "width": 700,
+          "color": 5
+        },
+        "id": "7b922033-5fca-4d1d-a949-8758aaecf9b7",
+        "name": "🌍 Payment Country Rules",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -4448,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "monetix-payment-link-nepal",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "b0842fbc-217b-41bc-9acd-839ae2b6376a",
+        "name": "📲 ElevenLabs Webhook Nepal",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          -4688,
+          960
+        ],
+        "webhookId": "6e09e343-2802-4cd1-af91-3189c4f9560c"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "fd5e5289-7968-441c-be68-13f19d17d88e",
+                "leftValue": "={{ $json.payment_provider }}",
+                "rightValue": "okpay",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "13d06663-4973-4b66-a5bc-22c3c53912bb",
+        "name": "🌍 Payment Provider Router",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -3712,
+          880
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// NEPAL / MONETIX REQUEST BUILDER — STRUCTURE READY\n// This node is intentionally safe until the Monetix technical team provides:\n// - API endpoint\n// - merchant/account identifier\n// - authentication/signature method\n// - secret/API key\n// - exact request field names\n// - callback/notify URL requirements\n// - success response format\n// - minimum/maximum amount rules\n//\n// Once those details arrive, replace ONLY the configuration/payload section\n// in this node and then configure/enable the HTTP node that follows.\n\nconst ctx = $input.first().json || {};\n\nif (ctx.country !== 'nepal' || ctx.payment_provider !== 'monetix') {\n  throw new Error('MONETIX_BRANCH_RECEIVED_NON_NEPAL_REQUEST');\n}\n\nconst monetix_request = {\n  // PLACEHOLDERS — DO NOT GUESS VALUES\n  merchant_id: '',\n  currency: ctx.currency || 'NPR',\n  amount: ctx.amount,\n  order_id: ctx.out_trade_no,\n  phone: ctx.phone,\n  callback_url: '',\n  return_url: 'https://crm.lmtradermarkets.com/'\n};\n\nreturn [{\n  json: {\n    ...ctx,\n    monetix_configured: false,\n    monetix_request,\n    monetix_configuration_status: 'WAITING_FOR_TECHNICAL_DETAILS'\n  }\n}];"
+        },
+        "id": "4cc43566-6391-40e7-aa08-16fd3c22a4be",
+        "name": "🇳🇵 Build Monetix Request [CONFIG REQUIRED]",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -3472,
+          1088
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://example.invalid/monetix-config-required",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "X-Idempotency-Key",
+                "value": "={{ $json.idempotency_key }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.monetix_request) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 20000
+          }
+        },
+        "id": "5a86d579-f99b-476c-a9b2-3b289c558055",
+        "name": "🇳🇵 POST Monetix Payment [DISABLED - CONFIGURE]",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -3232,
+          1088
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000,
+        "disabled": true,
+        "continueOnFail": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// MONETIX RESPONSE NORMALIZER — SAFE PLACEHOLDER\n// While the Monetix HTTP node is disabled/unconfigured, this returns a clean\n// non-success response and NEVER falls through to the OkPay branch.\n//\n// Replace the response parsing section after the Monetix team provides\n// the exact API response format.\n\nlet ctx = {};\ntry {\n  ctx = $('🇳🇵 Build Monetix Request [CONFIG REQUIRED]').first().json || {};\n} catch (e) {\n  ctx = $input.first().json || {};\n}\n\nif (!ctx.monetix_configured) {\n  return [{\n    json: {\n      ...ctx,\n      success: false,\n      refused: true,\n      payment_provider: 'monetix',\n      reason: 'MONETIX_CONFIGURATION_PENDING',\n      user_message: 'Nepal payment link is temporarily unavailable while the payment gateway configuration is being completed.'\n    }\n  }];\n}\n\n// PLACEHOLDER FOR FUTURE LIVE RESPONSE PARSING\nconst resp = $input.first().json || {};\n\nreturn [{\n  json: {\n    ...ctx,\n    success: false,\n    refused: false,\n    payment_provider: 'monetix',\n    raw_response: resp,\n    reason: 'MONETIX_RESPONSE_PARSER_NOT_CONFIGURED',\n    user_message: 'Nepal payment gateway response parser is not configured yet.'\n  }\n}];"
+        },
+        "id": "50ee9107-26fe-492a-b8c8-b5b6401ac468",
+        "name": "🇳🇵 Parse Monetix Response [CONFIG REQUIRED]",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -2992,
+          1088
+        ]
+      },
+      {
+        "parameters": {
+          "content": "## 🇳🇵 MONETIX — CONFIGURATION PENDING\n\nFill these 3 nodes only when the technical documentation arrives:\n\n1. **🇳🇵 Build Monetix Request [CONFIG REQUIRED]**\n2. **🇳🇵 POST Monetix Payment [DISABLED - CONFIGURE]**\n3. **🇳🇵 Parse Monetix Response [CONFIG REQUIRED]**\n\nCurrent Nepal branch is safe: it cannot send a live payment request.",
+          "height": 280,
+          "width": 560,
+          "color": 5
+        },
+        "id": "cfbb2ae7-378b-4fb3-9994-79ff6b38faca",
+        "name": "📌 Monetix Setup Pending",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -3504,
+          1360
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "44a3a075-4c7a-479f-ace5-0a477c78272f",
+        "name": "🔐 Login LeadStudio (WF7)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -1776,
+          720
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/leads/' + ($('🔗 Reattach Context After SMS').first().json.lead_id) + '/followups' }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $json.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ type: 'NOTE', notes: `Payment link sent — ${$('🔗 Reattach Context After SMS').first().json.currency} ${$('🔗 Reattach Context After SMS').first().json.amount} via ${$('🔗 Reattach Context After SMS').first().json.payment_provider}. Order: ${$('🔗 Reattach Context After SMS').first().json.out_trade_no}` }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "22db7890-6962-4a83-b616-b4d7f9f51790",
+        "name": "📝 POST Followup — Payment Link Sent",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -1536,
+          720
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "e6f1ae43-38b7-4a78-90c6-87247451c7b0",
+        "name": "🔐 Login LeadStudio (WF7-Fail)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -2496,
+          1136
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/leads/' + $('Payment Success?').item.json.lead_id + '/followups' }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $json.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ type: 'NOTE', notes: `Payment link FAILED — ${$json.payment_provider || 'unknown provider'}: ${$json.reason || 'unknown error'}` }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "ade3849d-9035-4d31-9fab-679769f1d3f0",
+        "name": "📝 POST Followup — Payment Link Failed",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -2256,
+          1136
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "url": "http://api2.santo.cc/submit",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "command",
+                "value": "MT_REQUEST"
+              },
+              {
+                "name": "cpid",
+                "value": "zUg8Dhgb"
+              },
+              {
+                "name": "cppwd",
+                "value": "vduAtccg"
+              },
+              {
+                "name": "da",
+                "value": "={{ $('⚙️ Parse Callback1').first().json.phone }}"
+              },
+              {
+                "name": "sm",
+                "value": "=Capital Atlantis: Payment of Rs{{ $('⚙️ Parse Callback1').first().json.money }} confirmed! Trading account active. Login: crm.capitalatlantis.net"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "text"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "d9688990-1713-493d-94b9-3c15749d8a5f",
+        "name": "📲 Send SMS Confirmation",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1472,
+          896
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "okpay-callback",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "caa2fbd4-975c-44e0-8401-6eb28f93c8a1",
+        "name": "📥 OkPay Callback Webhook1",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          208,
+          1120
+        ],
+        "webhookId": "e9cfe8dc-d32e-4f21-9da6-1ed63384da8f"
+      },
+      {
+        "parameters": {
+          "respondWith": "text",
+          "responseBody": "SUCCESS",
+          "options": {}
+        },
+        "id": "abd8b357-d5b9-42ad-acb0-abb1b8516c63",
+        "name": "✅ Respond SUCCESS1",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          416,
+          976
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const raw = $input.first().json;\nconst b = raw.body || raw;\n\n// OkPay sends flat form fields\nconst status     = String(b.status || b.trade_status || '').toUpperCase();\nconst money      = String(b.money || b.amount || '');\nconst outTradeNo = String(b.out_trade_no || '');\nconst transId    = String(b.transaction_id || b.transactionId || b.trade_no || '');\nconst attach     = String(b.attach || ''); // echoed lead_id\nconst phone      = String(b.phone || '').replace(/[^0-9]/g, '');\nconst mchId      = String(b.mchId || b.mch_id || '');\n\nconsole.log('📥 OkPay callback | status:', status, '| money:', money, '| out_trade_no:', outTradeNo, '| attach:', attach);\n\n// OkPay success statuses\nconst isPaid = status === 'SUCCESS' || status === 'PAID' || status === '1' || status === 'COMPLETED';\n\nif (!isPaid) {\n  console.log('⚠️ Payment not successful, status:', status);\n  return [{ json: { isPaid: false, status, outTradeNo, transId } }];\n}\n\n// Extract lead_id from attach or out_trade_no\nlet leadId = attach || outTradeNo;\n\nreturn [{ json: {\n  isPaid: true,\n  status,\n  money,\n  outTradeNo,\n  transId,\n  leadId,\n  phone,\n  mchId,\n  raw: b\n}}];"
+        },
+        "id": "e224af01-0e96-4ffb-a8c1-707c37fd8977",
+        "name": "⚙️ Parse Callback1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          416,
+          1120
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "paid-check",
+                "leftValue": "={{ $json.isPaid }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "0a944ebb-5670-4f41-b2c0-1622c40a5d98",
+        "name": "💰 Payment Successful?1",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          640,
+          1120
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const sms = $('📲 Send SMS Confirmation').first().json;\nconst ctx = $('⚙️ Parse Callback1').first().json;\nconsole.log('✅ Payment processed | money:', ctx.money, '| txn:', ctx.transId, '| sms_http:', sms.statusCode);\nreturn [{ json: {\n  status: 'PROCESSED',\n  money: ctx.money,\n  transId: ctx.transId,\n  outTradeNo: ctx.outTradeNo,\n  sms_status: sms.statusCode\n}}];"
+        },
+        "id": "37af9930-1fe8-4d04-83f8-08c935637b7d",
+        "name": "📝 Log Success1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1696,
+          1056
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const ctx = $input.first().json;\nconsole.log('⚠️ Payment not successful | status:', ctx.status, '| order:', ctx.outTradeNo);\nreturn [{ json: { status: 'SKIPPED', reason: ctx.status } }];"
+        },
+        "id": "a03c5e35-74ee-4405-9dfb-24c29c0a11d2",
+        "name": "📝 Log Skipped1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          864,
+          1280
+        ]
+      },
+      {
+        "parameters": {
+          "content": "Este WF permanece compartido porque actualiza `conversions`, no las pestañas `leads`.\n\nMientras Nepal payment está bloqueado en WF7, este callback procesa únicamente pagos emitidos por la ruta India existente. No requiere duplicar una pestaña por país.",
+          "height": 250,
+          "width": 620,
+          "color": 5
+        },
+        "id": "a97f64bf-2b3e-471f-9579-970855317df8",
+        "name": "🌍 Payment Callback",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          448,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "ec764d35-bdf0-479f-a483-2944590c1bd5",
+        "name": "🔐 Login LeadStudio (WF8)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1920,
+          1056
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/leads/' + ($('⚙️ Parse Callback1').first().json.leadId) + '/followups' }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $json.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ type: 'NOTE', notes: `Payment CONFIRMED — amount ${$('⚙️ Parse Callback1').first().json.money}. Txn: ${$('⚙️ Parse Callback1').first().json.transId}. Order: ${$('⚙️ Parse Callback1').first().json.outTradeNo}` }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "6a6d743d-c5c1-4132-97a6-b18f17dffc1c",
+        "name": "📝 POST Followup — Payment Confirmed",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2144,
+          1056
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "url": "http://api2.santo.cc/submit",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "command",
+                "value": "MT_REQUEST"
+              },
+              {
+                "name": "cpid",
+                "value": "zUg8Dhgb"
+              },
+              {
+                "name": "cppwd",
+                "value": "vduAtccg"
+              },
+              {
+                "name": "da",
+                "value": "={{ $('Guard + Build Order').item.json.phone }}"
+              },
+              {
+                "name": "sm",
+                "value": "={{ $json.message_to_user }}"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "text"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "735d12cd-578c-4b4b-98fa-0c08be706569",
+        "name": "📲 Send SMS Failed",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -976,
+          896
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000,
+        "continueOnFail": true
+      }
+    ],
+    "connections": {
+      "📲 ElevenLabs Webhook India": {
+        "main": [
+          [
+            {
+              "node": "✅ Respond ",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "🔧 Parse Webhook Input1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📲 ElevenLabs Webhook Nepal": {
+        "main": [
+          [
+            {
+              "node": "✅ Respond ",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "🔧 Parse Webhook Input1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔧 Parse Webhook Input1": {
+        "main": [
+          [
+            {
+              "node": "Guard + Build Order",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Guard + Build Order": {
+        "main": [
+          [
+            {
+              "node": "Guard passed?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Guard passed?": {
+        "main": [
+          [
+            {
+              "node": "🌍 Payment Provider Router",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "⛔ Refuse Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "⛔ Refuse Response": {
+        "main": [
+          [
+            {
+              "node": "🤖 Respond to AI",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🌍 Payment Provider Router": {
+        "main": [
+          [
+            {
+              "node": "🇮🇳 Build OkPay Signed Request",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "🇳🇵 Build Monetix Request [CONFIG REQUIRED]",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🇮🇳 Build OkPay Signed Request": {
+        "main": [
+          [
+            {
+              "node": "🇮🇳 POST OkPay /v1/Collect",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🇮🇳 POST OkPay /v1/Collect": {
+        "main": [
+          [
+            {
+              "node": "🇮🇳 Parse OkPay Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🇮🇳 Parse OkPay Response": {
+        "main": [
+          [
+            {
+              "node": "Payment Success?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🇳🇵 Build Monetix Request [CONFIG REQUIRED]": {
+        "main": [
+          [
+            {
+              "node": "🇳🇵 POST Monetix Payment [DISABLED - CONFIGURE]",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🇳🇵 POST Monetix Payment [DISABLED - CONFIGURE]": {
+        "main": [
+          [
+            {
+              "node": "🇳🇵 Parse Monetix Response [CONFIG REQUIRED]",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🇳🇵 Parse Monetix Response [CONFIG REQUIRED]": {
+        "main": [
+          [
+            {
+              "node": "Payment Success?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Payment Success?": {
+        "main": [
+          [
+            {
+              "node": "💬 Prepare SMS Message",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "🔐 Login LeadStudio (WF7-Fail)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "💬 Prepare SMS Message": {
+        "main": [
+          [
+            {
+              "node": "📲 Send SMS Link",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📲 Send SMS Link": {
+        "main": [
+          [
+            {
+              "node": "🔗 Reattach Context After SMS",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔗 Reattach Context After SMS": {
+        "main": [
+          [
+            {
+              "node": "🔐 Login LeadStudio (WF7)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔐 Login LeadStudio (WF7)": {
+        "main": [
+          [
+            {
+              "node": "📝 POST Followup — Payment Link Sent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📝 POST Followup — Payment Link Sent": {
+        "main": [
+          [
+            {
+              "node": "🤖 Respond to AI",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔐 Login LeadStudio (WF7-Fail)": {
+        "main": [
+          [
+            {
+              "node": "📝 POST Followup — Payment Link Failed",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📝 POST Followup — Payment Link Failed": {
+        "main": [
+          [
+            {
+              "node": "🤖 Respond to AI",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📲 Send SMS Confirmation": {
+        "main": [
+          [
+            {
+              "node": "📝 Log Success1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📥 OkPay Callback Webhook1": {
+        "main": [
+          [
+            {
+              "node": "✅ Respond SUCCESS1",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "⚙️ Parse Callback1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "⚙️ Parse Callback1": {
+        "main": [
+          [
+            {
+              "node": "💰 Payment Successful?1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "💰 Payment Successful?1": {
+        "main": [
+          [
+            {
+              "node": "📲 Send SMS Confirmation",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "📝 Log Skipped1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📝 Log Success1": {
+        "main": [
+          [
+            {
+              "node": "🔐 Login LeadStudio (WF8)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔐 Login LeadStudio (WF8)": {
+        "main": [
+          [
+            {
+              "node": "📝 POST Followup — Payment Confirmed",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🤖 Respond to AI": {
+        "main": [
+          [
+            {
+              "node": "📲 Send SMS Failed",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Land Market",
+    "name": null,
+    "description": null,
+    "autosaved": true,
+    "createdAt": "2026-09-18T08:21:43.136Z",
+    "updatedAt": "2026-09-18T08:21:43.136Z",
+    "workflowPublishHistory": [
+      {
+        "id": 1856,
+        "workflowId": "442FDm64j2YTx9mW",
+        "versionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-18T08:23:12.723Z"
+      },
+      {
+        "id": 1878,
+        "workflowId": "442FDm64j2YTx9mW",
+        "versionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+        "event": "deactivated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-18T13:30:10.425Z"
+      },
+      {
+        "id": 1970,
+        "workflowId": "442FDm64j2YTx9mW",
+        "versionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-22T06:33:49.865Z"
+      },
+      {
+        "id": 1901,
+        "workflowId": "442FDm64j2YTx9mW",
+        "versionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-21T06:30:07.947Z"
+      },
+      {
+        "id": 1919,
+        "workflowId": "442FDm64j2YTx9mW",
+        "versionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+        "event": "deactivated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-21T08:13:48.613Z"
+      },
+      {
+        "id": 1920,
+        "workflowId": "442FDm64j2YTx9mW",
+        "versionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-21T08:13:48.647Z"
+      },
+      {
+        "id": 1928,
+        "workflowId": "442FDm64j2YTx9mW",
+        "versionId": "42fbd391-8ad3-4cf7-8cff-93774036dc50",
+        "event": "deactivated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-21T13:30:12.606Z"
+      }
+    ]
+  }
+}

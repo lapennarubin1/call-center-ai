@@ -1,0 +1,517 @@
+{
+  "id": "ZAduHUfEFXVylR6B",
+  "name": "WF15 - Sync Stringee Call Log (MySQL)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-11T08:16:33.823Z",
+  "updatedAt": "2026-09-15T15:59:25.961Z",
+  "isArchived": false,
+  "versionId": "a0c8ff98-546a-4d4e-bd29-92e99835ed2c",
+  "versionCounter": 24,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT call_id, lead_id, country, phone FROM stringee_calls WHERE answered=0 AND sheet_synced=0 AND lead_id IS NOT NULL AND lead_id != '';",
+        "options": {}
+      },
+      "id": "41648c0e-bf90-4c9c-a779-e00a1efba0c6",
+      "name": "🔍 Buscar no contestadas sin sincronizar",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4112,
+        432
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-lead",
+              "leftValue": "={{ $json.lead_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "269a0409-b19f-43b9-9f0e-191052b9aaff",
+      "name": "🔍 Tiene lead_id?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4352,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cada fila que llega acá es una llamada de Stringee NO contestada,\n// con lead_id ya resuelto (viene de la query MySQL previa) y todavía\n// sin marcar como sincronizada al Sheet (sheet_synced=0).\n// Prepara los campos para \"Update Lead in Sheet\" — status=DIAL_FAILED\n// deja que el cooldown de 5min que YA tiene WF2 (Normalize & Select1)\n// la reintente solo, sin tocar WF2.\nconst items = $input.all();\nconst out = [];\n\nfor (const it of items) {\n  const r = it.json;\n  if (!r.lead_id) continue;\n  out.push({ json: {\n    lead_id: String(r.lead_id),\n    status: 'DIAL_FAILED',\n    last_call_status: 'STRINGEE_NO_ANSWER',\n    notes: '🔴 Stringee: no contestada (call_id ' + r.call_id + ')',\n    last_call_time: new Date().toISOString(),\n    _call_id: r.call_id\n  }});\n}\n\nconsole.log('Stringee no-contestadas a reportar al Sheet: ' + out.length);\nreturn out;\n"
+      },
+      "id": "02e7827b-88fd-46c2-bbec-d3b7044aa6f0",
+      "name": "⚙️ Preparar update Sheet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4592,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "status": "={{ $json.status }}",
+            "last_call_status": "={{ $json.last_call_status }}",
+            "notes": "={{ $json.notes }}",
+            "last_call_time": "={{ $json.last_call_time }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_call_status",
+              "displayName": "last_call_status",
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_call_time",
+              "displayName": "last_call_time",
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "524e4256-22bf-487d-aa5f-852b0615d73d",
+      "name": "📊 Update Lead in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4832,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Después de actualizar el Sheet con éxito, marca estas llamadas como\n// sheet_synced=1 para no volver a procesarlas en la próxima corrida\n// (WF15 corre cada 10 min con ventana de 20 min — se solapan a propósito).\n// Referencia directa al nodo que armó los call_id — mismo patrón que\n// WF2/WF9 ya usan ($('NodeName').all()), sin depender de static data.\nconst items = $('⚙️ Preparar update Sheet').all();\nconst callIds = items.map(it => it.json._call_id).filter(Boolean);\n\nif (!callIds.length) {\n  console.log('Nada que marcar como sincronizado');\n  return [];\n}\n\nfunction esc(v) {\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nconst inList = callIds.map(esc).join(',');\nconst sql = `UPDATE stringee_calls SET sheet_synced=1 WHERE call_id IN (${inList});`;\nconsole.log('Marcando ' + callIds.length + ' llamada(s) como sheet_synced=1');\nreturn [{ json: { sql } }];\n"
+      },
+      "id": "09381525-6637-4b2b-909c-2207509358a4",
+      "name": "⚙️ Preparar marcar sincronizado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5072,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "3c93ea6a-7b86-48da-acd0-1e4c433a2f04",
+      "name": "✅ Marcar sincronizado",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        5312,
+        384
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "b7fb45ae-fe1b-436b-a797-636e2ab946bb",
+      "name": "⏰ Cada 10 minutos1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        3152,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://172.18.0.1:8091/call-log",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "200"
+            },
+            {
+              "name": "from_start_time",
+              "value": "={{ Math.floor((Date.now() - 20*60*1000) / 1000) }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "96508baa-b7bb-438f-b262-732ad06a85df",
+      "name": "📞 GET Call Log (Stringee Worker)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3392,
+        224
+      ],
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Toma la respuesta de /call-log del worker Stringee y arma INSERTs en lotes.\n// Cruza to_number contra panel_leads (por los últimos 10 dígitos) para sacar lead_id.\n// No depende de WF2 ni WF9 — es 100% independiente, lee directo del Call Log de Stringee.\nfunction esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction escNum(v) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : 0;\n}\nfunction detectCountry(phone) {\n  const p = String(phone || '').replace(/[^0-9]/g, '');\n  if (p.startsWith('977')) return 'nepal';\n  if (p.startsWith('91'))  return 'india';\n  if (p.startsWith('52'))  return 'mexico';\n  return 'unknown';\n}\n\nconst data = $input.all()[0]?.json || {};\nconst calls = (data.data && data.data.calls) || [];\n\nif (!calls.length) {\n  console.log('Sin llamadas nuevas');\n  return [];\n}\n\nconst rows = calls.map(c => {\n  const toNumber = String(c.to_number || '').replace(/[^0-9]/g, '');\n  return {\n    call_id: String(c.id || ''),\n    phone: toNumber,\n    country: detectCountry(toNumber),\n    answered: Number(c.answer_time) > 0 ? 1 : 0,\n    duration_secs: Number(c.answer_duration || 0),\n    start_time: Number(c.start_time || 0),\n    answer_time: Number(c.answer_time || 0),\n    stop_time: Number(c.stop_time || 0)\n  };\n}).filter(r => r.call_id);\n\nconst BATCH = 200;\nconst out = [];\nfor (let i = 0; i < rows.length; i += BATCH) {\n  const chunk = rows.slice(i, i + BATCH);\n  const values = chunk.map(r => {\n    const last10 = r.phone.slice(-10);\n    const leadSub = last10\n      ? `(SELECT lead_id FROM panel_leads WHERE RIGHT(phone,10)=${esc(last10)} LIMIT 1)`\n      : 'NULL';\n    return '(' + [\n      esc(r.call_id), leadSub, esc(r.phone), esc(r.country),\n      escNum(r.answered), escNum(r.duration_secs),\n      escNum(r.start_time), escNum(r.answer_time), escNum(r.stop_time)\n    ].join(',') + ')';\n  }).join(',\\n');\n\n  const sql = `INSERT INTO stringee_calls\n    (call_id, lead_id, phone, country, answered, duration_secs, start_time, answer_time, stop_time)\n    VALUES\n${values}\n    ON DUPLICATE KEY UPDATE\n      lead_id=VALUES(lead_id), country=VALUES(country), answered=VALUES(answered),\n      duration_secs=VALUES(duration_secs), answer_time=VALUES(answer_time), stop_time=VALUES(stop_time);`;\n\n  out.push({ json: { sql, batch_size: chunk.length } });\n}\n\nconsole.log('Stringee: ' + rows.length + ' llamadas -> ' + out.length + ' lote(s)');\nreturn out;\n"
+      },
+      "id": "321ecd6e-4e13-43f2-a464-9033d7373db8",
+      "name": "⚙️ Normalizar + construir SQL1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3632,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {
+          "queryBatching": "transaction"
+        }
+      },
+      "id": "495e462e-1dac-4b4f-b946-a5de0126f5ae",
+      "name": "💾 Guardar en MySQL1",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        3872,
+        224
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nlet total = 0;\nfor (const it of items) {\n  total += Number(it.json.batch_size || 0);\n}\nconsole.log('Stringee calls sincronizadas: ' + total + ' fila(s) en ' + items.length + ' lote(s)');\nreturn [{ json: { synced_rows: total, batches: items.length, synced_at: new Date().toISOString() } }];\n"
+      },
+      "id": "0513d269-3dbc-4fb3-8d4e-a57678d91ce4",
+      "name": "📝 Log resultado1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4112,
+        224
+      ]
+    }
+  ],
+  "connections": {
+    "🔍 Buscar no contestadas sin sincronizar": {
+      "main": [
+        [
+          {
+            "node": "🔍 Tiene lead_id?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Tiene lead_id?": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Preparar update Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Preparar update Sheet": {
+      "main": [
+        [
+          {
+            "node": "📊 Update Lead in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Update Lead in Sheet": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Preparar marcar sincronizado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Preparar marcar sincronizado": {
+      "main": [
+        [
+          {
+            "node": "✅ Marcar sincronizado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Cada 10 minutos1": {
+      "main": [
+        [
+          {
+            "node": "📞 GET Call Log (Stringee Worker)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📞 GET Call Log (Stringee Worker)1": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalizar + construir SQL1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔍 Buscar no contestadas sin sincronizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalizar + construir SQL1": {
+      "main": [
+        [
+          {
+            "node": "💾 Guardar en MySQL1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Guardar en MySQL1": {
+      "main": [
+        [
+          {
+            "node": "📝 Log resultado1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:⏰ Cada 10 minutos": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    },
+    "node:⏰ Cada 10 minutos1": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    },
+    "node:⚙️ Preparar update Sheet": {
+      "callIds": [
+        "call-vn-1-XEDFQYMN5C-1787221010824",
+        "call-vn-1-XEDFQYMN5C-1787221010498",
+        "call-vn-1-XEDFQYMN5C-1787221010238",
+        "call-vn-1-XEDFQYMN5C-1787221009822",
+        "call-vn-1-XEDFQYMN5C-1787221009490",
+        "call-vn-1-XEDFQYMN5C-1787221009123",
+        "call-vn-1-XEDFQYMN5C-1787221008477",
+        "call-vn-1-XEDFQYMN5C-1787221007695",
+        "call-vn-1-XEDFQYMN5C-1787221006933",
+        "call-vn-1-XEDFQYMN5C-1787221006499",
+        "call-vn-1-XEDFQYMN5C-1787221006055",
+        "call-vn-1-XEDFQYMN5C-1787221005250",
+        "call-vn-1-XEDFQYMN5C-1787221004481",
+        "call-vn-1-XEDFQYMN5C-1787221003987",
+        "call-vn-1-XEDFQYMN5C-1787221003559",
+        "call-vn-1-XEDFQYMN5C-1787221003141",
+        "call-vn-1-XEDFQYMN5C-1787221002687",
+        "call-vn-1-XEDFQYMN5C-1787221001796",
+        "call-vn-1-XEDFQYMN5C-1787221000849",
+        "call-vn-1-XEDFQYMN5C-1787221000403",
+        "call-vn-1-XEDFQYMN5C-1787221000000",
+        "call-vn-1-XEDFQYMN5C-1787220999486",
+        "call-vn-1-XEDFQYMN5C-1787220999038",
+        "call-vn-1-XEDFQYMN5C-1787220998559",
+        "call-vn-1-XEDFQYMN5C-1787220997086",
+        "call-vn-1-XEDFQYMN5C-1787220996569",
+        "call-vn-1-XEDFQYMN5C-1787220996098",
+        "call-vn-1-XEDFQYMN5C-1787220995195",
+        "call-vn-1-XEDFQYMN5C-1787220994119",
+        "call-vn-1-XEDFQYMN5C-1787220993624",
+        "call-vn-1-XEDFQYMN5C-1787220508806",
+        "call-vn-1-XEDFQYMN5C-1787220507305",
+        "call-vn-1-XEDFQYMN5C-1787220504521",
+        "call-vn-1-XEDFQYMN5C-1787220503043",
+        "call-vn-1-XEDFQYMN5C-1787220501496",
+        "call-vn-1-XEDFQYMN5C-1787220500141",
+        "call-vn-1-XEDFQYMN5C-1787220497470",
+        "call-vn-1-XEDFQYMN5C-1787220495939",
+        "call-vn-1-XEDFQYMN5C-1787220494398",
+        "call-vn-1-XEDFQYMN5C-1787220492904",
+        "call-vn-1-XEDFQYMN5C-1787220491458",
+        "call-vn-1-XEDFQYMN5C-1787220490021",
+        "call-vn-1-XEDFQYMN5C-1787220488454",
+        "call-vn-1-XEDFQYMN5C-1787220486964",
+        "call-vn-1-XEDFQYMN5C-1787220485512",
+        "call-vn-1-XEDFQYMN5C-1787220482722",
+        "call-vn-1-XEDFQYMN5C-1787219929694",
+        "call-vn-1-XEDFQYMN5C-1787219901393",
+        "call-vn-1-XEDFQYMN5C-1787219876104",
+        "call-vn-1-XEDFQYMN5C-1787219862991",
+        "call-vn-1-XEDFQYMN5C-1787219856615",
+        "call-vn-1-XEDFQYMN5C-1787219846364"
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "ZAduHUfEFXVylR6B",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-11T08:16:33.823Z",
+      "updatedAt": "2026-09-11T08:16:33.823Z"
+    }
+  ],
+  "activeVersion": null
+}

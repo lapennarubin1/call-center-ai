@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Panel · Support{% endblock %}
+
+{% block content %}
+
+{% if error %}
+<p class="notice stale-warn">{{ error }}</p>
+{% endif %}
+{% if ok %}
+<p class="notice" style="border-left-color: var(--ok); background:#12392C; color: var(--ink-2)">{{ ok }}</p>
+{% endif %}
+
+<p class="cap" style="margin: 0 0 16px">
+  Open a new account for a client reached by phone, or send a payment link to an existing one.
+</p>
+
+<div class="grid-2">
+
+  <!-- ══ APERTURA DE CUENTA ══════════════════════════════════════════ -->
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">New client</span><h2>Open account</h2></div>
+    </header>
+    <form method="post" action="/support/account-open">
+      <div class="field">
+        <label for="oa-country">Country</label>
+        <select id="oa-country" name="country" required>
+          {% for code, label in countries %}
+            <option value="{{ code }}" {{ 'disabled' if not webhooks.get(code, {}).get('account_open') }}>
+              {{ label }}{{ ' — coming soon' if not webhooks.get(code, {}).get('account_open') }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="oa-name">Full name</label>
+        <input id="oa-name" name="full_name" placeholder="Client's full name" required>
+      </div>
+      <div class="field">
+        <label for="oa-phone">Phone</label>
+        <input id="oa-phone" name="phone" placeholder="With country code, e.g. 919812345678" required
+               pattern="[0-9]{8,15}" title="Digits only, with country code, no + or spaces">
+      </div>
+      <button type="submit" class="btn">Create account</button>
+    </form>
+    <p class="cap" style="margin-top:12px">
+      If this phone already has an account, the existing credentials are simply resent by SMS.
+    </p>
+  </section>
+
+  <!-- ══ PAYMENT LINK ════════════════════════════════════════════════ -->
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">Existing client</span><h2>Send payment link</h2></div>
+    </header>
+    <form method="post" action="/support/payment-link">
+      <div class="field">
+        <label for="pl-country">Country</label>
+        <select id="pl-country" name="country" required>
+          {% for code, label in countries %}
+            <option value="{{ code }}" {{ 'disabled' if not webhooks.get(code, {}).get('payment_link') }}>
+              {{ label }} ({{ webhooks.get(code, {}).get('currency', '') }}){{ ' — coming soon' if not webhooks.get(code, {}).get('payment_link') }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="pl-phone">Phone</label>
+        <input id="pl-phone" name="phone" placeholder="Must already have an account" required
+               pattern="[0-9]{8,15}" title="Digits only, with country code">
+      </div>
+      <div class="field">
+        <label for="pl-name">Full name <span style="text-transform:none; letter-spacing:0">(optional)</span></label>
+        <input id="pl-name" name="full_name" placeholder="Client's full name">
+      </div>
+      <div class="field">
+        <label for="pl-amount">Amount</label>
+        <input id="pl-amount" name="amount" type="number" step="1" min="1" placeholder="e.g. 2500" required>
+      </div>
+      <button type="submit" class="btn">Send payment link</button>
+    </form>
+    <p class="cap" style="margin-top:12px">
+      India minimum is 2000 INR. The phone must already be registered — if not, open the account first.
+    </p>
+  </section>
+
+</div>
+
+{% if settings %}
+<!-- ══ TELEGRAM (solo master) ═════════════════════════════════════════ -->
+<section class="panel" style="margin-top: 16px">
+  <header class="panel-head">
+    <div><span class="eyebrow">Master only</span><h2>Telegram bot</h2></div>
+  </header>
+  <p class="cap" style="margin-bottom:12px">
+    Create a bot with @BotFather in Telegram and paste the token below. Support can then use:<br>
+    <code>/newaccount India Juan Perez 919812345678</code> &nbsp;·&nbsp; <code>/paymentlink India 919812345678 2500</code>
+  </p>
+  <form method="post" action="/support/settings">
+    <div class="field" style="max-width:480px">
+      <label for="tg-token">Bot token</label>
+      <input id="tg-token" name="telegram_bot_token" placeholder="From @BotFather" value="{{ settings.telegram_bot_token or '' }}">
+    </div>
+    <div class="field" style="max-width:480px">
+      <label for="tg-wl">Allowed chat IDs / usernames</label>
+      <input id="tg-wl" name="telegram_chat_whitelist" placeholder="e.g. 123456789, @juansupport" value="{{ settings.telegram_chat_whitelist or '' }}">
+    </div>
+    <button type="submit" class="btn">Save Telegram settings</button>
+  </form>
+</section>
+{% endif %}
+
+<!-- ══ HISTORIAL ═══════════════════════════════════════════════════ -->
+<section class="panel" style="margin-top: 16px">
+  <header class="panel-head">
+    <div><span class="eyebrow">Audit</span><h2>Recent actions</h2></div>
+  </header>
+  {% if actions %}
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr><th>When</th><th>By</th><th>Country</th><th>Action</th><th>Phone</th><th>Name</th><th>Amount</th><th>Result</th></tr>
+      </thead>
+      <tbody>
+        {% for a in actions %}
+        <tr>
+          <td class="mono">{{ a.created_at }}</td>
+          <td>{{ a.actor }}</td>
+          <td>{{ a.country|capitalize }}</td>
+          <td>{{ 'Account opened' if a.action == 'account_open' else 'Payment link' }}</td>
+          <td class="mono">{{ a.phone }}</td>
+          <td>{{ a.full_name }}</td>
+          <td>{{ a.amount ~ ' ' ~ a.currency if a.amount else '—' }}</td>
+          <td>
+            {% if a.result == 'ok' %}<span class="pill good">ok</span>
+            {% else %}<span class="pill mid" title="{{ a.detail }}">error</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No actions logged yet.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

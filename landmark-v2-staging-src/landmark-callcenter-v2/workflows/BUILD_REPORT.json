@@ -1,0 +1,58 @@
+[
+  {
+    "workflow": "TEMPLATE_FOLLOWUP_ENGINE_V2",
+    "file": "TEMPLATE_FOLLOWUP_ENGINE_V2.json",
+    "nodes": 60,
+    "sticky_notes": 11,
+    "connections": 63,
+    "issues": []
+  },
+  {
+    "workflow": "TEMPLATE_WF2_CALL_DISPATCHER_V2",
+    "file": "TEMPLATE_WF2_CALL_DISPATCHER_V2.json",
+    "nodes": 58,
+    "sticky_notes": 14,
+    "connections": 62,
+    "issues": []
+  },
+  {
+    "workflow": "TEMPLATE_WF9_POST_CALL_HANDLER_V2",
+    "file": "TEMPLATE_WF9_POST_CALL_HANDLER_V2.json",
+    "nodes": 27,
+    "sticky_notes": 8,
+    "connections": 27,
+    "issues": []
+  },
+  {
+    "workflow": "TEMPLATE_WF3_ACCOUNT_CREATION_V2",
+    "file": "TEMPLATE_WF3_ACCOUNT_CREATION_V2.json",
+    "nodes": 38,
+    "sticky_notes": 9,
+    "connections": 47,
+    "issues": []
+  },
+  {
+    "workflow": "TEMPLATE_WF7_8_PAYMENT_CALLBACK_V2",
+    "file": "TEMPLATE_WF7_8_PAYMENT_CALLBACK_V2.json",
+    "nodes": 55,
+    "sticky_notes": 9,
+    "connections": 62,
+    "issues": []
+  },
+  {
+    "workflow": "TEMPLATE_WF10_RECORDINGS_V2",
+    "file": "TEMPLATE_WF10_RECORDINGS_V2.json",
+    "nodes": 34,
+    "sticky_notes": 8,
+    "connections": 38,
+    "issues": []
+  },
+  {
+    "workflow": "TEMPLATE_WF14_RECONCILIATION_ANALYTICS_V2",
+    "file": "TEMPLATE_WF14_RECONCILIATION_ANALYTICS_V2.json",
+    "nodes": 27,
+    "sticky_notes": 10,
+    "connections": 26,
+    "issues": []
+  }
+]

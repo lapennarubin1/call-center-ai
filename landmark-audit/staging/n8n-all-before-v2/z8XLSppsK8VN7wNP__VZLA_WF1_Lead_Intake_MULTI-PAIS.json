@@ -1,0 +1,1380 @@
+{
+  "id": "z8XLSppsK8VN7wNP",
+  "name": "VZLA WF1 Lead Intake MULTI-PAIS",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-07-29T07:15:58.987Z",
+  "updatedAt": "2026-08-18T07:28:10.210Z",
+  "isArchived": true,
+  "versionId": "dc544c2b-a4a6-4d7e-8738-428c323a71e2",
+  "versionCounter": 18,
+  "sourceWorkflowId": null,
+  "triggerCount": 2,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1649e188-f512-44c4-96c7-ef2d29c59f30",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -672,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 580397522,
+          "mode": "list",
+          "cachedResultName": "leads_colombia",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit#gid=580397522"
+        },
+        "options": {}
+      },
+      "name": "Read Colombia",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -288,
+        128
+      ],
+      "id": "72653edc-189d-40df-93ee-9066c387fb70",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads_venezuela",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit#gid=210138417"
+        },
+        "options": {}
+      },
+      "name": "Read Venezuela1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -288,
+        -288
+      ],
+      "id": "20cebfd7-18a9-4613-87f1-b23ab30298b9",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1546432888,
+          "mode": "list",
+          "cachedResultName": "leads_mexico",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit#gid=1546432888"
+        },
+        "options": {}
+      },
+      "name": "Read Mexico1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -288,
+        -96
+      ],
+      "id": "049bb3e1-3692-4715-85b4-1febf6984ae3",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "name": "Merge Leads1",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -80,
+        -192
+      ],
+      "id": "8fec4bcb-63d5-45a4-8477-2de0e257b9b8"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "name": "Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -528,
+        -304
+      ],
+      "id": "39bc8142-f371-4f70-86fc-68d0fb525074"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "363aee2b-5974-41f3-b084-239bed990a0a",
+        "options": {}
+      },
+      "name": "Manual Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        -96
+      ],
+      "webhookId": "363aee2b-5974-41f3-b084-239bed990a0a",
+      "id": "ab7d0a25-8d69-4155-a9b8-c4ffeef63b34"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick rows that need validation (status empty or PENDING_VALIDATION)\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  const status = String(r.status || '').trim().toUpperCase();\n  if (status === '' || status === 'PENDING_VALIDATION') out.push({ json: r });\n}\nreturn out;"
+      },
+      "name": "Filter Pending",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        -192
+      ],
+      "id": "da8a0532-00b3-4d8c-9008-1604dab3c20a"
+    },
+    {
+      "parameters": {
+        "jsCode": "const all = $('Merge Leads1').all().map(i => i.json);\nconst pending = $input.all().map(i => i.json);\n\nconst seenIds    = new Map();\nconst seenPhones = new Map();\nfor (const row of all) {\n  if (row.lead_id) seenIds.set(String(row.lead_id).trim(), row);\n  if (row.phone)   seenPhones.set(String(row.phone).trim(), row);\n}\n\n// Prefijos por pais para normalizar E.164\nconst COUNTRY_PREFIX = {\n  'venezuela': '+58', 'vzla': '+58', 've': '+58',\n  'mexico':    '+52', 'mx':   '+52',\n  'colombia':  '+57', 'co':   '+57',\n  'usa':       '+1',  'us':   '+1',\n  'spain':     '+34', 'es':   '+34',\n  'india':     '+91', 'in':   '+91',\n};\n\nconst out = [];\nfor (const c of pending) {\n  const errors   = [];\n  const fullName = String(c.full_name || '').trim();\n  const country  = String(c.country   || '').trim();\n  const leadId   = String(c.lead_id   || '').trim();\n\n  // Normalizar idioma: LATAM = es, India = hi, default es\n  let language = String(c.language || '').trim().toLowerCase();\n  const countryLow = country.toLowerCase();\n  if (!language || language === 'hi') {\n    if (['india','in'].includes(countryLow)) language = 'hi';\n    else language = 'es';\n  }\n\n  // Normalizar telefono E.164\n  let phone = String(c.phone || '').replace(/[^0-9+]/g, '');\n  if (phone && !phone.startsWith('+')) {\n    const prefix = COUNTRY_PREFIX[countryLow];\n    if (prefix) {\n      // Quitar el codigo de pais si ya viene pegado al numero\n      const prefixDigits = prefix.replace('+', '');\n      if (phone.startsWith(prefixDigits) && phone.length > prefixDigits.length + 6) {\n        phone = '+' + phone;\n      } else {\n        phone = prefix + phone;\n      }\n    } else if (phone.length >= 8 && phone.length <= 15) {\n      phone = '+' + phone;\n    }\n  }\n\n  // Validaciones\n  if (!leadId)   errors.push('missing lead_id');\n  if (!fullName) errors.push('missing full_name');\n  if (!phone)    errors.push('missing phone');\n  if (!country)  errors.push('missing country');\n  if (phone && !/^\\+[1-9]\\d{7,14}$/.test(phone)) errors.push('invalid phone format: ' + phone);\n\n  // Dedup\n  const isActive = (s) => s && !['', 'PENDING_VALIDATION', 'INVALID_LEAD'].includes(String(s).toUpperCase());\n  const dupId = seenIds.get(leadId);\n  const dupPh = seenPhones.get(phone);\n  if (dupId && isActive(dupId.status) && String(dupId.row_number || '') !== String(c.row_number || '')) {\n    errors.push('duplicate lead_id');\n  } else if (dupPh && isActive(dupPh.status) && String(dupPh.row_number || '') !== String(c.row_number || '')) {\n    errors.push('duplicate phone');\n  }\n\n  const valid = errors.length === 0;\n  out.push({ json: {\n    lead_id:   leadId,\n    phone,\n    full_name: fullName,\n    country,\n    language,\n    _valid:    valid,\n    _errors:   errors.join('; '),\n    status:    valid ? 'READY_TO_CALL' : 'INVALID_LEAD',\n    notes:     valid ? 'Validated OK' : ('VALIDATION FAIL: ' + errors.join('; '))\n  }});\n}\nreturn out;"
+      },
+      "name": "Validate + Dedup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -192
+      ],
+      "id": "3c826879-09cf-46b1-9a08-250b6df684f2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json._valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        384,
+        -192
+      ],
+      "id": "a1726e5a-7afd-4960-8360-706a26aa2f53"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ 'leads_' + ($json.country || 'venezuela').toLowerCase() }}",
+          "mode": "expression"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "call_trigger",
+              "displayName": "call_trigger",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "assigned_agent",
+              "displayName": "assigned_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_call_status",
+              "displayName": "last_call_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_call_time",
+              "displayName": "last_call_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "call_attempts",
+              "displayName": "call_attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "elevenlabs_call_id",
+              "displayName": "elevenlabs_call_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "interested",
+              "displayName": "interested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "callback_requested",
+              "displayName": "callback_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "callback_date",
+              "displayName": "callback_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution",
+              "displayName": "execution",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "_row_number",
+              "displayName": "_row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "_valid",
+              "displayName": "_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "_errors",
+              "displayName": "_errors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status_raw",
+              "displayName": "status_raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duration_secs",
+              "displayName": "duration_secs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "classification",
+              "displayName": "classification",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "from",
+              "displayName": "from",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "isFromMe",
+              "displayName": "isFromMe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "raw",
+              "displayName": "raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pushName",
+              "displayName": "pushName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "headers",
+              "displayName": "headers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "statusCode",
+              "displayName": "statusCode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "statusMessage",
+              "displayName": "statusMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Mark READY_TO_CALL",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        592,
+        -304
+      ],
+      "id": "09ed955f-654d-4eb8-ba0e-80f5be49b8e6",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ ({venezuela: 210138417, mexico: 1546432888, colombia: 580397522})[($json.country || 'venezuela').toLowerCase()] }}",
+          "mode": "expression"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "call_trigger",
+              "displayName": "call_trigger",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "assigned_agent",
+              "displayName": "assigned_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_call_status",
+              "displayName": "last_call_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_call_time",
+              "displayName": "last_call_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "call_attempts",
+              "displayName": "call_attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "elevenlabs_call_id",
+              "displayName": "elevenlabs_call_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "interested",
+              "displayName": "interested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "callback_requested",
+              "displayName": "callback_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "callback_date",
+              "displayName": "callback_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "execution",
+              "displayName": "execution",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_row_number",
+              "displayName": "_row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_valid",
+              "displayName": "_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_errors",
+              "displayName": "_errors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_raw",
+              "displayName": "status_raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "duration_secs",
+              "displayName": "duration_secs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "classification",
+              "displayName": "classification",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "from",
+              "displayName": "from",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "isFromMe",
+              "displayName": "isFromMe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "raw",
+              "displayName": "raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pushName",
+              "displayName": "pushName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "headers",
+              "displayName": "headers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "statusCode",
+              "displayName": "statusCode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "statusMessage",
+              "displayName": "statusMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Mark INVALID_LEAD",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        592,
+        -96
+      ],
+      "id": "b0850ee8-b80a-4cb0-8c5c-90cc03e8d4ee",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Log Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -496,
+        304
+      ],
+      "id": "fe4c1f18-a8a4-4146-a324-159b6a7f8a83",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Colombia": {
+      "main": [
+        [
+          {
+            "node": "Merge Leads1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Read Venezuela1": {
+      "main": [
+        [
+          {
+            "node": "Merge Leads1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Mexico1": {
+      "main": [
+        [
+          {
+            "node": "Merge Leads1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Leads1": {
+      "main": [
+        [
+          {
+            "node": "Filter Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 5 min": {
+      "main": [
+        [
+          {
+            "node": "Read Mexico1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Venezuela1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Colombia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read Mexico1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Venezuela1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Colombia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Pending": {
+      "main": [
+        [
+          {
+            "node": "Validate + Dedup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate + Dedup": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Mark READY_TO_CALL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark INVALID_LEAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Every 5 min1": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "id": "tge8Fb3bDa0wowvF",
+      "name": "wf1",
+      "createdAt": "2026-07-27T11:37:04.869Z",
+      "updatedAt": "2026-07-27T11:37:04.869Z"
+    },
+    {
+      "id": "EWlF9l3b9w6Vq3NA",
+      "name": "landmark",
+      "createdAt": "2026-07-27T09:29:13.383Z",
+      "updatedAt": "2026-07-27T09:29:13.383Z"
+    },
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "LismWLdOzwMudnEo",
+      "name": "compliant-v1",
+      "createdAt": "2026-07-27T09:29:13.400Z",
+      "updatedAt": "2026-07-27T09:29:13.400Z"
+    },
+    {
+      "id": "0cHA3q57oqQtIxKm",
+      "name": "wf1-validate",
+      "createdAt": "2026-07-27T11:37:04.865Z",
+      "updatedAt": "2026-07-27T11:37:04.865Z"
+    },
+    {
+      "id": "ZF3ImiIOdnoSG1Py",
+      "name": "hindi",
+      "createdAt": "2026-07-27T09:29:13.407Z",
+      "updatedAt": "2026-07-27T09:29:13.407Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "z8XLSppsK8VN7wNP",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-07-29T07:15:58.987Z",
+      "updatedAt": "2026-07-29T07:15:58.987Z"
+    }
+  ],
+  "activeVersion": null
+}

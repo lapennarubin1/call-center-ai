@@ -1,0 +1,597 @@
+[
+  {
+    "id": "1beExdhF284MuVYL",
+    "name": "VZLA WF3 - Atlantis Login + Account Creation (FINAL)",
+    "active": false,
+    "updatedAt": "2026-07-27T12:08:02.592Z",
+    "createdAt": "2026-07-27T11:58:55.739Z",
+    "tags": [
+      "call-center",
+      "wf3-atlantis"
+    ]
+  },
+  {
+    "id": "2xjFB1FVTKYBvszp",
+    "name": "WF14 - Sync Panel (Sheets → MySQL)",
+    "active": false,
+    "updatedAt": "2026-09-15T15:59:22.165Z",
+    "createdAt": "2026-08-06T13:31:27.129Z",
+    "tags": [
+      "panel",
+      "reporting"
+    ]
+  },
+  {
+    "id": "442FDm64j2YTx9mW",
+    "name": "WF7+WF8 MULTI-PAIS — Payment Link + Callback (100% LeadStudio API)",
+    "active": true,
+    "updatedAt": "2026-09-18T08:21:43.133Z",
+    "createdAt": "2026-09-16T12:13:23.412Z",
+    "tags": [
+      "landmark",
+      "compliant-v3"
+    ]
+  },
+  {
+    "id": "6ods2vlMKHhuhpQS",
+    "name": "INDIA + NEPAL WF3 — Account Creation (API LeadStudio + CashStudio)",
+    "active": true,
+    "updatedAt": "2026-09-16T11:43:41.330Z",
+    "createdAt": "2026-09-15T14:29:44.600Z",
+    "tags": [
+      "wf3-atlantis",
+      "call-center"
+    ]
+  },
+  {
+    "id": "94klx8IHXnwpP6pP",
+    "name": "WF5 - Sales Handoff & CRM v2 (VERIFIED)",
+    "active": false,
+    "updatedAt": "2026-08-19T07:20:05.448Z",
+    "createdAt": "2026-07-29T07:27:19.950Z",
+    "tags": [
+      "call-center",
+      "landmark",
+      "wf5",
+      "compliant-v1",
+      "wf5-handoff",
+      "hindi"
+    ]
+  },
+  {
+    "id": "AfB2HFXoRbKL2PBh",
+    "name": "WF3 - Atlantis Login + Account Creation (FINAL)",
+    "active": false,
+    "updatedAt": "2026-09-16T10:52:27.561Z",
+    "createdAt": "2026-09-16T10:52:10.626Z",
+    "tags": [
+      "call-center",
+      "wf3-atlantis"
+    ]
+  },
+  {
+    "id": "AHC6N5SdcyC5m9oG",
+    "name": "WF1 - Lead Intake & Validation v2 (VERIFIED)",
+    "active": false,
+    "updatedAt": "2026-08-31T09:27:24.113Z",
+    "createdAt": "2026-08-18T07:33:10.062Z",
+    "tags": [
+      "hindi",
+      "call-center",
+      "landmark",
+      "compliant-v1",
+      "wf1-validate",
+      "wf1"
+    ]
+  },
+  {
+    "id": "ap50YtvxxjErCPtq",
+    "name": "WF14 - CRM Sync (LeadStudio API → MySQL) + Stringee Call Log",
+    "active": true,
+    "updatedAt": "2026-09-18T08:19:58.089Z",
+    "createdAt": "2026-09-18T06:42:31.976Z",
+    "tags": []
+  },
+  {
+    "id": "BAUWo4DFV9qqyUMG",
+    "name": "WF8 - OkPay Payment Callback (SMS)",
+    "active": false,
+    "updatedAt": "2026-08-05T12:43:10.677Z",
+    "createdAt": "2026-07-29T07:30:11.175Z",
+    "tags": []
+  },
+  {
+    "id": "Bem8pAJ4gxZWrhDU",
+    "name": "WF2 UNIFICADO — Asterisk + Stringee (API LeadStudio, follow-up automático)",
+    "active": true,
+    "updatedAt": "2026-09-21T08:14:32.112Z",
+    "createdAt": "2026-09-15T10:06:45.696Z",
+    "tags": [
+      "wf2",
+      "DIAL-NOW-v5",
+      "wf2-unificado",
+      "landmark",
+      "call-center"
+    ]
+  },
+  {
+    "id": "CRbhC95Dkg1Mbs66",
+    "name": "WF3 - Atlantis Login + Account Creation DEALER",
+    "active": false,
+    "updatedAt": "2026-08-11T11:39:30.899Z",
+    "createdAt": "2026-07-29T07:22:46.609Z",
+    "tags": [
+      "wf3-atlantis",
+      "call-center"
+    ]
+  },
+  {
+    "id": "CxlzF4bGb95nEqXJ",
+    "name": "WF2 ElevenLabs Outbound v2 (VERIFIED)",
+    "active": false,
+    "updatedAt": "2026-09-10T06:34:33.194Z",
+    "createdAt": "2026-07-29T07:16:35.199Z",
+    "tags": [
+      "compliant-v1",
+      "wf2-v4",
+      "wf2",
+      "hindi",
+      "wf2-call",
+      "landmark",
+      "DIAL-NOW-v5",
+      "wf2-v3",
+      "call-center"
+    ]
+  },
+  {
+    "id": "DJ0IKlzohwndvRba",
+    "name": "INDIA MULTI-PAIS WF2 - ElevenLabs Outbound (India+Nepal+2 Slots)",
+    "active": false,
+    "updatedAt": "2026-09-07T09:14:43.699Z",
+    "createdAt": "2026-09-04T13:05:38.817Z",
+    "tags": [
+      "wf2-v4",
+      "DIAL-NOW-v5",
+      "landmark",
+      "call-center",
+      "compliant-v1",
+      "wf2",
+      "hindi",
+      "wf2-call",
+      "wf2-v3"
+    ]
+  },
+  {
+    "id": "E0ZBuDnTFwX9PeXt",
+    "name": "WF4 - Callback & Follow-up v2 (VERIFIED)",
+    "active": false,
+    "updatedAt": "2026-07-30T07:07:56.397Z",
+    "createdAt": "2026-07-29T07:23:13.588Z",
+    "tags": [
+      "wf4-callback",
+      "wf4",
+      "call-center",
+      "hindi"
+    ]
+  },
+  {
+    "id": "EILViUUYiG2ZL0Pf",
+    "name": "VZLA WF1 Lead Intake MULTI-PAIS",
+    "active": false,
+    "updatedAt": "2026-08-20T06:38:44.698Z",
+    "createdAt": "2026-07-27T11:37:06.500Z",
+    "tags": [
+      "hindi",
+      "compliant-v1",
+      "wf1-validate",
+      "wf1",
+      "landmark",
+      "call-center"
+    ]
+  },
+  {
+    "id": "eki1DZQggUdLze2A",
+    "name": "WF7 - OkPay Payment Link (SMS)",
+    "active": false,
+    "updatedAt": "2026-08-05T12:11:06.496Z",
+    "createdAt": "2026-07-29T07:29:12.104Z",
+    "tags": [
+      "compliant-v3",
+      "landmark"
+    ]
+  },
+  {
+    "id": "fMvrAtoRxNylF6YV",
+    "name": "INDIA MULTI-PAIS WF5 — Sales Handoff & CRM (India + Nepal)",
+    "active": false,
+    "updatedAt": "2026-09-09T08:25:44.197Z",
+    "createdAt": "2026-09-08T12:30:16.564Z",
+    "tags": [
+      "wf5-handoff",
+      "landmark",
+      "call-center",
+      "compliant-v1",
+      "hindi",
+      "wf5"
+    ]
+  },
+  {
+    "id": "fWDMTbgJR5Txillp",
+    "name": "WF11 - Audios Diarios a Google Drive (Multipais)",
+    "active": false,
+    "updatedAt": "2026-09-15T15:59:14.485Z",
+    "createdAt": "2026-07-29T07:52:41.442Z",
+    "tags": []
+  },
+  {
+    "id": "FZ5aGDTS19ud8F2z",
+    "name": "INDIA + NEPAL WF3 — Account Creation (Fixed)",
+    "active": false,
+    "updatedAt": "2026-09-10T13:57:44.168Z",
+    "createdAt": "2026-09-08T11:15:12.798Z",
+    "tags": [
+      "call-center",
+      "wf3-atlantis"
+    ]
+  },
+  {
+    "id": "gC0O8GN8pR0SoJyi",
+    "name": "INDIA MULTI-PAIS WF9 — Post-Call Handler (India + Nepal)",
+    "active": false,
+    "updatedAt": "2026-09-15T08:01:59.485Z",
+    "createdAt": "2026-09-08T13:28:11.313Z",
+    "tags": [
+      "call-center",
+      "wf6",
+      "postcall"
+    ]
+  },
+  {
+    "id": "HLusaKMqF2t4MhE3",
+    "name": "VZLA WF9 - Post-Call Handler  (Multipais)",
+    "active": false,
+    "updatedAt": "2026-08-20T07:01:18.706Z",
+    "createdAt": "2026-07-27T13:17:29.648Z",
+    "tags": [
+      "call-center",
+      "wf6",
+      "postcall"
+    ]
+  },
+  {
+    "id": "HweSXF3SbhNaCAE5",
+    "name": "INDIA MULTI-PAIS WF4 — Callback & Follow-up (India + Nepal)",
+    "active": false,
+    "updatedAt": "2026-09-09T08:22:12.613Z",
+    "createdAt": "2026-09-08T12:27:29.541Z",
+    "tags": [
+      "hindi",
+      "wf4",
+      "wf4-callback",
+      "call-center"
+    ]
+  },
+  {
+    "id": "I4oWIsO3njQLNm6f",
+    "name": "WF13 - Successful Calls Report (Drive + Telegram)",
+    "active": false,
+    "updatedAt": "2026-09-15T15:59:18.308Z",
+    "createdAt": "2026-07-31T11:39:12.065Z",
+    "tags": []
+  },
+  {
+    "id": "L25mrGgMDPpKpgAn",
+    "name": "VZLA WF2 ElevenLabs Outbound MULTI-PAIS (switch-write)",
+    "active": false,
+    "updatedAt": "2026-09-04T06:12:36.323Z",
+    "createdAt": "2026-07-27T09:29:15.549Z",
+    "tags": [
+      "hindi",
+      "DIAL-NOW-v5",
+      "landmark",
+      "wf2-v4",
+      "call-center",
+      "compliant-v1",
+      "wf2",
+      "wf2-call",
+      "wf2-v3"
+    ]
+  },
+  {
+    "id": "Mvkt0b6hVqoNRjNT",
+    "name": "WF2-Stringee-Outbound",
+    "active": false,
+    "updatedAt": "2026-08-10T06:53:17.023Z",
+    "createdAt": "2026-08-05T07:26:39.990Z",
+    "tags": [
+      "call-center",
+      "stringee"
+    ]
+  },
+  {
+    "id": "NWqT1VUJxYHPQ2bl",
+    "name": "INDIA MULTI-PAIS WF8 — Payment Callback (shared conversions)",
+    "active": false,
+    "updatedAt": "2026-09-09T08:28:37.074Z",
+    "createdAt": "2026-09-08T13:17:46.556Z",
+    "tags": []
+  },
+  {
+    "id": "P5ubGyb2etR46ftj",
+    "name": "VZLA WF4 Callback MULTI-PAIS (dual-sheet)",
+    "active": false,
+    "updatedAt": "2026-08-20T06:51:23.063Z",
+    "createdAt": "2026-07-27T12:22:27.428Z",
+    "tags": [
+      "wf4-callback",
+      "wf4",
+      "call-center",
+      "hindi"
+    ]
+  },
+  {
+    "id": "PlaDi1wsR1lWoZO8",
+    "name": "INDIA MULTI-PAIS WF2 — ElevenLabs Outbound (India + Nepal)",
+    "active": false,
+    "updatedAt": "2026-09-17T07:32:29.185Z",
+    "createdAt": "2026-09-08T10:37:31.735Z",
+    "tags": [
+      "wf2",
+      "hindi",
+      "call-center",
+      "wf2-v4",
+      "landmark",
+      "DIAL-NOW-v5",
+      "compliant-v1",
+      "wf2-call",
+      "wf2-v3"
+    ]
+  },
+  {
+    "id": "q1RdPcH27n7dJlPU",
+    "name": "WF9 - Post-Call Handler (Tiempo Real + Fallback Histórico)",
+    "active": false,
+    "updatedAt": "2026-09-07T13:13:22.783Z",
+    "createdAt": "2026-07-29T12:49:38.606Z",
+    "tags": [
+      "wf6",
+      "postcall",
+      "call-center"
+    ]
+  },
+  {
+    "id": "qIKciGSzjJzwPERV",
+    "name": "INDIA MULTI-PAIS WF1 - Lead Intake (India+Nepal+2 Slots)",
+    "active": false,
+    "updatedAt": "2026-09-07T09:14:50.988Z",
+    "createdAt": "2026-09-04T12:58:08.399Z",
+    "tags": [
+      "landmark",
+      "compliant-v1",
+      "hindi",
+      "wf1",
+      "wf1-validate",
+      "call-center"
+    ]
+  },
+  {
+    "id": "qq9EwmpOZYrGalw9",
+    "name": "WF_Stringee_Answer",
+    "active": false,
+    "updatedAt": "2026-08-10T06:44:54.697Z",
+    "createdAt": "2026-08-05T07:26:07.842Z",
+    "tags": [
+      "call-center",
+      "stringee"
+    ]
+  },
+  {
+    "id": "rSNw7GSCVipSXZl0",
+    "name": "WF1 — Lead Intake (API LeadStudio) — PRODUCCIÓN",
+    "active": false,
+    "updatedAt": "2026-09-15T11:17:12.201Z",
+    "createdAt": "2026-09-14T13:34:37.681Z",
+    "tags": []
+  },
+  {
+    "id": "sINJ2Godpz8a64FM",
+    "name": "INDIA MULTI-PAIS WF1 — Lead Intake (India + Nepal)",
+    "active": false,
+    "updatedAt": "2026-09-09T12:16:35.151Z",
+    "createdAt": "2026-09-08T09:29:47.697Z",
+    "tags": [
+      "call-center",
+      "compliant-v1",
+      "hindi",
+      "wf1-validate",
+      "wf1",
+      "landmark"
+    ]
+  },
+  {
+    "id": "so0zWwX8da3s5jV9",
+    "name": "VZLA WF7 - Payment Link (Binance + Bybit)",
+    "active": false,
+    "updatedAt": "2026-08-18T10:57:00.763Z",
+    "createdAt": "2026-07-27T13:15:02.790Z",
+    "tags": [
+      "landmark",
+      "compliant-v3"
+    ]
+  },
+  {
+    "id": "SX0fzwNCJu2a5izK",
+    "name": "WF3 - Lead Account Creation Landmark Markets",
+    "active": false,
+    "updatedAt": "2026-08-27T13:54:19.752Z",
+    "createdAt": "2026-08-11T11:24:10.415Z",
+    "tags": [
+      "wf3-atlantis",
+      "call-center"
+    ]
+  },
+  {
+    "id": "td4078JZk03EY0ZS",
+    "name": "WF12 - Reporte Diario v2 (sin timeout)",
+    "active": false,
+    "updatedAt": "2026-08-18T11:35:08.458Z",
+    "createdAt": "2026-07-29T08:17:08.893Z",
+    "tags": []
+  },
+  {
+    "id": "Th2Y8pLeBfNX00BC",
+    "name": "WF7 MULTI-PAIS — Payment Link (India OkPay + Nepal Monetix Structure)",
+    "active": false,
+    "updatedAt": "2026-09-17T06:45:39.659Z",
+    "createdAt": "2026-09-08T12:31:35.788Z",
+    "tags": [
+      "compliant-v3",
+      "landmark"
+    ]
+  },
+  {
+    "id": "TIDpFuTeThAQOsBw",
+    "name": "VZLA WF8 - Payment Callback",
+    "active": false,
+    "updatedAt": "2026-08-18T10:57:21.862Z",
+    "createdAt": "2026-07-27T13:17:05.220Z",
+    "tags": []
+  },
+  {
+    "id": "tPPUIs72OniUrtzk",
+    "name": "WF2 Stringee Outbound v5 (COMPLETE - NO LOOP)",
+    "active": true,
+    "updatedAt": "2026-09-17T07:32:33.350Z",
+    "createdAt": "2026-09-07T09:16:13.606Z",
+    "tags": [
+      "wf2-v3",
+      "DIAL-NOW-v5",
+      "landmark",
+      "wf2-v4",
+      "call-center",
+      "compliant-v1",
+      "wf2",
+      "hindi",
+      "wf2-call"
+    ]
+  },
+  {
+    "id": "TW1CHksqyf66MjQz",
+    "name": "WF10 — Recordings to LeadStudio API + Telegram (Multipais, sin Drive)",
+    "active": true,
+    "updatedAt": "2026-09-18T12:30:59.675Z",
+    "createdAt": "2026-09-17T08:22:16.599Z",
+    "tags": []
+  },
+  {
+    "id": "Vr2aeOmW9k6UK2vF",
+    "name": "VZLA WF5 Sales Handoff MULTI-PAIS (dual-sheet)",
+    "active": false,
+    "updatedAt": "2026-08-20T06:37:04.128Z",
+    "createdAt": "2026-07-27T12:29:10.254Z",
+    "tags": [
+      "hindi",
+      "wf5",
+      "compliant-v1",
+      "wf5-handoff",
+      "call-center",
+      "landmark"
+    ]
+  },
+  {
+    "id": "VZPJtmdeiujrJFLj",
+    "name": "WF10 - Recordings to Drive + Telegram (Multipais)",
+    "active": false,
+    "updatedAt": "2026-09-16T13:54:52.123Z",
+    "createdAt": "2026-07-31T08:18:17.705Z",
+    "tags": []
+  },
+  {
+    "id": "wNUh5ugIlHCyShyI",
+    "name": "INDIA MULTI-PAIS WF9 — Post-Call Handler (100% LeadStudio API, sin Sheets)",
+    "active": true,
+    "updatedAt": "2026-09-21T06:30:09.811Z",
+    "createdAt": "2026-09-16T12:43:18.918Z",
+    "tags": [
+      "call-center",
+      "postcall",
+      "wf6"
+    ]
+  },
+  {
+    "id": "WsVT2r13JrGBZrN8",
+    "name": "recuperar historico",
+    "active": false,
+    "updatedAt": "2026-08-10T06:53:19.805Z",
+    "createdAt": "2026-08-04T11:20:09.598Z",
+    "tags": [
+      "call-center",
+      "wf6",
+      "postcall"
+    ]
+  },
+  {
+    "id": "X1TsAjnftzvHOJr2",
+    "name": "WF_Stringee_Event",
+    "active": false,
+    "updatedAt": "2026-08-10T06:44:51.890Z",
+    "createdAt": "2026-08-05T07:26:23.137Z",
+    "tags": [
+      "call-center",
+      "stringee"
+    ]
+  },
+  {
+    "id": "YflhNxs5dQ7MnD2f",
+    "name": "WF3 - Lead Account Creation ATLANTIS",
+    "active": false,
+    "updatedAt": "2026-08-11T11:25:31.239Z",
+    "createdAt": "2026-08-05T08:42:35.567Z",
+    "tags": [
+      "call-center",
+      "wf3-atlantis"
+    ]
+  },
+  {
+    "id": "YWPBWi2k3IRRBtXh",
+    "name": "WF6 WhatsApp UNIFICADO (India + LATAM Router)",
+    "active": false,
+    "updatedAt": "2026-07-27T12:51:50.879Z",
+    "createdAt": "2026-07-27T12:39:35.145Z",
+    "tags": []
+  },
+  {
+    "id": "z8XLSppsK8VN7wNP",
+    "name": "VZLA WF1 Lead Intake MULTI-PAIS",
+    "active": false,
+    "updatedAt": "2026-08-18T07:28:10.210Z",
+    "createdAt": "2026-07-29T07:15:58.987Z",
+    "tags": [
+      "hindi",
+      "compliant-v1",
+      "call-center",
+      "landmark",
+      "wf1",
+      "wf1-validate"
+    ]
+  },
+  {
+    "id": "ZAduHUfEFXVylR6B",
+    "name": "WF15 - Sync Stringee Call Log (MySQL)",
+    "active": false,
+    "updatedAt": "2026-09-15T15:59:25.961Z",
+    "createdAt": "2026-09-11T08:16:33.823Z",
+    "tags": []
+  },
+  {
+    "id": "ZS6FrUbdzcNS0QfA",
+    "name": "VZLA WF3 - Lead Account Creation LANDMARKET",
+    "active": false,
+    "updatedAt": "2026-08-19T14:21:12.056Z",
+    "createdAt": "2026-08-18T08:11:47.732Z",
+    "tags": [
+      "call-center",
+      "wf3-atlantis"
+    ]
+  }
+]

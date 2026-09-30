@@ -1,0 +1,61 @@
+{
+  "id": "AfB2HFXoRbKL2PBh",
+  "name": "WF3 - Atlantis Login + Account Creation (FINAL)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-16T10:52:10.626Z",
+  "updatedAt": "2026-09-16T10:52:27.561Z",
+  "isArchived": true,
+  "versionId": "7a1ae35a-7383-4233-ae80-2966dfa2a47f",
+  "versionCounter": 2,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
+  "nodes": [],
+  "connections": {},
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "id": "O5XbU2xsNsK3wWYo",
+      "name": "wf3-atlantis",
+      "createdAt": "2026-07-27T11:58:53.683Z",
+      "updatedAt": "2026-07-27T11:58:53.683Z"
+    },
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "AfB2HFXoRbKL2PBh",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-16T10:52:10.626Z",
+      "updatedAt": "2026-09-16T10:52:10.626Z"
+    }
+  ],
+  "activeVersion": null
+}

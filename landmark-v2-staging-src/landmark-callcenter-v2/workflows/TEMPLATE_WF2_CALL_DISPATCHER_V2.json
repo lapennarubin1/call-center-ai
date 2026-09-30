@@ -1,0 +1,2362 @@
+{
+  "name": "TEMPLATE_WF2_CALL_DISPATCHER_V2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 00 — TRIGGERS\n\nTEMPLATE_WF2_CALL_DISPATCHER_V2 · v2.0.0\nContratos: TEMPLATE_DATA v2.2 · PROVIDER_ADAPTER v2.2 · FOLLOWUP_ENGINE v2.2 · ANALYTICS_EVENT v2.2\nRollback: WF2 UNIFICADO (v1) — apagar rutas desde el panel, luego desactivar este workflow (§12)\n\nCorre **cada minuto**. Cada corrida despacha, como mucho, la capacidad vigente\nde cada ruta activa en ese instante.\n\nEl webhook `dispatch-now-v2` existe para probar una corrida a mano sin esperar\nal schedule. **No está desactivado**: en n8n un nodo `disabled` deja pasar los\ndatos igual, así que apagar cosas desde el JSON es un no-fix (§2.3). Lo que se\napaga, se apaga desde el panel.\n\nConfig: `GET /api/routes/active` · `GET /api/settings` (red interna).",
+        "height": 440,
+        "width": 420,
+        "color": 4
+      },
+      "id": "326313e3-c38e-472f-af84-18e5ab918d48",
+      "name": "NOTE 00 00 — TRIGGERS",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "53f624a0-64aa-48f1-8fc7-557d74a2faa1",
+      "name": "[TRIGGER] Every Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dispatch-now-v2",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "c494f006-f4a5-49d3-8c5b-d77b2abc774b",
+      "name": "[TRIGGER] Manual Dispatch",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        520
+      ],
+      "webhookId": "dispatch-now-v2"
+    },
+    {
+      "parameters": {
+        "content": "## 01 — LOAD CONFIG\n\n`GET /api/routes/active` devuelve **solo**\nlas rutas que deben llamar ahora: país ON ∧ proveedor ON ∧ ruta ON ∧ no\narchivadas ∧ READY ∧ dentro del horario, con `capacity_now` ya resuelta.\n\n**Los tres interruptores no se evalúan acá.** Un template que lea `countries`,\n`voice_providers` o `call_routes` de la base viola el estándar (§1).\n\n**Fail-closed**: si el panel no responde 200, o responde 0 rutas, el ciclo\ntermina sin llamar a nadie. Nunca hay un \"modo degradado\" que llame igual.",
+        "height": 420,
+        "width": 420,
+        "color": 3
+      },
+      "id": "c2954052-b946-4aad-98ee-e56b72ce813f",
+      "name": "NOTE 01 01 — LOAD CONFIG",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        440,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LM_PANEL_URL || \"http://172.18.0.1:8080\" }}/api/routes/active",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "40f04d37-bbd4-4d06-aeb3-197bb9a73c1b",
+      "name": "[CONFIG] Load Active Routes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__PANEL_TOKEN_CREDENTIAL__",
+          "name": "Landmark Panel API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LM_PANEL_URL || \"http://172.18.0.1:8080\" }}/api/settings",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "b0ff8dd6-6434-4f7f-a481-4f9864a801a8",
+      "name": "[CONFIG] Load Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__PANEL_TOKEN_CREDENTIAL__",
+          "name": "Landmark Panel API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// neverError=true SIEMPRE seguido de un check explícito (§9).\nconst routesResp = $('[CONFIG] Load Active Routes').first().json || {};\nconst setResp = $input.first().json || {};\nconst rcode = Number(routesResp.statusCode || 0);\nconst rbody = routesResp.body || {};\nconst routes = Array.isArray(rbody.routes) ? rbody.routes : [];\n\n// Los settings son opcionales: si el endpoint falla se usan los defaults\n// DOCUMENTADOS (iguales al seed de la migración) y se deja constancia.\nconst scode = Number(setResp.statusCode || 0);\nconst settings = (scode >= 200 && scode < 300 && setResp.body && setResp.body.settings)\n  ? setResp.body.settings : null;\nconst defaults = { tech_retry_max: 8, tech_retry_backoff_cap_minutes: 60 };\nconst S = Object.assign({}, defaults, settings || {});\nif (!settings) {\n  console.log('[WF2] WARN /api/settings no disponible (HTTP ' + scode +\n              '): usando defaults documentados');\n}\n\n// ── CERROJO DEL MODO DE OPERACION ──────────────────────────────────\n// Segunda linea de defensa. El panel ya devuelve cero rutas invocables\n// cuando el modo no lo permite, pero WF2 lo comprueba TAMBIEN aqui y\n// termina antes de pedir un solo lead. Dos sistemas llamando a la vez\n// significa que el mismo cliente recibe dos llamadas: merece dos\n// cerrojos, no uno.\n//\n// FALLA CERRADO. WF2 exige una autorizacion EXPLICITA:\n//\n//     operating_mode === 'V2_PRIMARY'  Y  dispatch_allowed === true\n//\n// Cualquier otra cosa —ausente, invalida, ambigua, o la respuesta de un\n// panel anterior que no conoce el campo— significa NO LLAMAR.\n//\n// La version anterior asumia V2_PRIMARY cuando el campo faltaba, \"por\n// compatibilidad\". Eso convertia una respuesta incompleta en permiso\n// para marcar telefonos de clientes. Un panel que no sabe decir en que\n// modo esta no es una fuente de configuracion valida para WF2.\nconst operatingMode = rbody.operating_mode || null;\nconst dispatchAllowed = rbody.dispatch_allowed;\nconst modeOk = operatingMode === 'V2_PRIMARY' && dispatchAllowed === true;\n\nif (!modeOk) {\n  const motivo = !operatingMode\n    ? 'the panel did not report operating_mode (panel too old, or an ' +\n      'incomplete response). WF2 requires an explicit V2_PRIMARY.'\n    : (dispatchAllowed !== true\n        ? 'the panel did not explicitly allow dispatch (dispatch_allowed=' +\n          JSON.stringify(dispatchAllowed) + ').'\n        : 'operating_mode is ' + operatingMode + ', not V2_PRIMARY.');\n  console.log('[WF2] despacho BLOQUEADO: ' + motivo + ' ' +\n              (rbody.blocked_reason || '') +\n              ' El ciclo termina sin llamar a nadie.');\n  return [{ json: {\n    config_ok: false,\n    routes_http_status: rcode,\n    route_count: 0,\n    routes: [],\n    settings: S,\n    settings_from_api: !!settings,\n    operating_mode: operatingMode || 'UNKNOWN',\n    dispatch_allowed: false,\n    error_code: (!operatingMode || rbody.error_code === 'OPERATING_MODE_UNKNOWN')\n      ? 'OPERATING_MODE_UNKNOWN' : 'OPERATING_MODE_BLOCKED',\n    error_detail: rbody.blocked_reason || motivo,\n    execution_id: $execution.id\n  }}];\n}\n\nconst ok = rcode >= 200 && rcode < 300 && routes.length > 0;\nif (!ok) {\n  console.log('[WF2] sin rutas activas (HTTP ' + rcode + ', ' + routes.length +\n              ' rutas): el ciclo termina sin llamar a nadie');\n}\nreturn [{ json: {\n  config_ok: ok,\n  routes_http_status: rcode,\n  route_count: routes.length,\n  routes: routes,\n  settings: S,\n  settings_from_api: !!settings,\n  operating_mode: operatingMode,\n  dispatch_allowed: true,\n  error_code: ok ? null : (rcode >= 200 && rcode < 300 ? 'NO_ACTIVE_ROUTES' : 'CONFIG_ERROR'),\n  execution_id: $execution.id\n}}];\n"
+      },
+      "id": "42a7b216-ffd2-409e-9078-f7aab9fd5a5f",
+      "name": "[CONFIG] Check Config Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d9962273-9f4a-45e5-a328-fc4bdc2cb26a",
+              "leftValue": "={{ $json.config_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1c2970a1-9a2a-45b8-834c-c25b439c696e",
+      "name": "[CONFIG] Config Is Usable",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// CONFIG_ERROR aborta el ciclo: NADIE llama (§9). Que no haya rutas activas no\n// es un error — es el resultado correcto de apagar un país o estar fuera de\n// horario — pero termina igual sin despachar.\nconst d = $json;\nconsole.log('[WF2][exec=' + d.execution_id + '] action=abort code=' + d.error_code +\n            ' http=' + d.routes_http_status + ' routes=' + d.route_count);\nreturn [{ json: { ok: false, dispatched: 0, error_code: d.error_code,\n                  route_count: d.route_count } }];\n"
+      },
+      "id": "6d9425c4-495b-4c14-9af2-f53fc4677f9e",
+      "name": "[ERROR] Config Error Abort",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 02/03/04 — COUNTRIES · ROUTES · CAPACITY\n\nLas rutas activas se\nagrupan por país. La **demanda del país** es la suma de la capacidad vigente de\nsus rutas:\n\n    India:  IN_PROVEEDOR1 = 5 · IN_STRINGEE = 3  →  demanda 8\n\nSe pide **una sola cola por país** con `limit = demanda`, y los leads se\nreparten entre las rutas por `priority`. v1 pedía una cola por rama, así que dos\nramas del mismo país leían el mismo pool y podían tomar el mismo lead.\n\n`capacity_now` ya viene calculada por el panel (franja horaria vigente en el\nhuso del país, con DST). **Capacidad de negocio ≠ batching HTTP de n8n**: acá no\nhay ningún BATCH_SIZE.\n\n⚠️ **PV-13** (documentado en PENDING_VERIFICATION): esto asume que\n`GET /api/leads/queue` es una LECTURA y no una reserva. Si resultara que reserva\nleads, el reparto sigue siendo correcto —el claim atómico es por lead— pero\nconvendría revisar el `limit`.",
+        "height": 480,
+        "width": 420,
+        "color": 4
+      },
+      "id": "92a84861-f434-486f-9378-1491b75897cc",
+      "name": "NOTE 02 02/03/04 — COUNTRIES · ROUTES · CAPACITY",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1480,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Agrupa rutas por país y calcula la demanda efectiva. Sin un solo \"if India\":\n// el país es un dato, no una rama.\nconst d = $json;\nconst byCountry = {};\nfor (const r of d.routes) {\n  const cap = Number(r.capacity_now || 0);\n  if (cap <= 0) continue;                       // ruta sin capacidad en esta franja\n  const iso = r.iso;\n  if (!byCountry[iso]) {\n    byCountry[iso] = { iso: iso, country: r.country, timezone: r.timezone,\n                       dial_prefix: r.dial_prefix,\n                       national_number_len: r.national_number_len || null,\n                       language: r.language, demand: 0, routes: [] };\n  }\n  byCountry[iso].demand += cap;\n  byCountry[iso].routes.push({\n    route_id: r.route_id, route_key: r.route_key, provider: r.provider,\n    adapter_key: r.adapter_key, provider_endpoint: r.provider_endpoint || null,\n    priority: Number(r.priority || 100), capacity: cap,\n    caller_id: r.caller_id || null,\n    elevenlabs_agent_id: r.elevenlabs_agent_id || null,\n    elevenlabs_phone_number_id: r.elevenlabs_phone_number_id || null,\n    language: r.language, timezone: r.timezone, iso: r.iso,\n    country: r.country, dial_prefix: r.dial_prefix\n  });\n}\nconst out = [];\nfor (const iso of Object.keys(byCountry)) {\n  const c = byCountry[iso];\n  c.routes.sort((a, b) => a.priority - b.priority || a.route_key.localeCompare(b.route_key));\n  console.log('[WF2][exec=' + d.execution_id + '][' + iso + '] demanda=' + c.demand +\n              ' rutas=' + c.routes.map(r => r.route_key + ':' + r.capacity).join(','));\n  out.push({ json: Object.assign({}, c, { settings: d.settings,\n                                          execution_id: d.execution_id }) });\n}\nreturn out;\n"
+      },
+      "id": "27fa65aa-4096-4abe-bbb9-a7e29469f0fb",
+      "name": "[ROUTE] Build Country Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 05 — FETCH ELIGIBLE LEADS\n\nUn login por ciclo (credential\n`LeadStudio Login`, Custom Auth: el usuario y la contraseña **no** están en este\nJSON).\n\nDos lecturas por país:\n · **reactivación** — leads `NO_ANSWER` cuyo `nextFollowUpAt` ya venció vuelven\n   a `NOT_CONTACTED` (es lo que hacía v1, pero genérico: sin un par de nodos por\n   país)\n · **cola** — `status=NOT_CONTACTED`, `limit` = demanda del país\n\n`doNotCall` y un `status` distinto de `NOT_CONTACTED` excluyen el lead.",
+        "height": 420,
+        "width": 420,
+        "color": 6
+      },
+      "id": "f30b311a-fdc6-4598-91be-180cfc585ccb",
+      "name": "NOTE 05 05 — FETCH ELIGIBLE LEADS",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1940,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/auth/login",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth"
+      },
+      "id": "98570c14-d1b9-4882-9d5d-38fb2faef0a4",
+      "name": "[CRM] Get Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1960,
+        300
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "__LEADSTUDIO_LOGIN_CREDENTIAL__",
+          "name": "LeadStudio Login"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst resp = $input.first().json || {};\nconst code = Number(resp.statusCode || 0);\nconst token = (resp.body && resp.body.accessToken) || null;\nconst plans = $('[ROUTE] Build Country Plan').all();\nif (!token) {\n  console.log('[WF2] AUTH_ERROR: login a LeadStudio fallo (HTTP ' + code + ')');\n}\nreturn plans.map(p => ({ json: Object.assign({}, p.json, {\n  access_token: token, token_ok: !!token, token_http_status: code\n})}));\n"
+      },
+      "id": "48fed68b-9c84-4c78-b829-9c76fc330aac",
+      "name": "[CRM] Check Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6910a360-9bdc-4ba0-b3bc-051942939c5a",
+              "leftValue": "={{ $json.token_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7622b1f5-382c-426b-ab0e-8a99b4e478a5",
+      "name": "[CRM] Token Is Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// AUTH_ERROR aborta la rama y alerta (§9). No se llama a nadie sin poder\n// registrar el intento en el CRM.\nconst d = $json;\nconsole.log('[WF2][exec=' + d.execution_id + '] action=abort code=AUTH_ERROR http=' +\n            d.token_http_status);\nreturn [{ json: { ok: false, error_code: 'AUTH_ERROR', country: d.iso } }];\n"
+      },
+      "id": "24fe291a-6629-4cee-ae52-2f6eb976b88c",
+      "name": "[ERROR] Auth Error Abort",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2480,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/leads/queue",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "={{ Math.min(200, $json.demand * 10) }}"
+            },
+            {
+              "name": "country",
+              "value": "={{ $json.iso }}"
+            },
+            {
+              "name": "status",
+              "value": "NO_ANSWER"
+            }
+          ]
+        }
+      },
+      "id": "0cf712e6-efb8-4da0-a772-d8a0d36cea05",
+      "name": "[LEADS] Fetch Due Follow Ups",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2740,
+        740
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Un lead NO_ANSWER con nextFollowUpAt vencido vuelve a estar disponible.\n// Genérico: el país es un parámetro, no una rama (v1 tenía 2 nodos por país).\nconst ctx = $('[CRM] Token Is Valid').item.json;\nconst resp = $json || {};\nconst code = Number(resp.statusCode || 0);\nconst leads = (resp.body && Array.isArray(resp.body.leads)) ? resp.body.leads : [];\nif (code < 200 || code >= 300) {\n  console.log('[WF2][' + ctx.iso + '] WARN cola NO_ANSWER HTTP ' + code + ': sin reactivar');\n  return [];\n}\nconst now = Date.now();\nconst due = leads.filter(l => l.nextFollowUpAt && new Date(l.nextFollowUpAt).getTime() <= now\n                              && !l.doNotCall);\nconsole.log('[WF2][exec=' + ctx.execution_id + '][' + ctx.iso + '] reactivables=' +\n            due.length + '/' + leads.length);\nreturn due.map(l => ({ json: { lead_id: l.id, iso: ctx.iso,\n                               access_token: ctx.access_token,\n                               execution_id: ctx.execution_id } }));\n"
+      },
+      "id": "29a73b63-29d6-4dff-a4e0-d0fc3203afee",
+      "name": "[LEADS] Select Due For Reactivation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3000,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/leads/{{ $json.lead_id }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: \"NOT_CONTACTED\" }) }}"
+      },
+      "id": "78f143cb-6630-42d8-9d18-9b941a6ee0d1",
+      "name": "[CRM] Reactivate Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3260,
+        740
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst n = $input.all().length;\nconsole.log('[WF2] leads reactivados en este ciclo: ' + n);\nreturn [{ json: { reactivated: n } }];\n"
+      },
+      "id": "d65b85fd-d9ac-41b7-90e1-421d6f0a044e",
+      "name": "[LOG] Reactivated",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/leads/queue",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "={{ $json.demand }}"
+            },
+            {
+              "name": "country",
+              "value": "={{ $json.iso }}"
+            },
+            {
+              "name": "status",
+              "value": "NOT_CONTACTED"
+            }
+          ]
+        }
+      },
+      "id": "4f5e8cad-d486-4784-8918-12003ebfe003",
+      "name": "[LEADS] Fetch Country Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2740,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## 06/08 — NORMALIZE & ROUTE ALLOCATION\n\nSe normaliza el teléfono a\n**E.164 con `+`** usando el `dial_prefix` **del país** (dato de la ruta, no un\nliteral). El adapter que lo necesite sin `+` lo quita él mismo, en su\n`Build Request`.\n\nReparto: los leads se asignan a las rutas del país por `priority`, hasta llenar\nla `capacity` de cada una. La ruta que sobra capacidad no roba leads a la\nsiguiente.\n\nExclusiones (una por línea, todas con motivo logueado):\n · `doNotCall`\n · `status != NOT_CONTACTED`\n · teléfono que no forma un E.164 válido para el prefijo del país\n · país sin ruta con capacidad (no debería llegar acá)",
+        "height": 440,
+        "width": 420,
+        "color": 6
+      },
+      "id": "3bbbb13a-284b-4da8-a920-73173dc3aa91",
+      "name": "NOTE 07 06/08 — NORMALIZE & ROUTE ALLOCATION",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3760,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst ctx = $('[CRM] Token Is Valid').item.json;\nconst resp = $json || {};\nconst code = Number(resp.statusCode || 0);\nconst leads = (resp.body && Array.isArray(resp.body.leads)) ? resp.body.leads : [];\nif (code < 200 || code >= 300) {\n  console.log('[WF2][' + ctx.iso + '] ERROR cola HTTP ' + code + ': sin despachar');\n  return [];\n}\n\nfunction toE164(raw, prefix, natLen) {\n  let p = String(raw || '').replace(/[^0-9+]/g, '');\n  if (!p) return '';\n  if (p.startsWith('+')) return p;\n  const pd = String(prefix || '').replace('+', '');\n  if (pd && p.startsWith(pd) && p.length > pd.length + 5) return '+' + p;\n  if (natLen && p.length === Number(natLen)) return prefix + p;\n  if (!pd) return '+' + p;\n  return prefix + p;\n}\n\nconst skipped = [];\nconst eligible = [];\nfor (const l of leads) {\n  const status = String(l.status || '').trim().toUpperCase();\n  if (!l.id) { skipped.push('sin id'); continue; }\n  if (l.doNotCall) { skipped.push(l.id + ':doNotCall'); continue; }\n  if (status !== 'NOT_CONTACTED') { skipped.push(l.id + ':status=' + status); continue; }\n  const phone = toE164(l.phone, ctx.dial_prefix, ctx.national_number_len);\n  if (!/^\\+[1-9]\\d{7,14}$/.test(phone)) { skipped.push(l.id + ':phone'); continue; }\n  eligible.push({ lead_id: String(l.id), full_name: String(l.name || '').trim() || 'Customer',\n                  phone: phone, language: String(l.language || ctx.language || 'en').toLowerCase(),\n                  crm_attempts: Number(l.attempts || 0) });\n}\n\n// Reparto por prioridad, respetando la capacidad de CADA ruta.\nconst out = [];\nlet i = 0;\nfor (const r of ctx.routes) {\n  for (let k = 0; k < r.capacity && i < eligible.length; k++, i++) {\n    const lead = eligible[i];\n    out.push({ json: Object.assign({}, lead, {\n      route_id: r.route_id, route_key: r.route_key, country_iso: r.iso,\n      country: r.country, provider: r.provider, adapter_key: r.adapter_key,\n      provider_endpoint: r.provider_endpoint,\n      elevenlabs_agent_id: r.elevenlabs_agent_id,\n      elevenlabs_phone_number_id: r.elevenlabs_phone_number_id,\n      caller_id: r.caller_id, timezone: r.timezone,\n      access_token: ctx.access_token, execution_id: ctx.execution_id,\n      settings: ctx.settings\n    })});\n  }\n}\nconsole.log('[WF2][exec=' + ctx.execution_id + '][' + ctx.iso + '] elegibles=' +\n            eligible.length + ' asignados=' + out.length + ' descartados=' +\n            skipped.length + ' ' + JSON.stringify(skipped).slice(0, 300));\nreturn out;\n"
+      },
+      "id": "39e80537-b9a6-4f1f-b2e3-9401ed4de591",
+      "name": "[LEADS] Normalize And Allocate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 07 — ATOMIC CLAIM\n\n`UNIQUE(lead_id, attempt)` decide, de forma\natómica, quién despacha. El ganador se confirma **releyendo el `call_job_id`\npropio**, nunca por `affectedRows` (el driver `mysql2` cambia su significado\nsegún `FOUND_ROWS`).\n\n`attempt` = `next_attempt()`: si hay un intento `RELEASED` por error técnico se\nretoma **ese mismo número** (un 401 no consume un intento de negocio); si no,\n`max(CRM, local) + 1`.\n\n`UNIQUE(inflight_lead)` garantiza además **una sola llamada en vuelo por lead**,\nen cualquier intento y desde cualquier ruta. Perder el claim es un **SKIP**\nnormal, no un error.\n\nUn `call_job_id` aleatorio por sí solo NO alcanza: la unicidad la da el índice.",
+        "height": 460,
+        "width": 420,
+        "color": 3
+      },
+      "id": "fc884d37-e445-43f4-aefa-52caa1490d87",
+      "name": "NOTE 08 07 — ATOMIC CLAIM",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4220,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ? AS _lead,\n  (SELECT MIN(attempt) FROM wf_call_jobs\n     WHERE lead_id = ? AND state = 'RELEASED'\n       AND (next_tech_retry_at IS NULL OR next_tech_retry_at <= UTC_TIMESTAMP())\n  ) AS released_attempt,\n  (SELECT MIN(attempt) FROM wf_call_jobs\n     WHERE lead_id = ? AND state = 'RELEASED') AS released_any,\n  (SELECT MAX(attempt) FROM wf_call_jobs WHERE lead_id = ?) AS max_attempt,\n  (SELECT COUNT(*) FROM wf_call_jobs WHERE inflight_lead = ?) AS inflight,\n  (SELECT MAX(tech_retry_count) FROM wf_call_jobs\n     WHERE lead_id = ? AND state = 'RELEASED') AS tech_retries",
+        "options": {
+          "queryReplacement": "={{ $json.lead_id }},={{ $json.lead_id }},={{ $json.lead_id }},={{ $json.lead_id }},={{ $json.lead_id }},={{ $json.lead_id }}"
+        }
+      },
+      "id": "46a27ad0-16ff-4c34-8d62-871b6672d004",
+      "name": "[DB] Resolve Next Attempt",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4240,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// call_job_id = {route_key}-{UTC compacto}-{6 hex}. Es la PK lógica del\n// despacho y viaja en dynamic_variables hasta el post-call.\nconst crypto = require('crypto');\nconst rows = $input.all();\nconst out = [];\nfor (let i = 0; i < rows.length; i++) {\n  const r = rows[i].json || {};\n  const lead = $('[LEADS] Normalize And Allocate').itemMatching(i).json;\n  const S = lead.settings || {};\n  const techMax = Number(S.tech_retry_max || 8);\n\n  const released = r.released_attempt;\n  const releasedAny = r.released_any;\n  const maxAttempt = Number(r.max_attempt || 0);\n  const inflight = Number(r.inflight || 0);\n  const techRetries = Number(r.tech_retries || 0);\n\n  // Un lead con una llamada en vuelo (incluye NEEDS_RECONCILIATION) no se\n  // vuelve a llamar. El UNIQUE lo impediría igual; acá se evita el intento.\n  if (inflight > 0) {\n    console.log('[WF2][exec=' + lead.execution_id + '][' + lead.route_key +\n                '] skip lead=' + lead.lead_id + ' motivo=IN_FLIGHT');\n    continue;\n  }\n  // Intento liberado que sigue en backoff: todavía no toca.\n  if (released === null && releasedAny !== null && releasedAny !== undefined) {\n    console.log('[WF2][exec=' + lead.execution_id + '][' + lead.route_key +\n                '] skip lead=' + lead.lead_id + ' motivo=TECH_BACKOFF');\n    continue;\n  }\n  // Tope de reintentos técnicos: no se insiste para siempre contra un\n  // proveedor caído; queda para reconciliación.\n  if (released !== null && released !== undefined && techRetries >= techMax) {\n    console.log('[WF2][exec=' + lead.execution_id + '][' + lead.route_key +\n                '] skip lead=' + lead.lead_id + ' motivo=TECH_RETRY_EXHAUSTED');\n    continue;\n  }\n\n  const attempt = (released !== null && released !== undefined)\n    ? Number(released)\n    : Math.max(Number(lead.crm_attempts || 0), maxAttempt) + 1;\n\n  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}Z$/, 'Z');\n  const callJobId = lead.route_key + '-' + stamp + '-' + crypto.randomBytes(3).toString('hex');\n\n  out.push({ json: Object.assign({}, lead, {\n    attempt: attempt,\n    call_job_id: callJobId,\n    is_tech_reclaim: (released !== null && released !== undefined)\n  })});\n}\nreturn out;\n"
+      },
+      "id": "22045eb0-4219-49be-838e-7d964246c88c",
+      "name": "[CLAIM] Build Call Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_call_jobs\n  (call_job_id, lead_id, route_id, route_key, country_iso, provider,\n   adapter_key, attempt, execution_id, state, created_at, claimed_at)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CLAIMED', UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+        "options": {
+          "queryReplacement": "={{ $json.call_job_id }},={{ $json.lead_id }},={{ $json.route_id }},={{ $json.route_key }},={{ $json.country_iso }},={{ $json.provider }},={{ $json.adapter_key }},={{ $json.attempt }},={{ $json.execution_id }}"
+        }
+      },
+      "id": "533f1db8-bb59-478d-8ebd-fb87ca9647b1",
+      "name": "[DB] Insert Claim",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4760,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET call_job_id = ?, route_id = ?, route_key = ?, country_iso = ?,\n       provider = ?, adapter_key = ?, execution_id = ?, state = 'CLAIMED',\n       claimed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()\n WHERE lead_id = ? AND attempt = ? AND state = 'RELEASED'\n   AND (next_tech_retry_at IS NULL OR next_tech_retry_at <= UTC_TIMESTAMP())",
+        "options": {
+          "queryReplacement": "={{ $json.call_job_id }},={{ $json.route_id }},={{ $json.route_key }},={{ $json.country_iso }},={{ $json.provider }},={{ $json.adapter_key }},={{ $json.execution_id }},={{ $json.lead_id }},={{ $json.attempt }}"
+        }
+      },
+      "id": "f4c8f2d0-be68-464a-8e83-d323ecba15fb",
+      "name": "[DB] Reclaim Released Attempt",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        5020,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ? AS _lead, ? AS _attempt,\n  (SELECT call_job_id FROM wf_call_jobs\n     WHERE lead_id = ? AND attempt = ?) AS owner_call_job_id",
+        "options": {
+          "queryReplacement": "={{ $('[CLAIM] Build Call Job').item.json.lead_id }},={{ $('[CLAIM] Build Call Job').item.json.attempt }},={{ $('[CLAIM] Build Call Job').item.json.lead_id }},={{ $('[CLAIM] Build Call Job').item.json.attempt }}"
+        }
+      },
+      "id": "ed846fd2-0e9c-4e19-a1a7-95fc0776e82c",
+      "name": "[DB] Read Claim Owner",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        5280,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Relectura del token propio: el dueño de (lead_id, attempt) es quien despacha.\nconst rows = $input.all();\nreturn rows.map((r, i) => {\n  const ctx = $('[CLAIM] Build Call Job').itemMatching(i).json;\n  const owner = (r.json || {}).owner_call_job_id || null;\n  const winner = owner === ctx.call_job_id;\n  if (!winner) {\n    console.log('[WF2][exec=' + ctx.execution_id + '][' + ctx.route_key +\n                '] skip lead=' + ctx.lead_id + ' attempt=' + ctx.attempt +\n                ' motivo=CLAIM_LOST owner=' + owner);\n  }\n  return { json: Object.assign({}, ctx, { claim_won: winner, claim_owner: owner }) };\n});\n"
+      },
+      "id": "3b5bc46e-3302-4b3e-96bc-abcf8654c4d9",
+      "name": "[CLAIM] Check Claim Owner",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9505c005-8b85-4db9-a827-e1d13d46b2e9",
+              "leftValue": "={{ $json.claim_won }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "48ba242c-c00f-417f-89cc-c94cde4339cf",
+      "name": "[CLAIM] Claim Won",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Perder el claim NO es un error: otra ruta del mismo país (o la corrida\n// anterior) ya tomó ese lead. Es exactamente lo que evita la llamada doble.\nconst n = $input.all().length;\nconsole.log('[WF2] claims perdidos en este ciclo: ' + n + ' (comportamiento esperado)');\nreturn [{ json: { skipped_claims: n } }];\n"
+      },
+      "id": "4f2f424c-0850-448d-a154-ad69e945357d",
+      "name": "[LOG] Claim Skipped",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5800,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, call_job_id, lead_id,\n   country_iso, route_key, provider, adapter_key, attempt,\n   source_workflow, execution_id)\nVALUES (?, 'CALL_CLAIMED', 'CALL', UTC_TIMESTAMP(), ?, ?, ?, ?, ?, ?, ?,\n        'WF2', ?)",
+        "options": {
+          "queryReplacement": "={{ \"CALL_CLAIMED:\" + $json.call_job_id }},={{ $json.call_job_id }},={{ $json.lead_id }},={{ $json.country_iso }},={{ $json.route_key }},={{ $json.provider }},={{ $json.adapter_key }},={{ $json.attempt }},={{ $json.execution_id }}"
+        }
+      },
+      "id": "de7c59da-727c-4dc7-bbcc-427070c7af44",
+      "name": "[DB] Record Event Call Claimed",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        6060,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "content": "## 13 — CRM: ATTEMPTING\n\nSe marca el intento en LeadStudio\n**antes** de llamar, lo más temprano que es seguro: si el CRM no puede registrar\nel intento, no se llama.\n\nSi el PATCH falla, es un **error TÉCNICO**: el job va a `RELEASED`, no consume\nel intento de negocio, y se reintenta con backoff. No es un NO_ANSWER.",
+        "height": 360,
+        "width": 420,
+        "color": 2
+      },
+      "id": "535456ff-0059-4bfb-8f79-45ce206b33cb",
+      "name": "NOTE 09 13 — CRM: ATTEMPTING",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        6040,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/leads/{{ $json.lead_id }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: \"ATTEMPTING\", attempts: $json.attempt }) }}"
+      },
+      "id": "ea0aef6b-4f53-4779-ab0c-bcd268e2686c",
+      "name": "[CRM] Mark Attempting",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6320,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst rows = $input.all();\nreturn rows.map((r, i) => {\n  const ctx = $('[CLAIM] Check Claim Owner').itemMatching(i).json;\n  const code = Number((r.json || {}).statusCode || 0);\n  const ok = code >= 200 && code < 300;\n  return { json: Object.assign({}, ctx, {\n    attempting_ok: ok, attempting_http_status: code,\n    // Marcar el intento es parte del contrato con el CRM: si falla, no llamamos.\n    tech_error_code: ok ? null : (code === 401 || code === 403 ? 'AUTH_ERROR' : 'CRM_ERROR')\n  })};\n});\n"
+      },
+      "id": "6704c3d7-dbe7-4d41-8c27-65a12eaa12c9",
+      "name": "[CRM] Check Attempting",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6580,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9125ccb2-f42a-4b65-ac28-9ad15a55d026",
+              "leftValue": "={{ $json.attempting_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "27188a0c-2fd2-4614-bcee-af46eebadc9f",
+      "name": "[CRM] Attempting Recorded",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 09 — ADAPTER ROUTING\n\n`DISPATCHING` se escribe **SIEMPRE antes**\ndel HTTP al proveedor. Si n8n se cae entre el dispatch y la normalización, el\njob queda en `DISPATCHING` y el reconciliador lo manda a\n`NEEDS_RECONCILIATION`: **no se vuelve a llamar**.\n\nEl Switch ramifica por **`adapter_key`**, nunca por proveedor ni por país. Un\nfuturo PROVEEDOR2 con `ELEVENLABS_SIP` reutiliza la misma rama: cero código\nnuevo.\n\nLa salida *fallback* (adapter desconocido) va a `CONFIG_ERROR`. No debería\nocurrir —el panel no deja activar un adapter fuera del catálogo— pero la rama\nexiste: ninguna salida de Switch queda sin conectar.",
+        "height": 440,
+        "width": 420,
+        "color": 5
+      },
+      "id": "bdcfb898-b0a8-46f1-b06a-83ddd842f2f8",
+      "name": "NOTE 10 09 — ADAPTER ROUTING",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        7080,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs SET state = 'DISPATCHING', updated_at = UTC_TIMESTAMP()\n WHERE call_job_id = ? AND state = 'CLAIMED'",
+        "options": {
+          "queryReplacement": "={{ $json.call_job_id }}"
+        }
+      },
+      "id": "cb95a79a-4124-4697-942d-5af7205f6150",
+      "name": "[DB] Mark Dispatching",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        7100,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// dispatch_request del PROVIDER_ADAPTER_CONTRACT. Todo sale de la ruta y del\n// lead; el adapter no aporta ningún dato de negocio.\nconst rows = $input.all();\nreturn rows.map((r, i) => {\n  const d = $('[CRM] Attempting Recorded').itemMatching(i).json;\n  return { json: Object.assign({}, d, {\n    dynamic_variables: {\n      lead_id: String(d.lead_id),\n      full_name: String(d.full_name),\n      phone: String(d.phone),\n      country: String(d.country || ''),\n      country_iso: String(d.country_iso),\n      language: String(d.language),\n      attempt: String(d.attempt),\n      call_attempts: String(d.attempt),\n      call_job_id: String(d.call_job_id),\n      route_key: String(d.route_key),\n      route_id: String(d.route_id),\n      provider: String(d.provider),\n      adapter_key: String(d.adapter_key),\n      is_followup: 'false'\n    }\n  })};\n});\n"
+      },
+      "id": "f7e1b9ae-5d35-4ff3-b443-a17d4a7f58c4",
+      "name": "[ROUTE] Prepare Dispatch Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7360,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ac93b3ae-b458-4f65-868f-e569203e9409",
+                    "leftValue": "={{ $json.adapter_key }}",
+                    "rightValue": "ELEVENLABS_SIP",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "sip"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b700fb08-6689-4c80-9f7e-a81eb878e070",
+                    "leftValue": "={{ $json.adapter_key }}",
+                    "rightValue": "STRINGEE_WORKER",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "stringee"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "8a5febc2-8bc7-42fa-9d01-2dd1962958b2",
+      "name": "[ROUTE] Resolve Adapter",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        7620,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 10 — ADAPTER: ELEVENLABS_SIP\n\nLos cuatro pasos obligatorios del\n`PROVIDER_ADAPTER_CONTRACT`: Build Request → Dispatch → (respuesta cruda) →\nNormalize Dispatch.\n\nEste adapter **no** decide reintentos, **no** programa follow-ups, **no**\ninterpreta qué SIP significa \"no contestó\" (eso es política de la ruta) y **no**\ntoca `wf_call_jobs`.\n\nDevuelve `dispatch_outcome`: ACCEPTED · FINAL · TECHNICAL_ERROR · UNKNOWN.\nAnte la duda entre TECHNICAL_ERROR y UNKNOWN → **UNKNOWN**: es preferible\nreconciliar a mano que llamar dos veces.\n\nLa API key vive en la credential `ElevenLabs API`, nunca en el nodo.",
+        "height": 460,
+        "width": 420,
+        "color": 5
+      },
+      "id": "f74006e9-f3a3-4c31-a26a-a854eaf5da05",
+      "name": "NOTE 11 10 — ADAPTER: ELEVENLABS_SIP",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        7860,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// INPUT NORMALIZATION: dispatch_request -> body de ElevenLabs.\nreturn $input.all().map(it => {\n  const d = it.json;\n  return { json: Object.assign({}, d, {\n    provider_body: {\n      agent_id: d.elevenlabs_agent_id,\n      agent_phone_number_id: d.elevenlabs_phone_number_id,\n      to_number: d.phone,                      // E.164 CON '+' para SIP\n      conversation_initiation_client_data: {\n        conversation_config_override: { agent: { language: d.language } },\n        dynamic_variables: d.dynamic_variables\n      }\n    }\n  })};\n});\n"
+      },
+      "id": "ac4a6155-68ce-48e4-8a1c-e04ddbfab0a3",
+      "name": "[ELEVENLABS_SIP] Build Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call",
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.provider_body) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "42f2104c-74e8-4d81-83cf-40380e5b564b",
+      "name": "[ELEVENLABS_SIP] Dispatch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8140,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__ELEVENLABS_CREDENTIAL__",
+          "name": "ElevenLabs API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// RESULT NORMALIZATION: respuesta cruda -> dispatch_result.\n// La tabla de clasificación es la de PROVIDER_ADAPTER_CONTRACT ·\n// technical_classification. El adapter NO decide política.\nconst rows = $input.all();\nreturn rows.map((r, i) => {\n  const d = $('[ELEVENLABS_SIP] Build Request').itemMatching(i).json;\n  const resp = r.json || {};\n  const code = Number(resp.statusCode || 0);\n  const body = resp.body || {};\n  const conv = body.conversation_id || null;\n  const msg = String(body.message || body.detail || '');\n\n  // SIP crudo. Qué significa 603 lo decide la POLÍTICA, no este nodo.\n  const sipMatch = msg.match(/SIP\\s*(\\d{3})/i) || msg.match(/\\b([4-6]\\d{2})\\b/);\n  const sipCode = sipMatch ? sipMatch[1] : null;\n\n  let outcome, errorCode = null, errorClass = null, finalResult = null;\n  if (code >= 200 && code < 300 && body.success === true && conv) {\n    outcome = 'ACCEPTED';\n  } else if (code === 401 || code === 403) {\n    outcome = 'TECHNICAL_ERROR'; errorCode = 'AUTH_ERROR'; errorClass = 'TECHNICAL';\n  } else if (code === 0) {\n    // timeout o conexión cortada: la llamada PUDO salir\n    outcome = 'UNKNOWN'; errorCode = 'DISPATCH_UNKNOWN'; errorClass = 'AMBIGUOUS';\n  } else if (code >= 500) {\n    outcome = 'UNKNOWN'; errorCode = 'DISPATCH_UNKNOWN'; errorClass = 'AMBIGUOUS';\n  } else if (sipCode && !conv) {\n    // Resultado FINAL: hubo intento telefónico y no habrá post-call.\n    outcome = 'FINAL'; finalResult = 'FAILED'; errorCode = 'SIP_' + sipCode;\n  } else if (code >= 400 && code < 500) {\n    // 4xx sin SIP y sin conversación: config o datos. No salió llamada.\n    outcome = 'TECHNICAL_ERROR'; errorCode = 'CONFIG_ERROR'; errorClass = 'TECHNICAL';\n  } else {\n    outcome = 'UNKNOWN'; errorCode = 'DISPATCH_UNKNOWN'; errorClass = 'AMBIGUOUS';\n  }\n\n  return { json: Object.assign({}, d, {\n    dispatch_outcome: outcome,\n    conversation_id: conv,\n    provider_job_id: null,\n    provider_call_id: body.sip_call_id || body.callSid || null,\n    sip_code: sipCode,\n    dispatch_http_status: code,\n    final_result: finalResult,\n    error_code: errorCode,\n    error_class: errorClass,\n    error_detail: msg.slice(0, 200),\n    raw_excerpt: JSON.stringify(body).slice(0, 200)\n  })};\n});\n"
+      },
+      "id": "f9156a3e-df33-4221-9ead-a1a9aec43e38",
+      "name": "[ELEVENLABS_SIP] Normalize Dispatch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 11 — ADAPTER: STRINGEE_WORKER\n\nMismos cuatro pasos. El worker\nrecibe el teléfono **sin `+`** (así lo exige hoy) y devuelve `job_id`.\n\n`job_id` significa **DISPATCHED**, no ANSWERED ni NO_ANSWER. El resultado real\nllega después por el post-call de ElevenLabs y lo procesa WF9. v1 marcaba\n`callStatus: ANSWERED` con `DISPATCHED`, que es falso.\n\n`callback_url` apunta al webhook de WF9: el worker ya sabe reenviar el estado\nfinal (`sendCallback`), incluido `elevenlabs_conversation_id`.\n\nHTTP 429 `worker_capacity_reached` es **TECHNICAL_ERROR**: el worker está lleno,\nla llamada no salió y el intento de negocio **no** se consume.",
+        "height": 460,
+        "width": 420,
+        "color": 5
+      },
+      "id": "f5655fca-2e1c-402c-9d9e-478204d66b3f",
+      "name": "NOTE 12 11 — ADAPTER: STRINGEE_WORKER",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        8640,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// INPUT NORMALIZATION. El worker exige el teléfono SIN '+'; quitarlo es\n// responsabilidad del adapter, no del dispatcher.\nreturn $input.all().map(it => {\n  const d = it.json;\n  return { json: Object.assign({}, d, {\n    provider_body: {\n      lead_id: d.lead_id,\n      phone: String(d.phone).replace(/^\\+/, ''),\n      full_name: d.full_name,\n      country: d.country || d.country_iso,\n      language: d.language,\n      is_followup: 'false',\n      call_attempts: Number(d.attempt),\n      from_number: d.caller_id,\n      agent_id: d.elevenlabs_agent_id,\n      // El worker reenvía el estado final acá cuando termina la llamada.\n      callback_url: (process.env.LM_WF9_CALLBACK_URL || '')\n    }\n  })};\n});\n"
+      },
+      "id": "f5b5c4be-28db-4ac3-aeac-00018c17d69a",
+      "name": "[STRINGEE_WORKER] Build Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.provider_endpoint || \"http://172.18.0.1:8091\" }}/call",
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.provider_body) }}"
+      },
+      "id": "c21825dd-1a54-498b-992a-cabcb515d04b",
+      "name": "[STRINGEE_WORKER] Dispatch Worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8920,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// RESULT NORMALIZATION. El worker SOLO confirma que la llamada se disparó.\n// Nunca produce un resultado FINAL: por eso este adapter no emite 'FINAL'.\nconst rows = $input.all();\nreturn rows.map((r, i) => {\n  const d = $('[STRINGEE_WORKER] Build Request').itemMatching(i).json;\n  const resp = r.json || {};\n  const code = Number(resp.statusCode || 0);\n  const body = resp.body || {};\n  const jobId = body.job_id || body.jobId || null;\n\n  let outcome, errorCode = null, errorClass = null;\n  if (code >= 200 && code < 300 && body.ok === true && jobId) {\n    outcome = 'ACCEPTED';\n  } else if (code === 401 || code === 403) {\n    outcome = 'TECHNICAL_ERROR'; errorCode = 'AUTH_ERROR'; errorClass = 'TECHNICAL';\n  } else if (code === 429) {\n    // worker_capacity_reached: no salió llamada, no consume intento.\n    outcome = 'TECHNICAL_ERROR'; errorCode = 'PROVIDER_BUSY'; errorClass = 'TECHNICAL';\n  } else if (code === 400) {\n    // missing_lead_id / invalid_phone: dato inválido detectado por el worker.\n    outcome = 'TECHNICAL_ERROR'; errorCode = 'VALIDATION_ERROR'; errorClass = 'TECHNICAL';\n  } else if (code === 503) {\n    outcome = 'TECHNICAL_ERROR'; errorCode = 'PROVIDER_ERROR'; errorClass = 'TECHNICAL';\n  } else if (code === 0 || code >= 500) {\n    outcome = 'UNKNOWN'; errorCode = 'DISPATCH_UNKNOWN'; errorClass = 'AMBIGUOUS';\n  } else {\n    outcome = 'UNKNOWN'; errorCode = 'DISPATCH_UNKNOWN'; errorClass = 'AMBIGUOUS';\n  }\n\n  return { json: Object.assign({}, d, {\n    dispatch_outcome: outcome,\n    conversation_id: null,                 // llega en el post-call, no acá\n    provider_job_id: jobId,\n    provider_call_id: body.stringee_call_id || null,\n    sip_code: null,\n    dispatch_http_status: code,\n    final_result: null,\n    error_code: errorCode,\n    error_class: errorClass,\n    error_detail: String(body.error || '').slice(0, 200),\n    raw_excerpt: JSON.stringify(body).slice(0, 200)\n  })};\n});\n"
+      },
+      "id": "3e830ad7-ab89-438c-a162-b17f5a490a4b",
+      "name": "[STRINGEE_WORKER] Normalize Dispatch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// El panel no deja activar un adapter fuera del catálogo, así que esto no\n// debería ocurrir nunca. Si ocurre es CONFIG_ERROR: no se llama, se registra.\nreturn $input.all().map(it => ({ json: Object.assign({}, it.json, {\n  dispatch_outcome: 'TECHNICAL_ERROR',\n  error_code: 'CONFIG_ERROR',\n  error_class: 'TECHNICAL',\n  error_detail: 'adapter_key sin implementacion en WF2: ' + it.json.adapter_key,\n  dispatch_http_status: null, conversation_id: null, provider_job_id: null,\n  provider_call_id: null, sip_code: null, final_result: null, raw_excerpt: null\n})}));\n"
+      },
+      "id": "b62513b4-73aa-4cd8-b6d6-3bc6a0d9f805",
+      "name": "[ERROR] Unsupported Adapter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8660,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 12 — DISPATCH OUTCOME ROUTER\n\nLas tres ramas de adapter\nconvergen acá con el **mismo** `dispatch_result`. A partir de este punto el\ndispatcher no sabe —ni necesita saber— qué proveedor fue.\n\n| outcome | qué hace el dispatcher |\n|---|---|\n| `ACCEPTED` | job → DISPATCHED · evento · **fin de la rama** (sin motor) |\n| `FINAL` | registra el resultado y **llama al motor** con clave `call_job_id` |\n| `TECHNICAL_ERROR` | job → RELEASED + backoff · **no consume intento** · no llega al motor |\n| `UNKNOWN` | job → UNKNOWN → NEEDS_RECONCILIATION · **jamás re-dispatch** |",
+        "height": 420,
+        "width": 420,
+        "color": 5
+      },
+      "id": "7ee683d7-7ca4-47cd-a0d2-6428d91dc325",
+      "name": "NOTE 13 12 — DISPATCH OUTCOME ROUTER",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        9420,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "abe30f1e-eedf-4c53-98e7-39155a4c2d64",
+                    "leftValue": "={{ $json.dispatch_outcome }}",
+                    "rightValue": "ACCEPTED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "accepted"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c527c957-402f-40cf-a441-0c9e27281e87",
+                    "leftValue": "={{ $json.dispatch_outcome }}",
+                    "rightValue": "FINAL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "final"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7a06a6de-cdc9-49c5-b3d2-1c1e22692f49",
+                    "leftValue": "={{ $json.dispatch_outcome }}",
+                    "rightValue": "TECHNICAL_ERROR",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "technical"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7a38263d-10ce-48c2-bbd5-6f84df73a7fd",
+                    "leftValue": "={{ $json.dispatch_outcome }}",
+                    "rightValue": "UNKNOWN",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "unknown"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      },
+      "id": "5aaa7417-8d85-4113-9183-79087aacd9eb",
+      "name": "[RESULT] Dispatch Outcome Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        9440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET state = 'DISPATCHED', conversation_id = ?, provider_job_id = ?,\n       provider_call_id = ?, dispatch_http_status = ?,\n       dispatched_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()\n WHERE call_job_id = ? AND state = 'DISPATCHING'",
+        "options": {
+          "queryReplacement": "={{ $json.conversation_id }},={{ $json.provider_job_id }},={{ $json.provider_call_id }},={{ $json.dispatch_http_status }},={{ $json.call_job_id }}"
+        }
+      },
+      "id": "458282d0-92e8-46ec-8f28-b68b22af4e2c",
+      "name": "[DB] Mark Dispatched",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        9900,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, call_job_id, lead_id,\n   country_iso, route_key, provider, adapter_key, attempt, conversation_id,\n   provider_job_id, source_workflow, execution_id)\nVALUES (?, 'CALL_DISPATCHED', 'CALL', UTC_TIMESTAMP(), ?, ?, ?, ?, ?, ?, ?, ?, ?,\n        'WF2', ?)",
+        "options": {
+          "queryReplacement": "={{ \"CALL_DISPATCHED:\" + $('[RESULT] Dispatch Outcome Router').item.json.call_job_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.call_job_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.lead_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.country_iso }},={{ $('[RESULT] Dispatch Outcome Router').item.json.route_key }},={{ $('[RESULT] Dispatch Outcome Router').item.json.provider }},={{ $('[RESULT] Dispatch Outcome Router').item.json.adapter_key }},={{ $('[RESULT] Dispatch Outcome Router').item.json.attempt }},={{ $('[RESULT] Dispatch Outcome Router').item.json.conversation_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.provider_job_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.execution_id }}"
+        }
+      },
+      "id": "e5b564f2-456f-41b8-8db9-230d34b3e988",
+      "name": "[DB] Record Event Call Dispatched",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        10160,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// FIN DE LA RAMA. No se crea follow-up: el resultado llega por post-call (WF9).\n// v1 creaba acá un followup \"CONNECTED duration=0\", que falseaba las métricas.\nreturn $input.all().map((r, i) => {\n  const d = $('[RESULT] Dispatch Outcome Router').itemMatching(i).json;\n  lmLog('WF2', d, { call_job_id: d.call_job_id, route_key: d.route_key,\n                    country: d.country_iso, provider: d.provider,\n                    adapter_key: d.adapter_key, lead_id: d.lead_id,\n                    attempt: d.attempt, conversation_id: d.conversation_id,\n                    action: 'DISPATCHED' });\n  return { json: { ok: true, call_job_id: d.call_job_id, state: 'DISPATCHED',\n                   conversation_id: d.conversation_id,\n                   provider_job_id: d.provider_job_id } };\n});\n"
+      },
+      "id": "86f92a08-4327-4f88-a065-4257ec7b8bfa",
+      "name": "[LOG] Dispatched",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 15 — FINAL RESULT HANDOFF\n\nEl dispatch **ya es** el resultado\n(SIP 603/408/486…) y no va a llegar ningún post-call. Si WF2 no registra, el\nintento se pierde.\n\nSe escribe el hecho local y **después** se invoca el motor con el CALL RESULT\nnormalizado, con clave de idempotencia `call_job_id` (no hay `conversation_id`).\n\nWF2 **no** decide si 603 es \"no contestó\": manda `result=FAILED` + `sip_code` y\nla política de la ruta reclasifica.",
+        "height": 400,
+        "width": 420,
+        "color": 3
+      },
+      "id": "6ed3219a-2788-48ff-8a12-e322bb4e2efe",
+      "name": "NOTE 15 15 — FINAL RESULT HANDOFF",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        10660,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET state = 'COMPLETED', result = ?, duration_seconds = 0,\n       sip_code = ?, dispatch_http_status = ?,\n       dispatched_at = COALESCE(dispatched_at, UTC_TIMESTAMP()),\n       completed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()\n WHERE call_job_id = ? AND result IS NULL AND state = 'DISPATCHING'",
+        "options": {
+          "queryReplacement": "={{ $json.final_result }},={{ $json.sip_code }},={{ $json.dispatch_http_status }},={{ $json.call_job_id }}"
+        }
+      },
+      "id": "6d7090ac-a706-48bc-8fcf-a8310e4bf2ef",
+      "name": "[DB] Record Immediate Result",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        10680,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "__WORKFLOW_ID_TEMPLATE_FOLLOWUP_ENGINE_V2__",
+          "mode": "list",
+          "cachedResultName": "TEMPLATE_FOLLOWUP_ENGINE_V2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "47c998f6-3c6a-4943-9bb0-9a4ff6f7e6e1",
+      "name": "[ENGINE] Call Followup Engine",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        10940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// CALL RESULT CONTRACT: lo único que el motor acepta.\nreturn $input.all().map((r, i) => {\n  const d = $('[RESULT] Dispatch Outcome Router').itemMatching(i).json;\n  return { json: {\n    call_job_id: d.call_job_id, lead_id: d.lead_id, route_key: d.route_key,\n    country_iso: d.country_iso, provider: d.provider, adapter_key: d.adapter_key,\n    attempt: Number(d.attempt), conversation_id: null,\n    provider_job_id: d.provider_job_id, sip_code: d.sip_code,\n    result: d.final_result || 'FAILED', call_status: 'FAILED',\n    duration_seconds: 0, callback_requested: false, callback_at: null,\n    notes: null, summary: null, source: 'dispatch',\n    execution_id: d.execution_id, access_token: d.access_token\n  }};\n});\n"
+      },
+      "id": "2103c0d9-2359-43f6-8732-68e90fd90935",
+      "name": "[RESULT] Build Call Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nreturn $input.all().map(r => {\n  const d = r.json || {};\n  console.log('[WF2] resultado FINAL entregado al motor · job=' +\n              (d.call_job_id || '-') + ' action=' +\n              (d.decision ? d.decision.action : '-'));\n  return { json: { ok: true, handed_off: true, call_job_id: d.call_job_id || null,\n                   decision: d.decision || null } };\n});\n"
+      },
+      "id": "2ab4163f-e59a-4aac-ad27-e9947df7d42e",
+      "name": "[LOG] Final Result Handed Off",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 16 — ERROR HANDLING\n\n**Técnico ≠ negocio.** Un 401, un 403, un\nworker lleno o una config faltante **no son un NO_ANSWER** y no consumen un\nintento de negocio: el job va a `RELEASED` con backoff 1, 2, 4 … 60 min y el\n**mismo** número de intento se vuelve a reclamar cuando el backoff vence.\n\n`AUTH_ERROR` y `CONFIG_ERROR` además cortan la rama de ese proveedor en el ciclo\ny quedan visibles en el panel.\n\nAgotado `tech_retry_max`, el job queda para reconciliación: no se insiste\nindefinidamente contra un proveedor caído.\n\n| código | reintento | acción |\n|---|---|---|\n| `CONFIG_ERROR` | no | aborta, nadie llama |\n| `AUTH_ERROR` | no | aborta la rama, alerta |\n| `PROVIDER_BUSY` | sí, backoff | capacidad del worker |\n| `DISPATCH_UNKNOWN` | **nunca** | → NEEDS_RECONCILIATION |",
+        "height": 520,
+        "width": 420,
+        "color": 2
+      },
+      "id": "542c2f70-94fa-491a-9db8-4809f650aa8b",
+      "name": "NOTE 16 16 — ERROR HANDLING",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        11440,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET state = 'RELEASED', error_class = 'TECHNICAL', error_code = ?,\n       error_message = ?, dispatch_http_status = ?,\n       tech_retry_count = tech_retry_count + 1,\n       next_tech_retry_at = DATE_ADD(UTC_TIMESTAMP(), INTERVAL\n         LEAST(POW(2, tech_retry_count), ?) MINUTE),\n       updated_at = UTC_TIMESTAMP()\n WHERE call_job_id = ? AND state IN ('CLAIMED','DISPATCHING')",
+        "options": {
+          "queryReplacement": "={{ $json.error_code }},={{ $json.error_detail }},={{ $json.dispatch_http_status }},={{ ($json.settings && $json.settings.tech_retry_backoff_cap_minutes) || 60 }},={{ $json.call_job_id }}"
+        }
+      },
+      "id": "80e093c0-539c-4300-b556-f403b325f325",
+      "name": "[DB] Mark Released",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        11460,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, call_job_id, lead_id,\n   country_iso, route_key, provider, adapter_key, attempt, result,\n   source_workflow, execution_id, metadata_json)\nVALUES (?, 'CALL_TECH_FAILED', 'CALL', UTC_TIMESTAMP(), ?, ?, ?, ?, ?, ?, ?, ?,\n        'WF2', ?, ?)",
+        "options": {
+          "queryReplacement": "={{ \"CALL_TECH_FAILED:\" + $('[RESULT] Dispatch Outcome Router').item.json.call_job_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.call_job_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.lead_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.country_iso }},={{ $('[RESULT] Dispatch Outcome Router').item.json.route_key }},={{ $('[RESULT] Dispatch Outcome Router').item.json.provider }},={{ $('[RESULT] Dispatch Outcome Router').item.json.adapter_key }},={{ $('[RESULT] Dispatch Outcome Router').item.json.attempt }},={{ $('[RESULT] Dispatch Outcome Router').item.json.error_code }},={{ $('[RESULT] Dispatch Outcome Router').item.json.execution_id }},={{ JSON.stringify({http: $('[RESULT] Dispatch Outcome Router').item.json.dispatch_http_status, detail: $('[RESULT] Dispatch Outcome Router').item.json.error_detail}) }}"
+        }
+      },
+      "id": "cad67835-9245-48d9-95ce-6dd570d0a083",
+      "name": "[DB] Record Event Tech Failed",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        11720,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// NO llega al motor y NO se registra como NO_ANSWER. El intento de negocio\n// queda intacto para cuando el problema técnico se resuelva.\nreturn $input.all().map((r, i) => {\n  const d = $('[RESULT] Dispatch Outcome Router').itemMatching(i).json;\n  lmLog('WF2', d, { call_job_id: d.call_job_id, route_key: d.route_key,\n                    provider: d.provider, lead_id: d.lead_id, attempt: d.attempt,\n                    error_code: d.error_code, action: 'RELEASED' });\n  return { json: { ok: false, call_job_id: d.call_job_id, state: 'RELEASED',\n                   error_code: d.error_code, consumes_attempt: false } };\n});\n"
+      },
+      "id": "9e295570-0929-4506-b57c-c02f7137f69f",
+      "name": "[LOG] Technical Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET state = 'UNKNOWN', error_class = 'AMBIGUOUS',\n       error_code = 'DISPATCH_UNKNOWN', error_message = ?,\n       dispatch_http_status = ?, updated_at = UTC_TIMESTAMP()\n WHERE call_job_id = ? AND state = 'DISPATCHING'",
+        "options": {
+          "queryReplacement": "={{ $json.error_detail }},={{ $json.dispatch_http_status }},={{ $json.call_job_id }}"
+        }
+      },
+      "id": "fb206dd1-25b3-43e1-bb28-8118c430504e",
+      "name": "[DB] Mark Unknown",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        11460,
+        960
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, call_job_id, lead_id,\n   country_iso, route_key, provider, adapter_key, attempt,\n   source_workflow, execution_id, metadata_json)\nVALUES (?, 'CALL_UNKNOWN', 'CALL', UTC_TIMESTAMP(), ?, ?, ?, ?, ?, ?, ?,\n        'WF2', ?, ?)",
+        "options": {
+          "queryReplacement": "={{ \"CALL_UNKNOWN:\" + $('[RESULT] Dispatch Outcome Router').item.json.call_job_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.call_job_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.lead_id }},={{ $('[RESULT] Dispatch Outcome Router').item.json.country_iso }},={{ $('[RESULT] Dispatch Outcome Router').item.json.route_key }},={{ $('[RESULT] Dispatch Outcome Router').item.json.provider }},={{ $('[RESULT] Dispatch Outcome Router').item.json.adapter_key }},={{ $('[RESULT] Dispatch Outcome Router').item.json.attempt }},={{ $('[RESULT] Dispatch Outcome Router').item.json.execution_id }},={{ JSON.stringify({http: $('[RESULT] Dispatch Outcome Router').item.json.dispatch_http_status, detail: $('[RESULT] Dispatch Outcome Router').item.json.error_detail}) }}"
+        }
+      },
+      "id": "5da64b54-5edf-436f-8523-933cb1b864d7",
+      "name": "[DB] Record Event Call Unknown",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        11720,
+        960
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// No podemos PROBAR que la llamada no se creó. JAMÁS se re-despacha: el\n// reconciliador lo pasa a NEEDS_RECONCILIATION y, si el post-call llega, el\n// resultado se resuelve solo.\nreturn $input.all().map((r, i) => {\n  const d = $('[RESULT] Dispatch Outcome Router').itemMatching(i).json;\n  lmLog('WF2', d, { call_job_id: d.call_job_id, route_key: d.route_key,\n                    provider: d.provider, lead_id: d.lead_id, attempt: d.attempt,\n                    error_code: 'DISPATCH_UNKNOWN', action: 'UNKNOWN' });\n  return { json: { ok: false, call_job_id: d.call_job_id, state: 'UNKNOWN',\n                   redispatch: false } };\n});\n"
+      },
+      "id": "23bc8992-5de2-4c32-8174-48fff9861491",
+      "name": "[LOG] Dispatch Unknown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11980,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Fallback del Switch: un dispatch_outcome que no existe en el contrato.\n// Se trata como UNKNOWN (conservador) y se deja constancia.\nreturn $input.all().map(it => {\n  const d = it.json;\n  console.log('[WF2] dispatch_outcome fuera de contrato: ' + d.dispatch_outcome +\n              ' job=' + d.call_job_id);\n  return { json: { ok: false, call_job_id: d.call_job_id,\n                   error_code: 'VALIDATION_ERROR',\n                   dispatch_outcome: d.dispatch_outcome } };\n});\n"
+      },
+      "id": "ad6109fe-ff27-47d3-b417-0a4f7175e735",
+      "name": "[LOG] Unroutable Outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11460,
+        1400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET state = 'RELEASED', error_class = 'TECHNICAL', error_code = ?,\n       error_message = 'PATCH ATTEMPTING failed',\n       tech_retry_count = tech_retry_count + 1,\n       next_tech_retry_at = DATE_ADD(UTC_TIMESTAMP(), INTERVAL\n         LEAST(POW(2, tech_retry_count), 60) MINUTE),\n       updated_at = UTC_TIMESTAMP()\n WHERE call_job_id = ? AND state = 'CLAIMED'",
+        "options": {
+          "queryReplacement": "={{ $json.tech_error_code }},={{ $json.call_job_id }}"
+        }
+      },
+      "id": "66f18b7a-9b8f-41c0-bbed-c9325395f523",
+      "name": "[DB] Release On CRM Error",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        11460,
+        1840
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// No se pudo marcar ATTEMPTING en el CRM: NO se llama. Error TÉCNICO, no\n// consume intento de negocio.\nreturn $input.all().map((r, i) => {\n  const d = $('[CRM] Check Attempting').itemMatching(i).json;\n  lmLog('WF2', d, { call_job_id: d.call_job_id, route_key: d.route_key,\n                    lead_id: d.lead_id, attempt: d.attempt,\n                    error_code: d.tech_error_code, action: 'RELEASED' });\n  return { json: { ok: false, call_job_id: d.call_job_id, state: 'RELEASED',\n                   error_code: d.tech_error_code, consumes_attempt: false } };\n});\n"
+      },
+      "id": "7522f094-75c2-49d3-bfac-9f01753b1db3",
+      "name": "[LOG] Attempting Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11720,
+        1840
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 17 — AUDIT / METRICS\n\nResumen del ciclo con los campos de\ncorrelación del §10: workflow, execution_id, call_job_id, route_key, país,\nproveedor, adapter, attempt, conversation_id, resultado y código de error.\n\n**Nunca** teléfono completo, tokens ni `accessToken`.\n\nLas métricas del panel NO salen de este log: salen de `wf_call_jobs` y\n`wf_events`, que ya se escribieron en cada transición.",
+        "height": 340,
+        "width": 420,
+        "color": 4
+      },
+      "id": "e41821b2-812c-4edd-8df3-be29ab2d7a3d",
+      "name": "NOTE 17 17 — AUDIT / METRICS",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        12220,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Una sola línea por ciclo, para leer en Executions sin abrir cada nodo.\nfunction count(nodeName) {\n  try { return $(nodeName).all().length; } catch (e) { return 0; }\n}\nconst dispatched = count('[LOG] Dispatched');\nconst finals = count('[LOG] Final Result Handed Off');\nconst tech = count('[LOG] Technical Failure');\nconst unknown = count('[LOG] Dispatch Unknown');\nconst summary = { workflow: 'WF2', execution_id: $execution.id,\n                  dispatched: dispatched, final_results: finals,\n                  technical_failures: tech, unknown: unknown,\n                  total: dispatched + finals + tech + unknown };\nconsole.log('[WF2][exec=' + $execution.id + '] ciclo: ' + JSON.stringify(summary));\nreturn [{ json: summary }];\n"
+      },
+      "id": "583ea1f4-2688-4f7c-a315-6a561e2e0371",
+      "name": "[LOG] Cycle Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12240,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "[TRIGGER] Every Minute": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Load Active Routes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TRIGGER] Manual Dispatch": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Load Active Routes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Load Active Routes": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Load Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Load Settings": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Check Config Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Check Config Response": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Config Is Usable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Config Is Usable": {
+      "main": [
+        [
+          {
+            "node": "[ROUTE] Build Country Plan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[ERROR] Config Error Abort",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[ROUTE] Build Country Plan": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Get Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Get Token": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Check Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Check Token": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Token Is Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Token Is Valid": {
+      "main": [
+        [
+          {
+            "node": "[LEADS] Fetch Due Follow Ups",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "[LEADS] Fetch Country Queue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[ERROR] Auth Error Abort",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LEADS] Fetch Due Follow Ups": {
+      "main": [
+        [
+          {
+            "node": "[LEADS] Select Due For Reactivation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LEADS] Select Due For Reactivation": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Reactivate Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Reactivate Lead": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Reactivated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LEADS] Fetch Country Queue": {
+      "main": [
+        [
+          {
+            "node": "[LEADS] Normalize And Allocate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LEADS] Normalize And Allocate": {
+      "main": [
+        [
+          {
+            "node": "[DB] Resolve Next Attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Resolve Next Attempt": {
+      "main": [
+        [
+          {
+            "node": "[CLAIM] Build Call Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CLAIM] Build Call Job": {
+      "main": [
+        [
+          {
+            "node": "[DB] Insert Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Insert Claim": {
+      "main": [
+        [
+          {
+            "node": "[DB] Reclaim Released Attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Reclaim Released Attempt": {
+      "main": [
+        [
+          {
+            "node": "[DB] Read Claim Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Read Claim Owner": {
+      "main": [
+        [
+          {
+            "node": "[CLAIM] Check Claim Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CLAIM] Check Claim Owner": {
+      "main": [
+        [
+          {
+            "node": "[CLAIM] Claim Won",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CLAIM] Claim Won": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record Event Call Claimed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[LOG] Claim Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Call Claimed": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Mark Attempting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Mark Attempting": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Check Attempting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Check Attempting": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Attempting Recorded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Attempting Recorded": {
+      "main": [
+        [
+          {
+            "node": "[DB] Mark Dispatching",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Release On CRM Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Mark Dispatching": {
+      "main": [
+        [
+          {
+            "node": "[ROUTE] Prepare Dispatch Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[ROUTE] Prepare Dispatch Request": {
+      "main": [
+        [
+          {
+            "node": "[ROUTE] Resolve Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[ROUTE] Resolve Adapter": {
+      "main": [
+        [
+          {
+            "node": "[ELEVENLABS_SIP] Build Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[STRINGEE_WORKER] Build Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[ERROR] Unsupported Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[ELEVENLABS_SIP] Build Request": {
+      "main": [
+        [
+          {
+            "node": "[ELEVENLABS_SIP] Dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[ELEVENLABS_SIP] Dispatch": {
+      "main": [
+        [
+          {
+            "node": "[ELEVENLABS_SIP] Normalize Dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[STRINGEE_WORKER] Build Request": {
+      "main": [
+        [
+          {
+            "node": "[STRINGEE_WORKER] Dispatch Worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[STRINGEE_WORKER] Dispatch Worker": {
+      "main": [
+        [
+          {
+            "node": "[STRINGEE_WORKER] Normalize Dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[ELEVENLABS_SIP] Normalize Dispatch": {
+      "main": [
+        [
+          {
+            "node": "[RESULT] Dispatch Outcome Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[STRINGEE_WORKER] Normalize Dispatch": {
+      "main": [
+        [
+          {
+            "node": "[RESULT] Dispatch Outcome Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[ERROR] Unsupported Adapter": {
+      "main": [
+        [
+          {
+            "node": "[RESULT] Dispatch Outcome Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RESULT] Dispatch Outcome Router": {
+      "main": [
+        [
+          {
+            "node": "[DB] Mark Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Record Immediate Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Mark Released",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Mark Unknown",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[LOG] Unroutable Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Mark Dispatched": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record Event Call Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Call Dispatched": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Immediate Result": {
+      "main": [
+        [
+          {
+            "node": "[RESULT] Build Call Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RESULT] Build Call Result": {
+      "main": [
+        [
+          {
+            "node": "[ENGINE] Call Followup Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[ENGINE] Call Followup Engine": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Final Result Handed Off",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Mark Released": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record Event Tech Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Tech Failed": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Technical Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Mark Unknown": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record Event Call Unknown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Call Unknown": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Dispatch Unknown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Release On CRM Error": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Attempting Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LOG] Dispatched": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Cycle Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LOG] Final Result Handed Off": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Cycle Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LOG] Technical Failure": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Cycle Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LOG] Dispatch Unknown": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Cycle Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "versionId": "6fc218a0-5703-4d2a-afed-a9f43621aa79",
+  "meta": {
+    "templateVersion": "2.0.0"
+  },
+  "tags": [
+    {
+      "name": "landmark"
+    },
+    {
+      "name": "callcenter-v2"
+    }
+  ]
+}

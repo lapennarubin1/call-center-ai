@@ -1,0 +1,53 @@
+// ---------- Asterisk contestada: duración real (CDR.billsec) ----------
+// LeadStudio fija durationSeconds en el POST /followups y NO lo deja editar después.
+// Prioridad: 1) CDR.billsec (tiempo conectado real; NO cdr.duration, que incluye el timbrado)
+//            2) ElevenLabs metadata.call_duration_secs   3) 0 si no hubo conversación conectada.
+// El CDR se identifica por teléfono + hora del uniqueid y se ALINEA con la conversación (hora de
+// fin de la llamada). Sin una coincidencia única y clara se usa ElevenLabs: nunca se adivina.
+const CDR_BY_EVENT = new Map();
+let CDR_FAILED = false;   // el nodo CDR falló (tabla/permiso): no se espera a un CDR tardío
+function pickCdr(ev, startMs, endMs, durSecs) {
+  const rows = [];
+  const seen = new Set();
+  for (const r of (CDR_BY_EVENT.get(ev.event_key) || [])) {   // Asterisk puede escribir el MISMO registro dos veces (mismo uniqueid, misma duración): cuenta una vez
+    const k = [r.cdr_uniqueid, r.cdr_duration, r.cdr_billsec].join('|');
+    if (!seen.has(k)) { seen.add(k); rows.push(r); }
+  }
+  const cand = [];
+  for (const r of rows) {
+    const bill = Number(r.cdr_billsec);
+    const start = Number(r.cdr_start_s);
+    const total = Number(r.cdr_duration);
+    if (!(bill > 0) || !(start > 0) || !(total >= bill)) continue;
+    const answer = start + (total - bill);
+    let err;
+    if (startMs && endMs && durSecs > 0) {
+      const S = startMs / 1000;
+      const E = endMs / 1000;
+      // la conversación EL empieza al marcar o al contestar: ambos son válidos
+      if (S < start - WAIT.CDR_TOL_START_S || S > answer + WAIT.CDR_TOL_START_S) continue;
+      err = Math.abs(E - (start + total));
+      if (err > WAIT.CDR_TOL_END_S) continue;
+    } else {
+      // sin datos de la conversación: sólo la cercanía al despacho. Se exige que el CDR haya empezado a lo sumo
+      // 4 min antes/después del despacho: un CDR de otra llamada al mismo número (p. ej. de un agente) no sirve.
+      err = Math.abs(start - Math.floor((Number(ev.dispatched_at_ms) || Number(ev.event_at_ms) || 0) / 1000));
+      if (err > WAIT.CDR_UNALIGNED_TOL_S) continue;
+    }
+    cand.push({ err, r, bill, start });
+  }
+  if (!cand.length) return null;
+  cand.sort((a, b) => a.err - b.err);
+  // otro registro del MISMO tramo (pata Local / CDR repetido con otro uniqueid: mismo inicio ±2 s y billsec ±3 s) no es otra llamada
+  const rival = cand.slice(1).find(c => !(Math.abs(c.start - cand[0].start) <= 2 && Math.abs(c.bill - cand[0].bill) <= 3));
+  if (rival && rival.err - cand[0].err < WAIT.CDR_AMBIGUITY_S) return null;   // ambiguo -> ElevenLabs
+  return { billsec: Math.round(cand[0].bill), uniqueid: String(cand[0].r.cdr_uniqueid || ''), startMs: cand[0].start * 1000 };
+}
+// Devuelve { cls, source }: cls con la duración final de una Activity Asterisk creada por WF9.
+function withRealDuration(cls, cdr) {
+  const el = Math.max(0, Math.round(Number(cls.durationSec) || 0));
+  if (cdr && (el > 0 || cls.kind === 'CONTACTED')) return { cls: Object.assign({}, cls, { durationSec: cdr.billsec }), source: 'cdr' };
+  return { cls, source: 'el' };
+}
+
+// ---------- CRM ----------

@@ -1,0 +1,73 @@
+{% extends "base_app.html" %}
+{% import "_icons.html" as ic %}
+{% block title %}ElevenLabs — AI Business Platform{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Configuración de ElevenLabs</h1>
+  <p>Provider principal de Voice AI en este workspace</p>
+</div>
+
+<div class="panel" style="max-width:640px">
+  <div class="panel-header">
+    <div>
+      <h2>Provider: ElevenLabs</h2>
+      <div class="hint">
+        Estado:
+        {% if configured %}
+        <span class="badge badge-active"><span class="badge-dot"></span>configured</span>
+        {% else %}
+        <span class="badge badge-draft"><span class="badge-dot"></span>not configured</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div style="padding:20px">
+    <div id="form-alert" class="alert alert-error"></div>
+    <div id="form-success" class="alert alert-success"></div>
+
+    <p style="color:var(--text-muted);font-size:13.5px;margin-bottom:16px">
+      Esta pantalla no se conecta a ElevenLabs todavía — no se hacen requests reales ni se consumen créditos.
+      Solo define <strong>cómo</strong> este workspace va a usar ElevenLabs cuando esa conexión exista.
+    </p>
+
+    <form id="elevenlabs-form">
+      <div class="field">
+        <label>Modo</label>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+          <label style="display:flex;align-items:flex-start;gap:10px;font-weight:400;cursor:pointer">
+            <input type="radio" name="mode" value="managed" style="margin-top:3px"
+                   {{ 'checked' if current_mode == 'managed' or not current_mode }}>
+            <span>
+              <strong>Platform Managed</strong><br>
+              <span style="color:var(--text-muted);font-size:12.5px">La plataforma va a usar su propia cuenta de ElevenLabs para este workspace. No requiere ninguna configuración adicional de tu parte.</span>
+            </span>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:10px;font-weight:400;cursor:pointer">
+            <input type="radio" name="mode" value="byok" style="margin-top:3px"
+                   {{ 'checked' if current_mode == 'byok' }}>
+            <span>
+              <strong>Bring Your Own Key (BYOK)</strong><br>
+              <span style="color:var(--text-muted);font-size:12.5px">Vas a usar tu propia API key de ElevenLabs.</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div id="byok-note" class="alert" style="background:var(--warning-soft);color:var(--warning);display:none">
+        La plataforma todavía no tiene infraestructura de cifrado en reposo (vault) para guardar API keys de
+        terceros de forma segura. Por eso, en este modo, esta pantalla no acepta ni guarda tu API key —
+        solo registra que elegiste BYOK. Cuando confirmes, un operador va a poder cargar la key manualmente
+        en el servidor bajo el nombre de variable
+        <code style="background:#fff;padding:1px 6px;border-radius:4px">{{ config_ref if config_ref else 'TENANT_&lt;id&gt;_ELEVENLABS_KEY' }}</code>.
+        Nunca se te va a pedir pegarla acá.
+      </div>
+
+      <div class="form-actions">
+        <a class="btn btn-ghost" href="{{ url_for('web.voice_agents') }}">Volver</a>
+        <button type="submit" id="form-submit" class="btn btn-primary btn-auto">Guardar modo</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

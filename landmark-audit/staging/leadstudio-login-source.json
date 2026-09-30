@@ -1,0 +1,51 @@
+{
+  "email": "ai@leadstudio.com",
+  "password": "Admin@123",
+  "sources": [
+    {
+      "workflow": "WF7+WF8 MULTI-PAIS — Payment Link + Callback (100% LeadStudio API)",
+      "node": "🔐 Login LeadStudio (WF7)",
+      "source": "jsonBody"
+    },
+    {
+      "workflow": "WF7+WF8 MULTI-PAIS — Payment Link + Callback (100% LeadStudio API)",
+      "node": "🔐 Login LeadStudio (WF7-Fail)",
+      "source": "jsonBody"
+    },
+    {
+      "workflow": "WF7+WF8 MULTI-PAIS — Payment Link + Callback (100% LeadStudio API)",
+      "node": "🔐 Login LeadStudio (WF8)",
+      "source": "jsonBody"
+    },
+    {
+      "workflow": "INDIA + NEPAL WF3 — Account Creation (API LeadStudio + CashStudio)",
+      "node": "🔐 Login LeadStudio (WF3)",
+      "source": "jsonBody"
+    },
+    {
+      "workflow": "WF2 UNIFICADO — Asterisk + Stringee (API LeadStudio, follow-up automático)",
+      "node": "🔐 Login LeadStudio",
+      "source": "jsonBody"
+    },
+    {
+      "workflow": "WF10 — Recordings to LeadStudio API + Telegram (Multipais, sin Drive)",
+      "node": "🔐 Login LeadStudio (WF10-Asterisk)2",
+      "source": "jsonBody"
+    },
+    {
+      "workflow": "WF10 — Recordings to LeadStudio API + Telegram (Multipais, sin Drive)",
+      "node": "🔐 Login LeadStudio (WF10-Stringee)2",
+      "source": "jsonBody"
+    },
+    {
+      "workflow": "WF14 - CRM Sync (LeadStudio API → MySQL) + Stringee Call Log",
+      "node": "🔐 Login LeadStudio (CRM)",
+      "source": "jsonBody"
+    },
+    {
+      "workflow": "INDIA MULTI-PAIS WF9 — Post-Call Handler (100% LeadStudio API, sin Sheets)",
+      "node": "🔐 Login LeadStudio (WF9)",
+      "source": "jsonBody"
+    }
+  ]
+}

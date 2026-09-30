@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% set active='clients' %}
+{% block heading %}Clientes{% endblock %}
+{% block content %}
+<div class="panel">
+  <div class="panel-h"><h2>Todos los clientes</h2>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('client_form') }}">Nuevo cliente</a></div>
+  <div class="panel-b flush">
+    {% if clients %}
+    <table>
+      <thead><tr>
+        <th>ID</th><th>Nombre</th><th>Plan</th><th>Facturación</th>
+        <th class="num">Saldo</th><th class="num">Canales</th><th>Estado</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for c in clients %}
+        <tr>
+          <td class="mono">{{ c.client }}</td>
+          <td>{{ c.name }}{% if c.company %} <span class="tag">{{ c.company }}</span>{% endif %}</td>
+          <td>{{ plans.get(c.rate_plan_id, '—') }}</td>
+          <td>{{ 'Prepago' if c.billing_type=='prepaid' else 'Pospago' }}</td>
+          <td class="num">{{ '%.2f'|format(c.balance|float) }} {{ c.currency }}</td>
+          <td class="num">{{ c.max_channels }}</td>
+          <td>{% if c.active %}<span class="pill pill-ok">activo</span>
+              {% else %}<span class="pill pill-off">inactivo</span>{% endif %}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <a class="btn btn-sm" href="{{ url_for('client_form', cid=c.id) }}">Editar</a>
+            <a class="btn btn-sm" href="{{ url_for('client_toggle', cid=c.id) }}">
+              {{ 'Desactivar' if c.active else 'Activar' }}</a>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">Aún no hay clientes. Crea el primero para empezar.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

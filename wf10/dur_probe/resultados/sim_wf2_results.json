@@ -1,0 +1,128 @@
+[
+  {
+    "id": "HL-Stringee",
+    "name": "Fetch + Lock (Stringee): attempts ≥ 9 no se despacha → CLOSED + UNRESPONSIVE",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "HL-Stringee",
+    "name": "Fetch + Lock (Stringee): lead con attempts 2 sí se despacha (sin cambios de comportamiento)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "HL-Asterisk",
+    "name": "Fetch + Lock (Asterisk): attempts ≥ 9 no se despacha → CLOSED + UNRESPONSIVE",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "HL-Asterisk",
+    "name": "Fetch + Lock (Asterisk): lead con attempts 2 sí se despacha (sin cambios de comportamiento)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C9",
+    "name": "Asterisk intento 9 sin respuesta → CLOSED + UNRESPONSIVE, sin próximo intento",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C9",
+    "name": "Asterisk intento 9 contestado → CONTACTED, sin stage de cierre",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "CB",
+    "name": "POST → Stringee Worker: JSON válido con callback_url de producción y el resto del body intacto",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "LEDGER",
+    "name": "ledger: 1 fila por job con job_id válido (idempotente), teléfono en dígitos, próximo chequeo +3 min",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "FCF-A",
+    "name": "Asterisk: fila en wf_call_followups con followup_id real; CONNECTED → recording_synced=0, resto → 1; sin duplicados",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M1",
+    "name": "ATTEMPTING colgado con job Stringee sin resolver → NO se libera",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M2",
+    "name": "ATTEMPTING colgado con attempts 9 → CLOSED + UNRESPONSIVE",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M3",
+    "name": "ATTEMPTING colgado sin job pendiente → NO_ANSWER (no suma intento)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M4",
+    "name": "NO_ANSWER con attempts ≥ 9 → CLOSED + UNRESPONSIVE (nunca NOT_CONTACTED)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M5",
+    "name": "NO_ANSWER vencido (nextFollowUpAt válido) → NOT_CONTACTED",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M6",
+    "name": "NO_ANSWER con reintento retenido por WF9 a futuro → NO se reactiva aunque nextFollowUpAt viejo esté vencido",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M7",
+    "name": "NO_ANSWER con reintento retenido ya vencido → NOT_CONTACTED",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M8",
+    "name": "NO_ANSWER con nextFollowUpAt viejo (anterior al último cambio) → se recalcula por ciclo 3x3 y NO se reactiva en falso",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M9",
+    "name": "NO_ANSWER sin nextFollowUpAt (lead \"muerto\") → vencimiento recalculado (+2 h) → se reactiva",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M10",
+    "name": "Mantenimiento ya no intenta escribir nextFollowUpAt (LeadStudio lo ignora)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M11",
+    "name": "si la consulta MySQL falla → no libera ni reactiva nada (fail-safe) y avisa con 🚨",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M12",
+    "name": "aun con MySQL caído, attempts ≥ 9 se cierra (CLOSED + UNRESPONSIVE), nunca vuelve a la cola",
+    "pass": true,
+    "detail": ""
+  }
+]

@@ -1,0 +1,1231 @@
+{
+  "id": "Vr2aeOmW9k6UK2vF",
+  "name": "VZLA WF5 Sales Handoff MULTI-PAIS (dual-sheet)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-07-27T12:29:10.254Z",
+  "updatedAt": "2026-08-20T06:37:04.128Z",
+  "isArchived": false,
+  "versionId": "0cd8b5c8-2971-49a0-9613-6a1aace617ca",
+  "versionCounter": 18,
+  "sourceWorkflowId": null,
+  "triggerCount": 2,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "97d147a6-6f39-4e9b-97c3-616ad76a05e2",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -496,
+        1456
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads_venezuela",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit#gid=210138417"
+        },
+        "options": {}
+      },
+      "name": "Read Leads VZ",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -304,
+        800
+      ],
+      "id": "f7fc807f-2c04-4668-94d4-a766fe967805",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1546432888,
+          "mode": "list",
+          "cachedResultName": "leads_mexico",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit#gid=1546432888"
+        },
+        "options": {}
+      },
+      "name": "Read Leads MX",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -304,
+        1024
+      ],
+      "id": "ce9d8775-5b59-44db-971c-e3e6b2836c81",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "name": "Read Leads Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -96,
+        912
+      ],
+      "id": "502dd869-a914-481c-a152-3ee5215a6671"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "name": "Every 5 min1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -544,
+        816
+      ],
+      "id": "fdc3e21c-2784-43b5-bb45-deb75992d8b7"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "04fc929e-d5c3-40eb-a23a-2daf1f65ca40",
+        "options": {}
+      },
+      "name": "Manual Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        1008
+      ],
+      "webhookId": "04fc929e-d5c3-40eb-a23a-2daf1f65ca40",
+      "id": "7ff23852-227c-4d67-b53f-e3e1592f2293"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  const status        = String(r.status         || '').toUpperCase();\n  const interested    = String(r.interested     || '').toUpperCase() === 'TRUE';\n  const accountOpened = String(r.account_opened || '').toUpperCase();\n  let action = 'SKIP';\n  let next_action = '';\n\n  if (accountOpened === 'TRUE' && status !== 'CONVERTED') {\n    action = 'CONVERTED';\n    next_action = 'Welcome onboarding + first deposit follow-up';\n  } else if ((interested || accountOpened === 'PENDING') && !['SALES_HANDOFF', 'CONVERTED'].includes(status)) {\n    action = 'HANDOFF';\n    next_action = accountOpened === 'PENDING'\n      ? 'Call advisor: confirm credentials received + assist first deposit (min $25 USD)'\n      : 'Call advisor: nurture & confirm account opening';\n  }\n\n  if (action !== 'SKIP') out.push({ json: { ...r, _action: action, next_action } });\n}\nreturn out;"
+      },
+      "name": "Compute Action1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        96,
+        912
+      ],
+      "id": "26ae585d-d7a8-4c99-a27f-628955d56156"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "h1",
+                    "leftValue": "={{ $json._action }}",
+                    "rightValue": "HANDOFF",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "h2",
+                    "leftValue": "={{ $json._action }}",
+                    "rightValue": "CONVERTED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Route Action1",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        320,
+        912
+      ],
+      "id": "33242b38-1258-4b25-9427-0f66f075282e"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ ({venezuela: 210138417, mexico: 1546432888, colombia: 580397522})[($json.country || 'venezuela').toLowerCase()] }}",
+          "mode": "expression"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "=={{ $json.status }}",
+            "lead_id": "=={{ $json.lead_id }}",
+            "phone": "=={{ $json.phone }}"
+          },
+          "matchingColumns": [
+            "phone"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "call_trigger",
+              "displayName": "call_trigger",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "assigned_agent",
+              "displayName": "assigned_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "last_call_status",
+              "displayName": "last_call_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "last_call_time",
+              "displayName": "last_call_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "call_attempts",
+              "displayName": "call_attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "elevenlabs_call_id",
+              "displayName": "elevenlabs_call_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "interested",
+              "displayName": "interested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "callback_requested",
+              "displayName": "callback_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "callback_date",
+              "displayName": "callback_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "execution",
+              "displayName": "execution",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "_row_number",
+              "displayName": "_row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "_valid",
+              "displayName": "_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "_errors",
+              "displayName": "_errors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "status_raw",
+              "displayName": "status_raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "duration_secs",
+              "displayName": "duration_secs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "classification",
+              "displayName": "classification",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "from",
+              "displayName": "from",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "isFromMe",
+              "displayName": "isFromMe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "raw",
+              "displayName": "raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "pushName",
+              "displayName": "pushName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "headers",
+              "displayName": "headers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "statusCode",
+              "displayName": "statusCode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "statusMessage",
+              "displayName": "statusMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Mark SALES_HANDOFF1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        528,
+        768
+      ],
+      "id": "eb46128f-14fc-4d2d-b318-218893b24c3e",
+      "alwaysOutputData": false,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ ({venezuela: 210138417, mexico: 1546432888, colombia: 580397522})[($json.country || 'venezuela').toLowerCase()] }}",
+          "mode": "expression"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "status": "CONVERTED",
+            "account_opened": "TRUE",
+            "notes": "=Converted: {{ $json.next_action }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "name": "Mark CONVERTED1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        528,
+        1056
+      ],
+      "id": "645b3fc2-728f-4938-802c-1bfae905d706",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "conversations",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "event_type": "CONVERTED",
+            "lead_id": "={{ $json.lead_id }}",
+            "full_name": "={{ $json.full_name }}",
+            "phone": "={{ $json.phone }}",
+            "country": "={{ $json.country }}",
+            "elevenlabs_call_id": "={{ $json.elevenlabs_call_id }}",
+            "conversation_summary": "={{ $json.conversation_summary }}"
+          },
+          "schema": []
+        },
+        "options": {}
+      },
+      "name": "Append Conversion Log1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        752,
+        1056
+      ],
+      "id": "04b7928e-31a7-4e1a-ac2e-f3bdc607c066",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "name": "Log Error1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -304,
+        1456
+      ],
+      "id": "327a3ce7-41b2-42ba-9eb0-a16e9f68f978",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-1003616406932",
+        "text": "=🔥 *SALES HANDOFF — LATAM*\n\n*Lead:* {{ $json.full_name || 'Sin nombre' }}\n*Teléfono:* {{ $json.phone }}\n*País:* {{ ($json.country || '').toUpperCase() }}\n*Status:* {{ $json._action }}\n*Acción:* {{ $json.next_action }}\n*Resumen:* {{ String($json.conversation_summary || '').slice(0, 300) }}\n\n_{{ $now.toISO() }}_",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "📢 Telegram Alert — Sales Handoff",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        752,
+        768
+      ],
+      "id": "0a6f4366-1ed7-48c2-b09b-771db66e7ab3",
+      "webhookId": "585189fb-6f27-41d1-acd7-0920f98e076c",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 580397522,
+          "mode": "list",
+          "cachedResultName": "leads_colombia",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit#gid=580397522"
+        },
+        "options": {}
+      },
+      "name": "Read Leads CO",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -304,
+        1232
+      ],
+      "id": "1281054e-dc4b-40d6-94fd-8d0e2b4ead0c",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Leads VZ": {
+      "main": [
+        [
+          {
+            "node": "Read Leads Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Leads MX": {
+      "main": [
+        [
+          {
+            "node": "Read Leads Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Read Leads Merge": {
+      "main": [
+        [
+          {
+            "node": "Compute Action1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 5 min1": {
+      "main": [
+        [
+          {
+            "node": "Read Leads MX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Read Leads MX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Action1": {
+      "main": [
+        [
+          {
+            "node": "Route Action1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action1": {
+      "main": [
+        [
+          {
+            "node": "Mark SALES_HANDOFF1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark CONVERTED1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark CONVERTED1": {
+      "main": [
+        [
+          {
+            "node": "Append Conversion Log1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Leads CO": {
+      "main": [
+        [
+          {
+            "node": "Read Leads Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Mark SALES_HANDOFF1": {
+      "main": [
+        [
+          {
+            "node": "📢 Telegram Alert — Sales Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Every 5 min1": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {
+    "Error Trigger": [
+      {
+        "json": {
+          "execution": {
+            "id": "110404",
+            "url": "https://landmarket-n8n.dhsoig.easypanel.host/workflow/pHqOSOcJi2NEFjTw/executions/110404",
+            "error": {
+              "level": "warning",
+              "tags": {},
+              "timestamp": 1781524852392,
+              "context": {},
+              "functionality": "regular",
+              "name": "NodeOperationError",
+              "node": {
+                "parameters": {
+                  "preBuiltAgentsCalloutGoogleSheets": "",
+                  "authentication": "oAuth2",
+                  "resource": "sheet",
+                  "operation": "read",
+                  "documentId": {
+                    "__rl": true,
+                    "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+                    "mode": "list",
+                    "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+                    "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc/edit?usp=drivesdk"
+                  },
+                  "sheetName": {
+                    "__rl": true,
+                    "value": "leads_venezuela",
+                    "mode": "list",
+                    "cachedResultName": "leads_venezuela"
+                  },
+                  "filtersUI": {},
+                  "combineFilters": "AND",
+                  "options": {}
+                },
+                "name": "Read Leads VZ",
+                "type": "n8n-nodes-base.googleSheets",
+                "typeVersion": 4.5,
+                "position": [
+                  3232,
+                  3008
+                ],
+                "id": "a7d190da-33a1-41c4-b4c1-9c3e4fbe6f03",
+                "credentials": {
+                  "googleSheetsOAuth2Api": {
+                    "id": "NpFWreAH2GPGnUHj",
+                    "name": "Landmark Markets"
+                  }
+                }
+              },
+              "messages": [],
+              "message": "Sheet with ID leads_venezuela not found",
+              "stack": "NodeOperationError: Sheet with ID leads_venezuela not found\n    at GoogleSheet.spreadsheetGetSheet (/usr/local/lib/node_modules/n8n/node_modules/.pnpm/n8n-nodes-base@file+packages+nodes-base_@aws-sdk+credential-providers@3.808.0_asn1.js@5_8da18263ca0574b0db58d4fefd8173ce/node_modules/n8n-nodes-base/nodes/Google/Sheet/v2/helpers/GoogleSheet.ts:144:10)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at ExecuteContext.router (/usr/local/lib/node_modules/n8n/node_modules/.pnpm/n8n-nodes-base@file+packages+nodes-base_@aws-sdk+credential-providers@3.808.0_asn1.js@5_8da18263ca0574b0db58d4fefd8173ce/node_modules/n8n-nodes-base/nodes/Google/Sheet/v2/actions/router.ts:43:20)\n    at ExecuteContext.execute (/usr/local/lib/node_modules/n8n/node_modules/.pnpm/n8n-nodes-base@file+packages+nodes-base_@aws-sdk+credential-providers@3.808.0_asn1.js@5_8da18263ca0574b0db58d4fefd8173ce/node_modules/n8n-nodes-base/nodes/Google/Sheet/v2/GoogleSheetsV2.node.ts:30:10)\n    at WorkflowExecute.executeNode (/usr/local/lib/node_modules/n8n/node_modules/.pnpm/n8n-core@file+packages+core_@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30_ec37920eb95917b28efaa783206b20f3/node_modules/n8n-core/src/execution-engine/workflow-execute.ts:1045:8)\n    at WorkflowExecute.runNode (/usr/local/lib/node_modules/n8n/node_modules/.pnpm/n8n-core@file+packages+core_@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30_ec37920eb95917b28efaa783206b20f3/node_modules/n8n-core/src/execution-engine/workflow-execute.ts:1226:11)\n    at /usr/local/lib/node_modules/n8n/node_modules/.pnpm/n8n-core@file+packages+core_@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30_ec37920eb95917b28efaa783206b20f3/node_modules/n8n-core/src/execution-engine/workflow-execute.ts:1662:27\n    at /usr/local/lib/node_modules/n8n/node_modules/.pnpm/n8n-core@file+packages+core_@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30_ec37920eb95917b28efaa783206b20f3/node_modules/n8n-core/src/execution-engine/workflow-execute.ts:2297:11"
+            },
+            "lastNodeExecuted": "Read Leads VZ",
+            "mode": "trigger",
+            "executionContext": {
+              "version": 1,
+              "establishedAt": 1781524852032,
+              "source": "trigger",
+              "triggerNode": {
+                "name": "Every 5 min1",
+                "type": "n8n-nodes-base.scheduleTrigger"
+              }
+            }
+          },
+          "workflow": {
+            "id": "pHqOSOcJi2NEFjTw",
+            "name": "VZLA WF5 Sales Handoff MULTI-PAIS (dual-sheet)"
+          }
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "Compute Action1": [
+      {
+        "json": {
+          "row_number": 2,
+          "lead_id": 1,
+          "full_name": "Test Cliente",
+          "phone": 971509288227,
+          "country": "venezuela",
+          "language": "",
+          "status": "SALES_HANDOFF",
+          "call_trigger": "",
+          "priority": "",
+          "assigned_agent": "",
+          "last_call_status": "",
+          "last_call_time": "",
+          "call_attempts": "",
+          "elevenlabs_call_id": "",
+          "conversation_summary": "",
+          "interested": true,
+          "callback_requested": "",
+          "callback_date": "",
+          "account_opened": "",
+          "notes": "",
+          "execution": "",
+          "workflow": "",
+          "_row_number": "",
+          "_valid": "",
+          "_errors": "",
+          "status_raw": "",
+          "duration_secs": "",
+          "transcript": "",
+          "sentiment": "",
+          "intent": "",
+          "classification": "",
+          "from": "",
+          "isFromMe": "",
+          "text": "",
+          "raw": "",
+          "pushName": "",
+          "body": "",
+          "headers": "",
+          "statusCode": "",
+          "statusMessage": "",
+          "_action": "HANDOFF",
+          "next_action": "Call advisor: nurture & confirm account opening"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "id": "EWlF9l3b9w6Vq3NA",
+      "name": "landmark",
+      "createdAt": "2026-07-27T09:29:13.383Z",
+      "updatedAt": "2026-07-27T09:29:13.383Z"
+    },
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "LismWLdOzwMudnEo",
+      "name": "compliant-v1",
+      "createdAt": "2026-07-27T09:29:13.400Z",
+      "updatedAt": "2026-07-27T09:29:13.400Z"
+    },
+    {
+      "id": "4QiZI0ncQuXkUBYA",
+      "name": "wf5-handoff",
+      "createdAt": "2026-07-27T12:29:08.664Z",
+      "updatedAt": "2026-07-27T12:29:08.664Z"
+    },
+    {
+      "id": "ZF3ImiIOdnoSG1Py",
+      "name": "hindi",
+      "createdAt": "2026-07-27T09:29:13.407Z",
+      "updatedAt": "2026-07-27T09:29:13.407Z"
+    },
+    {
+      "id": "pRf4hChU7hBS26VE",
+      "name": "wf5",
+      "createdAt": "2026-07-27T12:29:08.661Z",
+      "updatedAt": "2026-07-27T12:29:08.661Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "Vr2aeOmW9k6UK2vF",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-07-27T12:29:10.254Z",
+      "updatedAt": "2026-07-27T12:29:10.254Z"
+    }
+  ],
+  "activeVersion": null
+}

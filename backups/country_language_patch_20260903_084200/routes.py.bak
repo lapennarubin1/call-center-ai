@@ -1,0 +1,479 @@
+"""Modulo voice_ai — Sprint 1: lectura de campanas y llamadas del tenant.
+No dispara llamadas: eso sigue en el sistema actual (Asterisk + n8n) hasta
+Fase B. Solo depende del core.
+
+Bloque "Campañas real" (post Sprint 1): administracion de campanas dentro
+de saas_platform unicamente. Ninguna ruta de este archivo toca Asterisk,
+dispara llamadas ni activa n8n — crear/editar una campana es una operacion
+100% de base de datos."""
+from flask import Blueprint, jsonify, g, request, abort
+from sqlalchemy import text
+import json
+from ...db import saas_session
+from ...core.auth.rbac import requires_role, requires_module
+from ...core.events.outbox import publish
+from . import countries, locales, elevenlabs
+
+bp = Blueprint("voice_ai", __name__, url_prefix="/api/v1/voice")
+
+# Estados permitidos por operacion. 'active' y 'finished' quedan fuera de
+# este bloque a proposito: activar una campana implica futura integracion
+# con n8n/Asterisk, explicitamente fuera de alcance ahora.
+CREATE_ALLOWED_STATUS = {"draft"}
+EDIT_ALLOWED_STATUS = {"draft", "paused", "archived"}
+
+# Agents: mismo criterio — 'active' bloqueado en este bloque completo
+# (ni al crear ni al editar), no solo al crear.
+AGENT_CREATE_ALLOWED_STATUS = {"draft"}
+AGENT_EDIT_ALLOWED_STATUS = {"draft", "disabled"}
+ALLOWED_VOICE_PROVIDERS = {"elevenlabs"}  # unico proveedor real habilitado en este bloque
+NAME_MAX_LEN = 120
+DESCRIPTION_MAX_LEN = 500
+SYSTEM_PROMPT_MAX_LEN = 6000
+EXTERNAL_AGENT_ID_MAX_LEN = 120  # sin regex rigido: ElevenLabs no garantiza un formato estable
+
+
+@bp.get("/campaigns")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def list_campaigns():
+    with saas_session() as s:
+        rows = s.execute(text("""
+            SELECT id, name, country, timezone, status, daily_limit, created_at
+            FROM voice_campaigns WHERE tenant_id=:t ORDER BY id DESC
+        """), {"t": g.tenant_id}).mappings().all()
+    return jsonify(items=[dict(r) for r in rows])
+
+
+@bp.get("/calls")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def list_calls():
+    with saas_session() as s:
+        rows = s.execute(text("""
+            SELECT id, campaign_id, contact_id, direction, phone_e164, started_at, billsec, status, outcome
+            FROM voice_calls WHERE tenant_id=:t ORDER BY id DESC LIMIT 100
+        """), {"t": g.tenant_id}).mappings().all()
+    return jsonify(items=[dict(r) for r in rows])
+
+
+# ------------------------------------------------------- helpers privados --
+
+def _agent_belongs_to_tenant(session, agent_id: int, tenant_id: int) -> bool:
+    return session.execute(text(
+        "SELECT 1 FROM agents WHERE id=:a AND tenant_id=:t"
+    ), {"a": agent_id, "t": tenant_id}).first() is not None
+
+
+def _campaign_row(session, campaign_id: int, tenant_id: int):
+    """SIEMPRE filtrado por tenant_id. Una campana de otro tenant no existe
+    para esta consulta — nunca se distingue "no existe" de "es de otro
+    tenant" en la respuesta, para no filtrar informacion."""
+    return session.execute(text("""
+        SELECT c.id, c.tenant_id, c.name, c.description, c.status, c.country, c.timezone,
+               c.daily_limit, c.created_at, c.updated_at,
+               a.id AS agent_id, a.name AS agent_name
+        FROM voice_campaigns c
+        LEFT JOIN agents a ON a.id = c.agent_id
+        WHERE c.id = :id AND c.tenant_id = :t
+    """), {"id": campaign_id, "t": tenant_id}).mappings().first()
+
+
+def _campaign_or_404(session, campaign_id: int, tenant_id: int):
+    row = _campaign_row(session, campaign_id, tenant_id)
+    if not row:
+        abort(404, description="Campaña no encontrada")
+    return row
+
+
+# --------------------------------------------------------------- endpoints --
+
+@bp.get("/campaigns/<int:campaign_id>")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def get_campaign(campaign_id):
+    with saas_session() as s:
+        row = _campaign_or_404(s, campaign_id, g.tenant_id)
+    return jsonify(dict(row))
+
+
+@bp.post("/campaigns")
+@requires_module("voice_ai")
+@requires_role("operator", "admin", "owner")
+def create_campaign():
+    d = request.get_json(silent=True) or {}
+    name = (d.get("name") or "").strip()
+    country = (d.get("country") or "").strip().upper()
+    description = (d.get("description") or "").strip() or None
+    agent_id = d.get("agent_id")
+    status = (d.get("status") or "draft").strip().lower()
+
+    if not name:
+        return jsonify(error="name es obligatorio"), 400
+    if not countries.is_valid_country(country):
+        return jsonify(error=f"country invalido. Valores permitidos: {', '.join(c for c, _ in countries.country_choices())}"), 400
+    if status not in CREATE_ALLOWED_STATUS:
+        return jsonify(error=f"status invalido para creacion. Permitido: {', '.join(sorted(CREATE_ALLOWED_STATUS))}"), 400
+    if not agent_id:
+        return jsonify(error="agent_id es obligatorio (el esquema actual no permite campañas sin agente)"), 400
+
+    with saas_session() as s:
+        if not _agent_belongs_to_tenant(s, agent_id, g.tenant_id):
+            return jsonify(error="agent_id no pertenece a este tenant"), 400
+
+        timezone = countries.default_timezone(country)
+        res = s.execute(text("""
+            INSERT INTO voice_campaigns (tenant_id, agent_id, name, description, country, timezone, status)
+            VALUES (:t, :a, :n, :d, :c, :tz, :st)
+        """), {"t": g.tenant_id, "a": agent_id, "n": name, "d": description,
+               "c": country, "tz": timezone, "st": status})
+        campaign_id = res.lastrowid
+
+        publish(s, g.tenant_id, "voice_ai", "voice.campaign.created", "voice_campaign", campaign_id, {
+            "name": name, "country": country, "agent_id": agent_id, "status": status,
+        })
+        row = _campaign_row(s, campaign_id, g.tenant_id)
+    return jsonify(dict(row)), 201
+
+
+@bp.patch("/campaigns/<int:campaign_id>")
+@requires_module("voice_ai")
+@requires_role("operator", "admin", "owner")
+def update_campaign(campaign_id):
+    d = request.get_json(silent=True) or {}
+
+    with saas_session() as s:
+        current = _campaign_or_404(s, campaign_id, g.tenant_id)
+
+        fields, params = [], {"id": campaign_id, "t": g.tenant_id}
+        changed = {}
+
+        if "name" in d:
+            name = (d.get("name") or "").strip()
+            if not name:
+                return jsonify(error="name no puede quedar vacio"), 400
+            fields.append("name=:name"); params["name"] = name; changed["name"] = name
+
+        if "description" in d:
+            description = (d.get("description") or "").strip() or None
+            fields.append("description=:description"); params["description"] = description
+            changed["description"] = description
+
+        if "country" in d:
+            country = (d.get("country") or "").strip().upper()
+            if not countries.is_valid_country(country):
+                return jsonify(error=f"country invalido. Valores permitidos: {', '.join(c for c, _ in countries.country_choices())}"), 400
+            fields.append("country=:country"); params["country"] = country
+            fields.append("timezone=:timezone"); params["timezone"] = countries.default_timezone(country)
+            changed["country"] = country
+
+        if "agent_id" in d:
+            agent_id = d.get("agent_id")
+            if not agent_id or not _agent_belongs_to_tenant(s, agent_id, g.tenant_id):
+                return jsonify(error="agent_id invalido o no pertenece a este tenant"), 400
+            fields.append("agent_id=:agent_id"); params["agent_id"] = agent_id; changed["agent_id"] = agent_id
+
+        if "status" in d:
+            status = (d.get("status") or "").strip().lower()
+            if status not in EDIT_ALLOWED_STATUS:
+                return jsonify(error=f"status invalido. Permitido en este bloque: {', '.join(sorted(EDIT_ALLOWED_STATUS))}"), 400
+            fields.append("status=:status"); params["status"] = status; changed["status"] = status
+
+        if not fields:
+            return jsonify(error="no se envio ningun campo para actualizar"), 400
+
+        s.execute(text(f"UPDATE voice_campaigns SET {', '.join(fields)} WHERE id=:id AND tenant_id=:t"), params)
+        publish(s, g.tenant_id, "voice_ai", "voice.campaign.updated", "voice_campaign", campaign_id, changed)
+        row = _campaign_row(s, campaign_id, g.tenant_id)
+    return jsonify(dict(row))
+
+
+
+# ============================================================= AGENTS =====
+
+def _agent_row(session, agent_id: int, tenant_id: int):
+    """SIEMPRE filtrado por tenant_id — mismo criterio que _campaign_row:
+    un agente de otro tenant no existe para esta consulta."""
+    return session.execute(text("""
+        SELECT a.id, a.tenant_id, a.name, a.description, a.type, a.language, a.locale,
+               a.voice_provider, a.voice_id, a.system_prompt, a.channel_config, a.status,
+               a.created_at, a.updated_at,
+               (SELECT COUNT(*) FROM voice_campaigns c WHERE c.agent_id = a.id AND c.tenant_id = a.tenant_id) AS campaigns_count
+        FROM agents a
+        WHERE a.id = :id AND a.tenant_id = :t
+    """), {"id": agent_id, "t": tenant_id}).mappings().first()
+
+
+def _agent_or_404(session, agent_id: int, tenant_id: int):
+    row = _agent_row(session, agent_id, tenant_id)
+    if not row:
+        abort(404, description="Agente no encontrado")
+    return row
+
+
+def _agent_dict(row) -> dict:
+    """Convierte la fila de _agent_row a JSON de respuesta: agrega
+    external_agent_id (derivado, no es secreto) y oculta el channel_config
+    crudo — el cliente nunca necesita ver la estructura interna completa."""
+    d = dict(row)
+    channel_config_json = d.pop("channel_config", None)
+    d["external_agent_id"] = elevenlabs.external_agent_id_from_config(channel_config_json)
+    return d
+
+
+def _validate_agent_fields(d: dict, partial: bool = False):
+    """Validaciones compartidas por POST y PATCH. Devuelve (errors:list, clean:dict).
+    partial=True permite que un campo este ausente (no se valida si no vino)."""
+    clean = {}
+
+    if "name" in d or not partial:
+        name = (d.get("name") or "").strip()
+        if not name:
+            return "name es obligatorio", None
+        if len(name) > NAME_MAX_LEN:
+            return f"name supera el maximo de {NAME_MAX_LEN} caracteres", None
+        clean["name"] = name
+
+    if "description" in d:
+        description = (d.get("description") or "").strip() or None
+        if description and len(description) > DESCRIPTION_MAX_LEN:
+            return f"description supera el maximo de {DESCRIPTION_MAX_LEN} caracteres", None
+        clean["description"] = description
+
+    if "locale" in d or not partial:
+        locale = (d.get("locale") or "").strip()
+        if not locales.is_valid_locale(locale):
+            return f"locale invalido. Permitidos: {', '.join(c for c, _ in locales.locale_choices())}", None
+        clean["locale"] = locale
+        clean["language"] = locales.language_for_locale(locale)
+
+    if "language" in d and d.get("language"):
+        language = (d.get("language") or "").strip()
+        if not locales.is_valid_language(language):
+            return f"language invalido. Permitidos: {', '.join(c for c, _ in locales.language_choices())}", None
+        # el language debe corresponder al locale elegido — una sola fuente de verdad
+        effective_locale = clean.get("locale") or d.get("locale")
+        expected = locales.language_for_locale(effective_locale)
+        if expected and language != expected:
+            return f"language '{language}' no corresponde al locale seleccionado", None
+
+    if "voice_provider" in d or not partial:
+        voice_provider = (d.get("voice_provider") or "").strip().lower()
+        if voice_provider not in ALLOWED_VOICE_PROVIDERS:
+            return f"voice_provider invalido. Permitido en este bloque: {', '.join(sorted(ALLOWED_VOICE_PROVIDERS))}", None
+        clean["voice_provider"] = voice_provider
+
+    if "voice_id" in d:
+        voice_id = (d.get("voice_id") or "").strip() or None
+        clean["voice_id"] = voice_id  # opcional/manual — nunca se valida contra ElevenLabs real (punto F)
+
+    if "external_agent_id" in d:
+        external_agent_id = (d.get("external_agent_id") or "").strip() or None
+        # Sin regex rigido: ElevenLabs no garantiza un formato estable de ID.
+        # Solo se acota longitud, igual que el resto de campos de texto libre.
+        if external_agent_id and len(external_agent_id) > EXTERNAL_AGENT_ID_MAX_LEN:
+            return f"external_agent_id supera el maximo de {EXTERNAL_AGENT_ID_MAX_LEN} caracteres", None
+        clean["external_agent_id"] = external_agent_id  # se fusiona en channel_config, nunca es columna propia
+
+    if "system_prompt" in d:
+        system_prompt = (d.get("system_prompt") or "").strip() or None
+        if system_prompt and len(system_prompt) > SYSTEM_PROMPT_MAX_LEN:
+            return f"system_prompt supera el maximo de {SYSTEM_PROMPT_MAX_LEN} caracteres", None
+        clean["system_prompt"] = system_prompt
+
+    return None, clean
+
+
+@bp.get("/agents")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def list_agents():
+    with saas_session() as s:
+        rows = s.execute(text("""
+            SELECT a.id, a.name, a.status, a.language, a.locale, a.voice_provider, a.voice_id,
+                   a.channel_config, a.updated_at,
+                   (SELECT COUNT(*) FROM voice_campaigns c WHERE c.agent_id = a.id AND c.tenant_id = a.tenant_id) AS campaigns_count
+            FROM agents a
+            WHERE a.tenant_id = :t AND a.type = 'voice'
+            ORDER BY a.id DESC
+        """), {"t": g.tenant_id}).mappings().all()
+    items = []
+    for r in rows:
+        d = dict(r)
+        channel_config_json = d.pop("channel_config", None)
+        d["external_agent_id"] = elevenlabs.external_agent_id_from_config(channel_config_json)
+        items.append(d)
+    return jsonify(items=items)
+
+
+@bp.get("/agents/<int:agent_id>")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def get_agent(agent_id):
+    with saas_session() as s:
+        row = _agent_or_404(s, agent_id, g.tenant_id)
+    return jsonify(_agent_dict(row))
+
+
+@bp.post("/agents")
+@requires_module("voice_ai")
+@requires_role("operator", "admin", "owner")
+def create_agent():
+    d = request.get_json(silent=True) or {}
+
+    status = (d.get("status") or "draft").strip().lower()
+    if status not in AGENT_CREATE_ALLOWED_STATUS:
+        return jsonify(error=f"status invalido para creacion. Permitido: {', '.join(sorted(AGENT_CREATE_ALLOWED_STATUS))}"), 400
+
+    err, clean = _validate_agent_fields(d, partial=False)
+    if err:
+        return jsonify(error=err), 400
+
+    with saas_session() as s:
+        channel_config = elevenlabs.merge_external_agent_id(None, clean.get("external_agent_id"))
+        res = s.execute(text("""
+            INSERT INTO agents (tenant_id, name, description, type, language, locale,
+                                 voice_provider, voice_id, system_prompt, channel_config, status)
+            VALUES (:t, :name, :description, 'voice', :language, :locale,
+                    :voice_provider, :voice_id, :system_prompt, :channel_config, :status)
+        """), {
+            "t": g.tenant_id, "name": clean["name"], "description": clean.get("description"),
+            "language": clean["language"], "locale": clean["locale"],
+            "voice_provider": clean["voice_provider"], "voice_id": clean.get("voice_id"),
+            "system_prompt": clean.get("system_prompt"), "channel_config": channel_config, "status": status,
+        })
+        agent_id = res.lastrowid
+
+        # Payload SIN prompt completo y SIN external_agent_id completo — solo
+        # booleanos de si se cargo cada uno (punto 6 / punto I).
+        publish(s, g.tenant_id, "voice_ai", "voice.agent.created", "agent", agent_id, {
+            "agent_id": agent_id, "name": clean["name"], "locale": clean["locale"],
+            "language": clean["language"], "voice_provider": clean["voice_provider"],
+            "status": status, "has_system_prompt": bool(clean.get("system_prompt")),
+            "external_agent_linked": bool(clean.get("external_agent_id")),
+        })
+        row = _agent_row(s, agent_id, g.tenant_id)
+    return jsonify(_agent_dict(row)), 201
+
+
+@bp.patch("/agents/<int:agent_id>")
+@requires_module("voice_ai")
+@requires_role("operator", "admin", "owner")
+def update_agent(agent_id):
+    d = request.get_json(silent=True) or {}
+
+    with saas_session() as s:
+        current = _agent_or_404(s, agent_id, g.tenant_id)
+
+        err, clean = _validate_agent_fields(d, partial=True)
+        if err:
+            return jsonify(error=err), 400
+
+        if "status" in d:
+            status = (d.get("status") or "").strip().lower()
+            if status not in AGENT_EDIT_ALLOWED_STATUS:
+                return jsonify(error=f"status invalido. Permitido en este bloque: {', '.join(sorted(AGENT_EDIT_ALLOWED_STATUS))}"), 400
+            clean["status"] = status
+
+        if not clean:
+            return jsonify(error="no se envio ningun campo para actualizar"), 400
+
+        # external_agent_id no es una columna propia: se fusiona dentro de
+        # channel_config, PRESERVANDO cualquier otra clave ya existente ahi
+        # (nunca se sobreescribe channel_config entero).
+        external_agent_id_changed = "external_agent_id" in clean
+        if external_agent_id_changed:
+            clean["channel_config"] = elevenlabs.merge_external_agent_id(
+                current["channel_config"], clean.pop("external_agent_id")
+            )
+
+        # UPDATE dinamico SOLO con columnas de una whitelist fija — nunca a
+        # partir de claves arbitrarias del body (evita mass assignment).
+        allowed_columns = {"name", "description", "locale", "language", "voice_provider",
+                            "voice_id", "system_prompt", "channel_config", "status"}
+        fields = [f"{col}=:{col}" for col in clean if col in allowed_columns]
+        params = {k: v for k, v in clean.items() if k in allowed_columns}
+        params.update({"id": agent_id, "t": g.tenant_id})
+
+        s.execute(text(f"UPDATE agents SET {', '.join(fields)} WHERE id=:id AND tenant_id=:t"), params)
+
+        # changed_fields en vez del contenido: si cambio el prompt, se marca
+        # prompt_changed=true; si cambio el enlace de ElevenLabs, se marca
+        # external_agent_changed=true — nunca se envia el texto/ID (punto 6 / I).
+        changed_fields = sorted(k for k in clean.keys() if k != "channel_config")
+        if external_agent_id_changed:
+            changed_fields.append("external_agent_id")
+            changed_fields.sort()
+        event_payload = {"agent_id": agent_id, "changed_fields": changed_fields}
+        if "system_prompt" in clean:
+            event_payload["prompt_changed"] = True
+        if external_agent_id_changed:
+            event_payload["external_agent_changed"] = True
+        for safe_field in ("name", "locale", "language", "voice_provider", "status"):
+            if safe_field in clean:
+                event_payload[safe_field] = clean[safe_field]
+
+        publish(s, g.tenant_id, "voice_ai", "voice.agent.updated", "agent", agent_id, event_payload)
+        row = _agent_row(s, agent_id, g.tenant_id)
+    return jsonify(_agent_dict(row))
+
+
+# =================================================== ELEVENLABS CONFIG =====
+
+@bp.get("/integrations/elevenlabs")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def get_elevenlabs_config():
+    with saas_session() as s:
+        row = s.execute(text("""
+            SELECT provider_key, settings, config_ref, status, updated_at
+            FROM tenant_integrations WHERE tenant_id=:t AND provider_key=:p
+        """), {"t": g.tenant_id, "p": elevenlabs.PROVIDER_KEY}).mappings().first()
+
+    if not row:
+        return jsonify(mode=None, configured=False, config_ref=None)
+
+    settings = json.loads(row["settings"]) if row["settings"] else {}
+    mode = settings.get("mode")
+    return jsonify(
+        mode=mode,
+        configured=elevenlabs.is_configured(mode, row["config_ref"]) if mode else False,
+        config_ref=row["config_ref"],
+        updated_at=row["updated_at"],
+    )
+
+
+@bp.patch("/integrations/elevenlabs")
+@requires_module("voice_ai")
+@requires_role("admin", "owner")
+def update_elevenlabs_config():
+    """Solo guarda el MODO elegido (managed|byok) y el nombre de la variable
+    de entorno donde deberia vivir la key (BYOK). NUNCA acepta ni guarda un
+    valor de API key real en este endpoint — ver elevenlabs.py."""
+    d = request.get_json(silent=True) or {}
+    mode = (d.get("mode") or "").strip().lower()
+    if mode not in elevenlabs.VALID_MODES:
+        return jsonify(error=f"mode invalido. Permitido: {', '.join(sorted(elevenlabs.VALID_MODES))}"), 400
+    if "api_key" in d or "secret" in d or "key" in d:
+        return jsonify(error="Este endpoint no acepta valores de API key todavia — ver documentacion de seguridad"), 400
+
+    config_ref = elevenlabs.config_ref_for(g.tenant_id, mode)
+    settings = json.dumps({"mode": mode})
+
+    with saas_session() as s:
+        existing_id = s.execute(text(
+            "SELECT id FROM tenant_integrations WHERE tenant_id=:t AND provider_key=:p"
+        ), {"t": g.tenant_id, "p": elevenlabs.PROVIDER_KEY}).scalar()
+
+        if existing_id:
+            s.execute(text("""
+                UPDATE tenant_integrations SET config_ref=:ref, settings=:settings, status='active'
+                WHERE id=:id
+            """), {"ref": config_ref, "settings": settings, "id": existing_id})
+        else:
+            s.execute(text("""
+                INSERT INTO tenant_integrations (tenant_id, provider_key, label, config_ref, settings, status)
+                VALUES (:t, :p, 'ElevenLabs', :ref, :settings, 'active')
+            """), {"t": g.tenant_id, "p": elevenlabs.PROVIDER_KEY, "ref": config_ref, "settings": settings})
+
+    return jsonify(mode=mode, configured=elevenlabs.is_configured(mode, config_ref), config_ref=config_ref)

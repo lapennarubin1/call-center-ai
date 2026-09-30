@@ -1,0 +1,1009 @@
+{
+  "id": "eki1DZQggUdLze2A",
+  "name": "WF7 - OkPay Payment Link (SMS)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-07-29T07:29:12.104Z",
+  "updatedAt": "2026-08-05T12:11:06.496Z",
+  "isArchived": false,
+  "versionId": "abfa95fc-2b5c-4c61-ba50-8a032ed16afa",
+  "versionCounter": 15,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1a3b321-c3f0-4770-995f-853d117e2fff",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        2448,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://tinyurl.com/api-create.php",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.checkout_url }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "de007b59-3798-4b31-9f1a-0c3d4081a194",
+      "name": "Shorten Payment Link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4128,
+        -240
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "disabled": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst ctx = $('Parse OkPay Response').first().json;\n\nlet shortUrl = '';\nif (typeof resp === 'string') shortUrl = resp;\nelse shortUrl = resp.data || resp.body || resp.text || '';\n\n// Fallback: si TinyURL falla o devuelve algo raro, usar el link original de OkPay\nif (!shortUrl || !shortUrl.startsWith('http')) shortUrl = ctx.checkout_url;\n\nreturn [{ json: { ...ctx, short_url: shortUrl } }];"
+      },
+      "id": "bddb290d-9d44-4bf5-a090-3a44fbd47e5b",
+      "name": "Merge Shortened Link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4368,
+        -240
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\n\n// SMS corto (menos de 160 caracteres) — solo lo esencial: monto + link\n// Si el acortador está desactivado o falló, usa el link original de OkPay\nconst link = ctx.short_url || ctx.checkout_url;\nconst text = `Landmark Markets: Rs${ctx.amount} payment link: ${link}`;\n\nreturn [{ json: { ...ctx, sms_text: text } }];"
+      },
+      "id": "45048ca7-887c-4366-bb30-51970afde6fd",
+      "name": "Prepare SMS Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4608,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "={{ $json.sms_text }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "d5fda09f-935b-4c14-86ac-1b32ad623952",
+      "name": "Send SMS Link1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4848,
+        -240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const smsResponse = $input.first().json;\nconst ctx = $('Parse OkPay Response').first().json;\n\nreturn [{ json: { ...ctx, sms_response: smsResponse } }];"
+      },
+      "id": "e3c1c2da-a650-418e-8633-20bf8c5c565b",
+      "name": "Reattach Context After SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5088,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "okpay-payment-link",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1008e563-f02c-4e03-aeb3-674deec7583f",
+      "name": "📲 ElevenLabs Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        -64
+      ],
+      "webhookId": "fb21d318-bc42-46de-a1f9-bdf3347bb4ab"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }",
+        "options": {}
+      },
+      "id": "e6653489-f5f4-4dd7-bf63-e1247a53033c",
+      "name": "✅ Respond ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2464,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst clientPhone = String(b.phone || b.lead_id || '').replace(/^=+/, '').replace(/[^0-9]/g, '');\n\n// Fix whatsapp_phone — si es Twilio o no empieza con 91, usar phone del cliente\nlet whatsapp_phone = String(b.whatsapp_phone || '').replace(/^=+/, '').replace(/[^0-9]/g, '');\nif (!whatsapp_phone || !whatsapp_phone.startsWith('91')) {\n  whatsapp_phone = clientPhone;\n}\nif (!whatsapp_phone.startsWith('+')) {\n  whatsapp_phone = '+' + whatsapp_phone;\n}\n\nreturn [{ json: {\n  lead_id:                   String(b.lead_id || Date.now()).replace(/^=+/, '').trim(),\n  full_name:                 String(b.full_name || 'friend').replace(/^=+/, '').trim(),\n  phone:                     clientPhone,\n  whatsapp_phone:            whatsapp_phone,\n  currency:                  String(b.currency || 'INR').toUpperCase(),\n  amount:                    b.amount || 2000,\n  risk_disclosure_confirmed: true\n}}];"
+      },
+      "id": "3f31e18b-0db0-448f-864e-1706b1c39672",
+      "name": "🔧 Parse Webhook Input1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// HARD GUARD — refuses bad inputs before we ever sign an OkPay request.\nconst j = $input.first().json || {};\nconst lead_id   = String(j.lead_id || '').trim();\nconst full_name = String(j.full_name || '').trim();\nconst phone     = String(j.phone || '').replace(/[^0-9]/g, '');\nconst currency  = String(j.currency || 'INR').trim().toUpperCase();\nconst amountRaw = j.amount;\nconst amountNum = Number(String(amountRaw || '0').replace(/^=/, '').trim());\nconst riskConfirmed = j.risk_disclosure_confirmed === true || j.risk_disclosure_confirmed === 'true';\n\n// Fix whatsapp_phone — lista negra de números Twilio\nconst TWILIO_NUMBERS = ['917827796280', '16514170638'];\nlet whatsapp_phone = String(j.whatsapp_phone || '').replace(/[^0-9]/g, '');\nif (!whatsapp_phone || TWILIO_NUMBERS.includes(whatsapp_phone)) {\n  whatsapp_phone = phone;\n}\nif (whatsapp_phone.length === 10) {\n  whatsapp_phone = '+91' + whatsapp_phone;\n} else if (!whatsapp_phone.startsWith('+')) {\n  whatsapp_phone = '+' + whatsapp_phone;\n}\n\nconst errs = [];\nif (!lead_id) errs.push('missing lead_id');\nif (!phone) errs.push('missing phone');\nif (!['INR', 'PKR', 'BDT', 'JPY'].includes(currency)) errs.push('unsupported currency ' + currency);\nif (!Number.isFinite(amountNum) || amountNum < 2000) errs.push('amount must be >= 2000');\nif (amountNum > 500000) errs.push('amount exceeds sanity ceiling 500000');\nif (!riskConfirmed) errs.push('risk_disclosure_confirmed must be true');\n\nif (errs.length) {\n  return [{ json: {\n    success: false,\n    refused: true,\n    reason: errs.join('; '),\n    user_message: 'Sorry, payment link nahi bana sakti. Reason: ' + errs.join(', ')\n  }}];\n}\n\nconst out_trade_no = 'LM_' + lead_id + '_' + Date.now();\nconst idempotency_key = 'pay_' + out_trade_no;\n\nreturn [{ json: {\n  ok: true,\n  lead_id, full_name, phone, whatsapp_phone, currency,\n  amount: String(Math.floor(amountNum)),\n  out_trade_no, idempotency_key\n}}];"
+      },
+      "id": "9535b1b3-a63e-4722-8709-03130d71bfe4",
+      "name": "Guard + Build Order",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2688,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a77c2747-ed84-4318-9514-7af8d5d5c38a",
+      "name": "Guard passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2928,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function md5(str) {\n  function rh(n) {\n    var j,s=\"\";\n    for(j=0;j<=3;j++) s+=\"0123456789abcdef\".charAt((n>>(j*8+4))&0xF)+\"0123456789abcdef\".charAt((n>>(j*8))&0xF);\n    return s;\n  }\n  function ad(x,y) {var l=(x&0xFFFF)+(y&0xFFFF);var m=(x>>16)+(y>>16)+(l>>16);return(m<<16)|(l&0xFFFF);}\n  function rl(n,c){return(n<<c)|(n>>>(32-c));}\n  function cm(q,a,b,x,s,t){return ad(rl(ad(ad(a,q),ad(x,t)),s),b);}\n  function ff(a,b,c,d,x,s,t){return cm((b&c)|((~b)&d),a,b,x,s,t);}\n  function gg(a,b,c,d,x,s,t){return cm((b&d)|(c&(~d)),a,b,x,s,t);}\n  function hh(a,b,c,d,x,s,t){return cm(b^c^d,a,b,x,s,t);}\n  function ii(a,b,c,d,x,s,t){return cm(c^(b|(~d)),a,b,x,s,t);}\n  function sb(x) {\n    var i,nblk=((x.length+8)>>6)+1,blks=new Array(nblk*16);\n    for(i=0;i<nblk*16;i++) blks[i]=0;\n    for(i=0;i<x.length;i++) blks[i>>2]|=x.charCodeAt(i)<<((i%4)*8);\n    blks[i>>2]|=0x80<<((i%4)*8);\n    blks[nblk*16-2]=x.length*8;\n    return blks;\n  }\n  var i,x=sb(str),a=1732584193,b=-271733879,c=-1732584194,d=271733878,olda,oldb,oldc,oldd;\n  for(i=0;i<x.length;i+=16){\n    olda=a;oldb=b;oldc=c;oldd=d;\n    a=ff(a,b,c,d,x[i+0],7,-680876936);d=ff(d,a,b,c,x[i+1],12,-389564586);c=ff(c,d,a,b,x[i+2],17,606105819);b=ff(b,c,d,a,x[i+3],22,-1044525330);\n    a=ff(a,b,c,d,x[i+4],7,-176418897);d=ff(d,a,b,c,x[i+5],12,1200080426);c=ff(c,d,a,b,x[i+6],17,-1473231341);b=ff(b,c,d,a,x[i+7],22,-45705983);\n    a=ff(a,b,c,d,x[i+8],7,1770035416);d=ff(d,a,b,c,x[i+9],12,-1958414417);c=ff(c,d,a,b,x[i+10],17,-42063);b=ff(b,c,d,a,x[i+11],22,-1990404162);\n    a=ff(a,b,c,d,x[i+12],7,1804603682);d=ff(d,a,b,c,x[i+13],12,-40341101);c=ff(c,d,a,b,x[i+14],17,-1502002290);b=ff(b,c,d,a,x[i+15],22,1236535329);\n    a=gg(a,b,c,d,x[i+1],5,-165796510);d=gg(d,a,b,c,x[i+6],9,-1069501632);c=gg(c,d,a,b,x[i+11],14,643717713);b=gg(b,c,d,a,x[i+0],20,-373897302);\n    a=gg(a,b,c,d,x[i+5],5,-701558691);d=gg(d,a,b,c,x[i+10],9,38016083);c=gg(c,d,a,b,x[i+15],14,-660478335);b=gg(b,c,d,a,x[i+4],20,-405537848);\n    a=gg(a,b,c,d,x[i+9],5,568446438);d=gg(d,a,b,c,x[i+14],9,-1019803690);c=gg(c,d,a,b,x[i+3],14,-187363961);b=gg(b,c,d,a,x[i+8],20,1163531501);\n    a=gg(a,b,c,d,x[i+13],5,-1444681467);d=gg(d,a,b,c,x[i+2],9,-51403784);c=gg(c,d,a,b,x[i+7],14,1735328473);b=gg(b,c,d,a,x[i+12],20,-1926607734);\n    a=hh(a,b,c,d,x[i+5],4,-378558);d=hh(d,a,b,c,x[i+8],11,-2022574463);c=hh(c,d,a,b,x[i+11],16,1839030562);b=hh(b,c,d,a,x[i+14],23,-35309556);\n    a=hh(a,b,c,d,x[i+1],4,-1530992060);d=hh(d,a,b,c,x[i+4],11,1272893353);c=hh(c,d,a,b,x[i+7],16,-155497632);b=hh(b,c,d,a,x[i+10],23,-1094730640);\n    a=hh(a,b,c,d,x[i+13],4,681279174);d=hh(d,a,b,c,x[i+0],11,-358537222);c=hh(c,d,a,b,x[i+3],16,-722521979);b=hh(b,c,d,a,x[i+6],23,76029189);\n    a=hh(a,b,c,d,x[i+9],4,-640364487);d=hh(d,a,b,c,x[i+12],11,-421815835);c=hh(c,d,a,b,x[i+15],16,530742520);b=hh(b,c,d,a,x[i+2],23,-995338651);\n    a=ii(a,b,c,d,x[i+0],6,-198630844);d=ii(d,a,b,c,x[i+7],10,1126891415);c=ii(c,d,a,b,x[i+14],15,-1416354905);b=ii(b,c,d,a,x[i+5],21,-57434055);\n    a=ii(a,b,c,d,x[i+12],6,1700485571);d=ii(d,a,b,c,x[i+3],10,-1894986606);c=ii(c,d,a,b,x[i+10],15,-1051523);b=ii(b,c,d,a,x[i+1],21,-2054922799);\n    a=ii(a,b,c,d,x[i+8],6,1873313359);d=ii(d,a,b,c,x[i+15],10,-30611744);c=ii(c,d,a,b,x[i+6],15,-1560198380);b=ii(b,c,d,a,x[i+13],21,1309151649);\n    a=ii(a,b,c,d,x[i+4],6,-145523070);d=ii(d,a,b,c,x[i+11],10,-1120210379);c=ii(c,d,a,b,x[i+2],15,718787259);b=ii(b,c,d,a,x[i+9],21,-343485551);\n    a=ad(a,olda);b=ad(b,oldb);c=ad(c,oldc);d=ad(d,oldd);\n  }\n  return rh(a)+rh(b)+rh(c)+rh(d);\n}\n\nfunction clean(v) {\n  return String(v || '').replace(/=/g, '').trim();\n}\n\nconst ctx = $input.first().json;\n\n// Fix whatsapp_phone — add +91 if missing prefix\nlet whatsapp_phone = String(ctx.whatsapp_phone || ctx.phone || '').replace(/[^0-9]/g, '');\nif (whatsapp_phone.length === 10) {\n  whatsapp_phone = '+91' + whatsapp_phone;\n} else if (whatsapp_phone.length > 10 && !whatsapp_phone.startsWith('+')) {\n  whatsapp_phone = '+' + whatsapp_phone;\n}\n\nconst params = {\n  mchId:        '2764',\n  currency:     clean(ctx.currency),\n  out_trade_no: clean(ctx.out_trade_no),\n  pay_type:     'UPI',\n  money:        clean(ctx.amount),\n  notify_url:   'https://landmarket-n8n.dhsoig.easypanel.host/webhook/okpay-callback',\n  returnUrl:    'https://www.landmarkmarkets.in/sign-in',\n  phone:        clean(ctx.phone),\n  attach:       clean(ctx.lead_id),\n};\n\nconst filtered = {};\nfor (const k of Object.keys(params)) {\n  const v = params[k];\n  if (v !== '' && v !== null && v !== undefined) filtered[k] = v;\n}\n\nconst sortedKeys = Object.keys(filtered).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));\nconst baseString = sortedKeys.map(k => k + '=' + filtered[k]).join('&');\nconst toSign = baseString + '&key=' + 'a421742f0b404661b8ddb323c51cc99b';\nconst sign = md5(toSign);\n\nconst bodyParts = sortedKeys.map(k => encodeURIComponent(k) + '=' + encodeURIComponent(filtered[k]));\nbodyParts.push('sign=' + sign);\nconst formBody = bodyParts.join('&');\n\nreturn [{ json: { ...ctx, ...filtered, whatsapp_phone, sign, formBody } }];"
+      },
+      "id": "8e1e8c26-075c-4b92-bee1-1ab2ad908b9f",
+      "name": "Build Signed Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3168,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.wpay.one/v1/Collect",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            },
+            {
+              "name": "X-Idempotency-Key",
+              "value": "={{ $json.idempotency_key }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json.formBody }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "10812e92-41d8-479d-be74-e873ec9d8528",
+      "name": "POST OkPay /v1/Collect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3408,
+        -16
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json || {};\nconst ctx = $('Build Signed Request').first().json;\nconst code = resp.statusCode ?? resp.status ?? null;\nconst body = resp.body || resp;\nconst okpayCode = body.code;\nconst url = body.data && body.data.url;\nconst txnId = body.data && (body.data.transaction_Id || body.data.transactionId);\nconst success = code && code >= 200 && code < 300 && okpayCode === 0 && url;\nif (success) {\n  return [{ json: { ...ctx,\n    success: true,\n    checkout_url: url,\n    okpay_transaction_id: txnId,\n    http_status: code\n  }}];\n}\nreturn [{ json: { ...ctx,\n  success: false,\n  refused: false,\n  reason: 'OkPay error code=' + okpayCode + ' msg=' + (body.msg || '') + ' http=' + code,\n  user_message: 'Payment link generate karne mein technical issue aaya. Thodi der baad try karte hain.'\n}}];"
+      },
+      "id": "11ee146c-be95-4f93-8bf2-3d5e460114fc",
+      "name": "Parse OkPay Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3648,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "s1",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0e33e879-856d-4806-afed-bdf8ce3b832e",
+      "name": "Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3888,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=1999552215"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "full_name": "={{ $json.full_name }}",
+            "phone": "={{ $json.phone }}",
+            "conversion_date": "={{ $now.toISO() }}",
+            "account_opened": "true",
+            "deposit_status": "=PAYMENT_LINK_SENT",
+            "notes": "=Rs {{ $json.amount }} | OkPay: {{ $json.okpay_transaction_id }}",
+            "out_trade_no": "=={{ $json.out_trade_no }}",
+            "whatsapp_phone": "{{ $json.whatsapp_phone }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "whatsapp_phone",
+              "displayName": "whatsapp_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "atlantis_username",
+              "displayName": "atlantis_username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "atlantis_password",
+              "displayName": "atlantis_password",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversion_date",
+              "displayName": "conversion_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "deposit_status",
+              "displayName": "deposit_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "paid",
+              "displayName": "paid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "out_trade_no",
+              "displayName": "out_trade_no",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4eed7dbc-edf0-4c94-8090-97584f6cd4eb",
+      "name": "Update Lead (Success)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        5328,
+        -240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF7_PAYMENT",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "Payment Link Generation",
+            "message": "={{ $json.reason || 'unknown error' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4e8b2fb9-479e-4d7a-9c47-b2aae0f4b9da",
+      "name": "Audit: Failure",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4160,
+        128
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return a clean, tool-friendly response to the AI Agent.\nconst j = $input.first().json;\nif (j.success) {\n  return [{ json: {\n    success: true,\n    message_to_user: 'Payment link aapko SMS pe bhej diya hai. Check kar ke confirm karein. Yaad rahe — trading mein risk hota hai.',\n    out_trade_no: j.out_trade_no,\n    amount: j.amount,\n    currency: j.currency\n  }}];\n}\nreturn [{ json: {\n  success: false,\n  message_to_user: j.user_message || 'Payment link generate karne mein issue aaya. Thodi der baad try karte hain.',\n  reason: j.reason\n}}];"
+      },
+      "id": "16991eff-085f-4924-b0ec-d2a77ddd57b2",
+      "name": "Respond to AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5568,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nreturn [{ json: {\n  success: false,\n  refused: true,\n  message_to_user: j.user_message || ('Payment link refused: ' + j.reason),\n  reason: j.reason\n}}];"
+      },
+      "id": "2230af96-ad67-40c1-83f5-66ec16c52dce",
+      "name": "Refuse Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3168,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF7_PAYMENT",
+            "timestamp": "=={{ $now.toISO() }}",
+            "node": "`={{ $json.execution?.lastNodeExecuted",
+            "message": "=={{ JSON.stringify($json).slice(0, 5000) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "53d90d51-b96d-4589-8d66-47611866e0ba",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2624,
+        560
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare SMS Message": {
+      "main": [
+        [
+          {
+            "node": "Send SMS Link1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS Link1": {
+      "main": [
+        [
+          {
+            "node": "Reattach Context After SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reattach Context After SMS": {
+      "main": [
+        [
+          {
+            "node": "Update Lead (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shorten Payment Link": {
+      "main": [
+        [
+          {
+            "node": "Merge Shortened Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Shortened Link": {
+      "main": [
+        [
+          {
+            "node": "Prepare SMS Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📲 ElevenLabs Webhook1": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond ",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔧 Parse Webhook Input1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Parse Webhook Input1": {
+      "main": [
+        [
+          {
+            "node": "Guard + Build Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard + Build Order": {
+      "main": [
+        [
+          {
+            "node": "Guard passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard passed?": {
+      "main": [
+        [
+          {
+            "node": "Build Signed Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuse Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Signed Request": {
+      "main": [
+        [
+          {
+            "node": "POST OkPay /v1/Collect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST OkPay /v1/Collect": {
+      "main": [
+        [
+          {
+            "node": "Parse OkPay Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse OkPay Response": {
+      "main": [
+        [
+          {
+            "node": "Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Success?": {
+      "main": [
+        [
+          {
+            "node": "Shorten Payment Link",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit: Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Lead (Success)": {
+      "main": [
+        [
+          {
+            "node": "Respond to AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit: Failure": {
+      "main": [
+        [
+          {
+            "node": "Respond to AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refuse Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {
+    "📲 ElevenLabs Webhook1": [
+      {
+        "json": {
+          "headers": {
+            "host": "landmarket-n8n.dhsoig.easypanel.host",
+            "user-agent": "ElevenLabs/1.0",
+            "content-length": "111",
+            "accept": "*/*",
+            "accept-encoding": "gzip",
+            "content-type": "application/json",
+            "x-forwarded-for": "34.59.11.47",
+            "x-forwarded-host": "landmarket-n8n.dhsoig.easypanel.host",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "211887854d89",
+            "x-real-ip": "34.59.11.47"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "phone": "+919650037726",
+            "full_name": "daniel arroyo",
+            "amount": "5000",
+            "lead_id": "",
+            "whatsapp_phone": ""
+          },
+          "webhookUrl": "https://landmarket-n8n.dhsoig.easypanel.host/webhook/okpay-payment-link",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "id": "EWlF9l3b9w6Vq3NA",
+      "name": "landmark",
+      "createdAt": "2026-07-27T09:29:13.383Z",
+      "updatedAt": "2026-07-27T09:29:13.383Z"
+    },
+    {
+      "id": "RV5NkjlkcBjJfgn5",
+      "name": "compliant-v3",
+      "createdAt": "2026-07-27T13:15:00.991Z",
+      "updatedAt": "2026-07-27T13:15:00.991Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "eki1DZQggUdLze2A",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-07-29T07:29:12.104Z",
+      "updatedAt": "2026-07-29T07:29:12.104Z"
+    }
+  ],
+  "activeVersion": null
+}

@@ -1,0 +1,12 @@
+{% extends "base_bare.html" %}
+{% block body %}
+<div class="login-wrap">
+  <div class="login-card">
+    <span class="mark" aria-hidden="true"></span>
+    <h1>El panel no pudo leer los datos</h1>
+    <p class="lead">Revisá que MySQL esté corriendo y que las credenciales del panel sean correctas.</p>
+    <div class="err mono" style="word-break:break-word">{{ error }}</div>
+    <a class="btn" href="/" style="display:block;text-align:center;margin-top:8px">Reintentar</a>
+  </div>
+</div>
+{% endblock %}

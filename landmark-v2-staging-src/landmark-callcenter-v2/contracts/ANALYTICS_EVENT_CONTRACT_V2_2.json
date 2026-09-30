@@ -1,0 +1,256 @@
+{
+  "$contract": "ANALYTICS_EVENT_CONTRACT",
+  "$version": "2.2",
+  "$generated": "event_types y claves GENERADOS de app/ops_events.EVENT_TYPES",
+  "$reference_implementation": "app/ops_events.py · app/analytics_v2.py · app/call_jobs.py",
+  "principles": [
+    "El panel lee MySQL local. Nunca llama a LeadStudio para un KPI, un gráfico o un refresh.",
+    "Cada workflow escribe LOCALMENTE lo que pasa, en el momento en que pasa (near real-time).",
+    "wf_call_jobs es el HECHO de cada llamada (resultado y duración una sola vez). wf_events es el LOG append-only de todo lo demás.",
+    "event_key es DETERMINISTA y UNIQUE: el mismo hecho escrito dos veces no se cuenta dos veces.",
+    "Un solo CALL_RESULT por llamada (clave por call_job_id), no un tipo por resultado: dos resultados contradictorios no pueden quedar ambos guardados.",
+    "Los eventos no se borran ni se editan. Una diferencia con el CRM abre un issue, nunca corrige el dato local."
+  ],
+  "table": "wf_events",
+  "columns": {
+    "event_key": "UNIQUE, ver key de cada tipo",
+    "event_type": "ver event_types",
+    "event_domain": [
+      "CALL",
+      "FOLLOWUP",
+      "RECORDING",
+      "TOOL"
+    ],
+    "occurred_at": "UTC, cuándo pasó (no cuándo se escribió)",
+    "call_job_id": "si aplica",
+    "lead_id": "casi siempre",
+    "country_iso": "ISO-2",
+    "route_key": "ruta de VOZ si aplica",
+    "provider": "proveedor DEL DOMINIO: voz en CALL, tool en TOOL (cashstudio, okpay)",
+    "adapter_key": "solo CALL",
+    "attempt": "intento de negocio (CALL)",
+    "conversation_id": "",
+    "provider_job_id": "",
+    "followup_id": "",
+    "result": "CALL: resultado final · LEAD_CLOSED: motivo",
+    "duration_seconds": "CALL_RESULT",
+    "amount": "PAYMENT_*",
+    "currency": "PAYMENT_*",
+    "source_workflow": "WF2, WF9, ENGINE, WF3…",
+    "execution_id": "n8n",
+    "metadata_json": "partes de la clave que no son columna (request_ref, order_ref) + extras",
+    "created_at": "cuándo se escribió"
+  },
+  "event_types": {
+    "CALL_CLAIMED": {
+      "domain": "CALL",
+      "key": "CALL_CLAIMED:{call_job_id}",
+      "written_by": "WF2"
+    },
+    "CALL_DISPATCHED": {
+      "domain": "CALL",
+      "key": "CALL_DISPATCHED:{call_job_id}",
+      "written_by": "WF2"
+    },
+    "CALL_TECH_FAILED": {
+      "domain": "CALL",
+      "key": "CALL_TECH_FAILED:{call_job_id}",
+      "written_by": "WF2"
+    },
+    "CALL_UNKNOWN": {
+      "domain": "CALL",
+      "key": "CALL_UNKNOWN:{call_job_id}",
+      "written_by": "WF2"
+    },
+    "CALL_RESULT": {
+      "domain": "CALL",
+      "key": "CALL_RESULT:{call_job_id}",
+      "written_by": "WF9 (post-call) · WF2 (resultado inmediato SIP)"
+    },
+    "FOLLOWUP_CREATED": {
+      "domain": "FOLLOWUP",
+      "key": "FOLLOWUP_CREATED:{call_job_id}",
+      "written_by": "FOLLOWUP ENGINE"
+    },
+    "CALLBACK_SCHEDULED": {
+      "domain": "FOLLOWUP",
+      "key": "CALLBACK_SCHEDULED:{call_job_id}",
+      "written_by": "FOLLOWUP ENGINE"
+    },
+    "LEAD_CLOSED": {
+      "domain": "FOLLOWUP",
+      "key": "LEAD_CLOSED:{call_job_id}",
+      "written_by": "FOLLOWUP ENGINE (result = MAX_ATTEMPTS | WRONG_NUMBER | DNC)"
+    },
+    "ACCOUNT_REQUESTED": {
+      "domain": "TOOL",
+      "key": "ACCOUNT_REQUESTED:{lead_id}:{request_ref}",
+      "written_by": "WF3"
+    },
+    "ACCOUNT_CREATED": {
+      "domain": "TOOL",
+      "key": "ACCOUNT_CREATED:{provider}:{lead_id}",
+      "written_by": "WF3"
+    },
+    "ACCOUNT_ALREADY_EXISTS": {
+      "domain": "TOOL",
+      "key": "ACCOUNT_ALREADY_EXISTS:{provider}:{lead_id}",
+      "written_by": "WF3 (409 de CashStudio)"
+    },
+    "ACCOUNT_FAILED": {
+      "domain": "TOOL",
+      "key": "ACCOUNT_FAILED:{lead_id}:{request_ref}",
+      "written_by": "WF3"
+    },
+    "PAYMENT_LINK_REQUESTED": {
+      "domain": "TOOL",
+      "key": "PAYMENT_LINK_REQUESTED:{lead_id}:{request_ref}",
+      "written_by": "WF7"
+    },
+    "PAYMENT_LINK_CREATED": {
+      "domain": "TOOL",
+      "key": "PAYMENT_LINK_CREATED:{provider}:{order_ref}",
+      "written_by": "WF7"
+    },
+    "PAYMENT_LINK_FAILED": {
+      "domain": "TOOL",
+      "key": "PAYMENT_LINK_FAILED:{lead_id}:{request_ref}",
+      "written_by": "WF7"
+    },
+    "PAYMENT_CONFIRMED": {
+      "domain": "TOOL",
+      "key": "PAYMENT_CONFIRMED:{provider}:{order_ref}",
+      "written_by": "WF8 (callback)"
+    },
+    "RECORDING_ATTACHED": {
+      "domain": "RECORDING",
+      "key": "RECORDING_ATTACHED:{call_job_id}",
+      "written_by": "WF10"
+    },
+    "RECORDING_SKIPPED_SHORT": {
+      "domain": "RECORDING",
+      "key": "RECORDING_SKIPPED_SHORT:{call_job_id}",
+      "written_by": "WF10 (duración < recording_min_secs)"
+    },
+    "RECORDING_MISSING": {
+      "domain": "RECORDING",
+      "key": "RECORDING_MISSING:{call_job_id}",
+      "written_by": "WF10 / reconciliador"
+    }
+  },
+  "key_parts": {
+    "request_ref": "identificador del PEDIDO (conversation_id de la llamada que pidió la tool, o execution_id si no hay). Dos pedidos distintos del mismo lead son dos eventos.",
+    "order_ref": "id de la orden en el proveedor de pago (out_trade_no de OkPay)"
+  },
+  "writes_by_workflow": {
+    "WF2": [
+      "claim → CALL_CLAIMED",
+      "ACCEPTED → CALL_DISPATCHED",
+      "TECHNICAL_ERROR → CALL_TECH_FAILED (+ job RELEASED)",
+      "UNKNOWN → CALL_UNKNOWN",
+      "FINAL (SIP 603…) → record_call_result() → CALL_RESULT"
+    ],
+    "WF9": [
+      "post-call → record_call_result(call_job_id, result, duration) → hecho + CALL_RESULT en el mismo momento"
+    ],
+    "FOLLOWUP_ENGINE": [
+      "FOLLOWUP_CREATED",
+      "CALLBACK_SCHEDULED",
+      "LEAD_CLOSED"
+    ],
+    "WF3": [
+      "ACCOUNT_REQUESTED",
+      "ACCOUNT_CREATED | ACCOUNT_ALREADY_EXISTS | ACCOUNT_FAILED"
+    ],
+    "WF7_8": [
+      "PAYMENT_LINK_REQUESTED",
+      "PAYMENT_LINK_CREATED | PAYMENT_LINK_FAILED",
+      "PAYMENT_CONFIRMED"
+    ],
+    "WF10": [
+      "RECORDING_ATTACHED | RECORDING_SKIPPED_SHORT | RECORDING_MISSING"
+    ],
+    "WF14": [
+      "NO escribe eventos de negocio: RECONCILIA (ver reconciliation)"
+    ]
+  },
+  "sql_templates": {
+    "$note": "Lo que los nodos MySQL de n8n ejecutan. Parametrizado. INSERT IGNORE: el UNIQUE decide.",
+    "record_event": "INSERT IGNORE INTO wf_events (event_key, event_type, event_domain, occurred_at, call_job_id, lead_id, country_iso, route_key, provider, adapter_key, attempt, conversation_id, provider_job_id, followup_id, result, duration_seconds, amount, currency, source_workflow, execution_id, metadata_json) VALUES (?, …)",
+    "record_call_result_1": "UPDATE wf_call_jobs SET state='COMPLETED', result=?, duration_seconds=?, conversation_id=COALESCE(conversation_id,?), completed_at=UTC_TIMESTAMP(), dispatched_at=COALESCE(dispatched_at,UTC_TIMESTAMP()) WHERE call_job_id=? AND result IS NULL AND state IN ('DISPATCHING','DISPATCHED','UNKNOWN','NEEDS_RECONCILIATION')",
+    "record_call_result_2": "SELECT result FROM wf_call_jobs WHERE call_job_id=?  → igual: DUPLICATE · distinto: CONFLICT → issue RESULT_CONFLICT · sin fila: ORPHAN_POSTCALL",
+    "record_call_result_3": "record_event CALL_RESULT con los valores DEL JOB (no los recibidos)"
+  },
+  "examples": {
+    "CALL_RESULT": {
+      "event_key": "CALL_RESULT:IN_STRINGEE-20260921T101500Z-a1b2c3",
+      "event_type": "CALL_RESULT",
+      "event_domain": "CALL",
+      "occurred_at": "2026-09-21T10:21:42Z",
+      "call_job_id": "IN_STRINGEE-20260921T101500Z-a1b2c3",
+      "lead_id": "L-8f2c",
+      "country_iso": "IN",
+      "route_key": "IN_STRINGEE",
+      "provider": "stringee",
+      "adapter_key": "STRINGEE_WORKER",
+      "attempt": 2,
+      "conversation_id": "conv_01k5x8y2z3",
+      "result": "ANSWERED",
+      "duration_seconds": 327,
+      "source_workflow": "WF9"
+    },
+    "ACCOUNT_CREATED": {
+      "event_key": "ACCOUNT_CREATED:cashstudio:L-8f2c",
+      "event_type": "ACCOUNT_CREATED",
+      "event_domain": "TOOL",
+      "occurred_at": "2026-09-21T10:19:03Z",
+      "lead_id": "L-8f2c",
+      "country_iso": "IN",
+      "provider": "cashstudio",
+      "conversation_id": "conv_01k5x8y2z3",
+      "source_workflow": "WF3"
+    },
+    "PAYMENT_LINK_CREATED": {
+      "event_key": "PAYMENT_LINK_CREATED:okpay:LM-IN-000123",
+      "event_type": "PAYMENT_LINK_CREATED",
+      "event_domain": "TOOL",
+      "occurred_at": "2026-09-21T10:20:11Z",
+      "lead_id": "L-8f2c",
+      "country_iso": "IN",
+      "provider": "okpay",
+      "amount": 5000,
+      "currency": "INR",
+      "metadata_json": {
+        "order_ref": "LM-IN-000123"
+      },
+      "source_workflow": "WF7"
+    }
+  },
+  "reconciliation": {
+    "table": "wf_reconciliation_issues",
+    "issue_types": [
+      "RESULT_CONFLICT",
+      "CRM_ACCOUNT_MISSING",
+      "CRM_STATUS_MISMATCH",
+      "CALL_NEEDS_RECONCILIATION",
+      "FOLLOWUP_NEEDS_RECONCILIATION",
+      "TECH_RETRY_REPEATED",
+      "ORPHAN_POSTCALL"
+    ],
+    "issue_key": "{issue_type}:{entity_type}:{entity_id} — UNIQUE; re-detectar suma occurrences",
+    "lifecycle": [
+      "OPEN",
+      "RESOLVED",
+      "IGNORED"
+    ],
+    "WF14_role": "Compara lo local con LeadStudio y el call-log de Stringee. Si difieren, abre un issue. Nunca borra ni corrige datos locales porque el CRM falle o esté atrasado."
+  },
+  "metric_definitions": "→ ANALYTICS_ARCHITECTURE_V2_2.md §4 (y docstring de app/analytics_v2.py)",
+  "attribution": {
+    "model": "LAST_CONNECTED_CALL_V1",
+    "window_days": 30,
+    "rule": "última llamada del mismo lead con resultado ANSWERED o CALLBACK, completada antes o en el momento de la apertura, dentro de la ventana",
+    "no_evidence": "UNATTRIBUTED — nunca se inventa",
+    "status": "convención de reporting, NO hecho · PENDING_PRODUCT_DECISION"
+  }
+}

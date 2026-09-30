@@ -1,0 +1,629 @@
+{
+  "id": "94klx8IHXnwpP6pP",
+  "name": "WF5 - Sales Handoff & CRM v2 (VERIFIED)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-07-29T07:27:19.950Z",
+  "updatedAt": "2026-08-19T07:20:05.448Z",
+  "isArchived": false,
+  "versionId": "6a9c3402-fb70-427e-a62e-fb44507f8158",
+  "versionCounter": 23,
+  "sourceWorkflowId": null,
+  "triggerCount": 2,
+  "nodes": [
+    {
+      "parameters": {
+        "chatId": "-1004454561082",
+        "text": "=🔥 *SALES HANDOFF — INDIA*\n\n*Lead:* {{ $json.full_name || 'Sin nombre' }}\n*Teléfono:* {{ $json.phone }}\n*Status:* {{ $json._action }}\n*Acción:* {{ $json.next_action }}\n*Resumen:* {{ String($json.conversation_summary || '').slice(0, 300) }}\n\n_{{ $now.toISO() }}_",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "📢 Telegram Alert — Sales Handoff",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -1072,
+        -288
+      ],
+      "id": "9912d456-b49e-4a83-b0e7-1d0de9cc24a9",
+      "webhookId": "c3c837e0-9421-4bfa-8372-098fe1cae655",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "handoff",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "full_name": "={{ $json.full_name || '' }}",
+            "phone": "={{ $json.phone }}",
+            "status": "SALES_HANDOFF",
+            "conversation_summary": "={{ String($json.conversation_summary || '').slice(0, 300) }}",
+            "next_action": "={{ $json.next_action }}",
+            "assigned_to": "={{ $json.assigned_agent || 'unassigned' }}",
+            "created_at": "={{ $now.toISO() }}",
+            "notes": "={{ $json.notes || '' }}"
+          },
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "a54a70d9-893c-437c-a7bf-f8748a8c5927",
+      "name": "Append to Handoff Tab1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1552,
+        -288
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf5-handoff",
+        "options": {}
+      },
+      "id": "b0bc6562-4d0c-4cd3-bf7a-c55e352a816c",
+      "name": "Manual Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2464,
+        -96
+      ],
+      "webhookId": "wf5-handoff"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=210138417"
+        },
+        "options": {}
+      },
+      "id": "1877db67-46b4-42ee-882a-8803bbd90067",
+      "name": "Read All Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -2224,
+        -192
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bucket rows: HANDOFF | CONVERTED | SKIP\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  const status = String(r.status || '').toUpperCase();\n  const interested = String(r.interested || '').toUpperCase() === 'TRUE';\n  const accountOpened = String(r.account_opened || '').toUpperCase();\n  let action = 'SKIP';\n  let next_action = '';\n  if (accountOpened === 'TRUE' && status !== 'CONVERTED') {\n    action = 'CONVERTED';\n    next_action = 'Welcome onboarding + first deposit follow-up';\n  } else if ((interested || accountOpened === 'PENDING') && !['SALES_HANDOFF', 'CONVERTED'].includes(status)) {\n    action = 'HANDOFF';\n    next_action = accountOpened === 'PENDING'\n      ? 'Call advisor: confirm credentials received + assist deposit of Rs 5000'\n      : 'Call advisor: nurture & confirm account opening';\n  }\n  if (action !== 'SKIP') out.push({ json: { ...r, _action: action, next_action } });\n}\nreturn out;"
+      },
+      "id": "1f226653-b3ac-4ed6-8e4b-fe798c2453f7",
+      "name": "Compute Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2000,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "h1",
+                    "leftValue": "={{ $json._action }}",
+                    "rightValue": "HANDOFF",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "h2",
+                    "leftValue": "={{ $json._action }}",
+                    "rightValue": "CONVERTED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "31e1d61c-a82a-4ff3-aebb-0732eda76346",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -1776,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=210138417"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "status": "SALES_HANDOFF",
+            "assigned_agent": "={{ $json.assigned_agent || 'unassigned' }}",
+            "notes": "=Handoff: {{ $json.next_action }} | Summary: {{ String($json.conversation_summary || '').slice(0, 200) }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "26100299-2fb1-4701-ba23-cdbf66948a1f",
+      "name": "Mark SALES_HANDOFF",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1312,
+        -288
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=210138417"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "status": "CONVERTED",
+            "account_opened": "TRUE",
+            "notes": "=Converted: {{ $json.next_action }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "f6e44681-d53f-4b8d-83dc-d62e0e2ca728",
+      "name": "Mark CONVERTED",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1568,
+        -48
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "conversions",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "event_type": "CONVERTED",
+            "lead_id": "={{ $json.lead_id }}",
+            "full_name": "={{ $json.full_name }}",
+            "phone": "={{ $json.phone }}",
+            "country": "={{ $json.country }}",
+            "elevenlabs_call_id": "={{ $json.elevenlabs_call_id }}",
+            "conversation_summary": "={{ $json.conversation_summary }}"
+          },
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "bf05e7e5-8005-4c5a-8d58-783ad1e4c071",
+      "name": "Append Conversion Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1344,
+        -48
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF5",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+            "message": "={{ JSON.stringify($json).slice(0, 5000) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4b2aabea-2d52-4968-836e-192e21c1f681",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -2224,
+        176
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 11-18 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cdae5d10-8797-48b1-a4cc-38f4185f950d",
+      "name": "Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2464,
+        -288
+      ]
+    }
+  ],
+  "connections": {
+    "Append to Handoff Tab1": {
+      "main": [
+        [
+          {
+            "node": "Mark SALES_HANDOFF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read All Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read All Leads": {
+      "main": [
+        [
+          {
+            "node": "Compute Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Action": {
+      "main": [
+        [
+          {
+            "node": "Route Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [
+          {
+            "node": "Append to Handoff Tab1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark CONVERTED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark SALES_HANDOFF": {
+      "main": [
+        [
+          {
+            "node": "📢 Telegram Alert — Sales Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark CONVERTED": {
+      "main": [
+        [
+          {
+            "node": "Append Conversion Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 15 min": {
+      "main": [
+        [
+          {
+            "node": "Read All Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Every 15 min1": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    },
+    "node:Every 15 min": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "id": "EWlF9l3b9w6Vq3NA",
+      "name": "landmark",
+      "createdAt": "2026-07-27T09:29:13.383Z",
+      "updatedAt": "2026-07-27T09:29:13.383Z"
+    },
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "LismWLdOzwMudnEo",
+      "name": "compliant-v1",
+      "createdAt": "2026-07-27T09:29:13.400Z",
+      "updatedAt": "2026-07-27T09:29:13.400Z"
+    },
+    {
+      "id": "4QiZI0ncQuXkUBYA",
+      "name": "wf5-handoff",
+      "createdAt": "2026-07-27T12:29:08.664Z",
+      "updatedAt": "2026-07-27T12:29:08.664Z"
+    },
+    {
+      "id": "ZF3ImiIOdnoSG1Py",
+      "name": "hindi",
+      "createdAt": "2026-07-27T09:29:13.407Z",
+      "updatedAt": "2026-07-27T09:29:13.407Z"
+    },
+    {
+      "id": "pRf4hChU7hBS26VE",
+      "name": "wf5",
+      "createdAt": "2026-07-27T12:29:08.661Z",
+      "updatedAt": "2026-07-27T12:29:08.661Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "94klx8IHXnwpP6pP",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-07-29T07:27:19.950Z",
+      "updatedAt": "2026-07-29T07:27:19.950Z"
+    }
+  ],
+  "activeVersion": null
+}

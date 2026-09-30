@@ -1,0 +1,40 @@
+# =====================================================================
+#  Servicios systemd del panel y la facturacion
+# =====================================================================
+
+# ---------- /etc/systemd/system/itsp-panel.service ----------
+# Panel web (gunicorn en localhost:8080; ponlo detras de nginx con TLS).
+[Unit]
+Description=ITSP Panel (Flask/gunicorn)
+After=network.target mariadb.service
+
+[Service]
+WorkingDirectory=/opt/itsp/panel
+Environment=ITSP_DB_USER=asterisk_rw
+Environment=ITSP_DB_PASS=CAMBIA_ESTO_PASS_BD_RW
+Environment=ITSP_SECRET=CAMBIA_ESTO_SECRET_LARGO
+ExecStart=/usr/bin/gunicorn -w 2 -b 127.0.0.1:8080 app:app
+Restart=always
+User=itsp
+
+[Install]
+WantedBy=multi-user.target
+
+# =====================================================================
+# ---------- /etc/systemd/system/itsp-rating.service ----------
+# [Unit]
+# Description=ITSP rating (tarifica CDR pendientes)
+# After=network.target mariadb.service
+# [Service]
+# Type=oneshot
+# ExecStart=/usr/bin/python3 /opt/itsp/billing/rating.py
+# User=root
+
+# ---------- /etc/systemd/system/itsp-rating.timer ----------
+# [Unit]
+# Description=Tarifica cada 5 minutos
+# [Timer]
+# OnBootSec=120
+# OnUnitActiveSec=300
+# [Install]
+# WantedBy=timers.target

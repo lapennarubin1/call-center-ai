@@ -1,0 +1,334 @@
+{
+  "id": "Mvkt0b6hVqoNRjNT",
+  "name": "WF2-Stringee-Outbound",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-08-05T07:26:39.990Z",
+  "updatedAt": "2026-08-10T06:53:17.023Z",
+  "isArchived": true,
+  "versionId": "c49bedd9-2caa-4c55-aaf6-81d8e2105952",
+  "versionCounter": 1,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "ec5844d8-8b01-456b-8b9d-c21f2bf61b3c",
+      "name": "⏰ Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "leads"
+        },
+        "options": {}
+      },
+      "id": "4b85660d-523b-42d1-8811-478c16372461",
+      "name": "📋 Sheet → Pull All Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ═══ HORARIO DE LLAMADAS INDIA: 11:00–19:00 IST (UTC+5:30) ═══\nconst istMinutes = (new Date().getUTCHours() * 60 + new Date().getUTCMinutes() + 330) % 1440;\nconst IST_OPEN = 11 * 60, IST_CLOSE = 19 * 60;\nif (istMinutes < IST_OPEN || istMinutes >= IST_CLOSE) {\n  const h = String(Math.floor(istMinutes / 60)).padStart(2, '0');\n  const m = String(istMinutes % 60).padStart(2, '0');\n  console.log(`🌙 Fuera de horario India (${h}:${m} IST) — sin llamadas hasta las 11:00 IST`);\n  return [];\n}\n\nfunction toE164(raw) {\n  if (raw === undefined || raw === null) return '';\n  let p = String(raw).replace(/[^0-9+]/g, '');\n  if (!p) return '';\n  if (p.startsWith('+')) return p;\n  if (p.length >= 8 && p.length <= 15) return '+' + p;\n  return '';\n}\n\nconst SKIP_STATUSES = new Set([\n  'DO_NOT_CALL', 'CONVERTED', 'MAX_ATTEMPTS_REACHED',\n  'INTERESTED', 'NOT_INTERESTED', 'SALES_HANDOFF', 'ACCOUNT_OPENED',\n  'SUCCESSFUL', 'VOICEMAIL', 'FAILED', 'SCHEDULED'\n]);\n\nconst BATCH_SIZE = 5;\nconst RETRY_COOLDOWN_MIN = 5;\nconst STUCK_TIMEOUT_MIN = 30;\nconst now = Date.now();\nconst attempts = [];\nconst skipped = [];\n\nfor (const item of $input.all()) {\n  const r = { ...(item.json || {}) };\n  const phone = toE164(r.phone);\n  let attemptsCount = Number(r.call_attempts || 0);\n  let status = String(r.status || '').trim().toUpperCase();\n\n  if (!phone) { skipped.push({ lead_id: r.lead_id, reason: `bad phone: '${r.phone}'` }); continue; }\n  if (!r.lead_id || String(r.lead_id).trim() === '') { skipped.push({ lead_id: 'EMPTY', reason: 'missing lead_id' }); continue; }\n\n  if ((status === 'CALL_IN_PROGRESS' || status === 'DIALING') && r.last_call_time) {\n    const minsSince = (now - new Date(r.last_call_time).getTime()) / 60000;\n    if (minsSince > STUCK_TIMEOUT_MIN) {\n      status = 'READY_TO_CALL'; r.status = 'READY_TO_CALL';\n    } else {\n      skipped.push({ lead_id: r.lead_id, reason: `${status} since ${minsSince.toFixed(0)}min` }); continue;\n    }\n  }\n\n  if ((status === 'DIAL_FAILED') && r.last_call_time) {\n    const minsSince = (now - new Date(r.last_call_time).getTime()) / 60000;\n    if (minsSince < RETRY_COOLDOWN_MIN) {\n      skipped.push({ lead_id: r.lead_id, reason: `DIAL_FAILED cooldown ${minsSince.toFixed(1)}min` }); continue;\n    }\n    status = 'READY_TO_CALL'; r.status = 'READY_TO_CALL';\n  }\n\n  if (attemptsCount >= 3) { skipped.push({ lead_id: r.lead_id, reason: `attempts=${attemptsCount}` }); continue; }\n  if (SKIP_STATUSES.has(status)) { skipped.push({ lead_id: r.lead_id, reason: `status=${status}` }); continue; }\n  if (status === 'SCHEDULED') { skipped.push({ lead_id: r.lead_id, reason: 'SCHEDULED → WF4' }); continue; }\n\n  r.phone = phone;\n  r.full_name = String(r.full_name || '').trim() || 'User';\n  r.lead_id = String(r.lead_id).trim();\n\n  const phoneStr = String(phone);\n  let country = String(r.country || '').trim();\n  if (!country || country.length < 2) {\n    if (phoneStr.startsWith('+91')) country = 'India';\n    else if (phoneStr.startsWith('+971')) country = 'UAE';\n    else country = 'India';\n  }\n  r.country = country;\n  attempts.push({ json: r });\n}\n\nconsole.log('🟢 ELEGIBLES', attempts.length, '| ⚪ SKIPPED', skipped.length);\nif (attempts.length === 0) return [];\n\nconst nuevos     = attempts.filter(a => Number(a.json.call_attempts || 0) === 0);\nconst reintentos = attempts.filter(a => Number(a.json.call_attempts || 0) > 0);\nconst batch = [...nuevos, ...reintentos].slice(0, BATCH_SIZE);\n\nconsole.log(`📦 Batch: ${batch.length}/${BATCH_SIZE} | Nuevos: ${nuevos.length} | Reintentos: ${reintentos.length}`);\nreturn batch;\n"
+      },
+      "id": "1c5acce4-9d3f-43e0-bcf6-709b095282ab",
+      "name": "⚙️ Normalize & Select",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "status": "DIALING",
+            "last_call_time": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ]
+        },
+        "options": {}
+      },
+      "id": "b987aed8-ac2a-4b9d-b442-a27dcedb6e3c",
+      "name": "✏️ Mark DIALING in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        688,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Genera JWT de Stringee con HS256\n// Válido por 1 hora — se regenera en cada ejecución\nconst crypto = require('crypto');\n\nconst SID = 'AC50a1aa324d52698728ae498e5d34386a';\nconst KEY = 'SEWgD8mlmbshvT87T7F7Czdd5k8JdWdp';\nconst now = Math.floor(Date.now() / 1000);\nconst exp = now + 3600; // 1 hora\n\nconst header  = Buffer.from(JSON.stringify({ typ:'JWT', alg:'HS256', cty:'stringee-api;v=1' })).toString('base64url');\nconst payload = Buffer.from(JSON.stringify({ jti: SID + '_' + now, iss: SID, exp, rest_api: true })).toString('base64url');\nconst sig     = crypto.createHmac('sha256', KEY).update(header + '.' + payload).digest('base64url');\nconst jwt     = header + '.' + payload + '.' + sig;\n\nconsole.log('🔑 Stringee JWT generado (exp en 1h)');\nreturn [{ json: { jwt } }];\n"
+      },
+      "id": "5e4fd9f1-6184-4736-8eca-1e9273a652aa",
+      "name": "⚙️ Generate Stringee JWT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Llama a Stringee API para cada lead del batch.\n// El answer_url incluye lead_id y phone como query params\n// para que el webhook de Stringee-Answer pueda identificar al lead\n// y WF-Stringee-Init pueda devolver los dynamic_variables a ElevenLabs.\nconst jwt    = $('⚙️ Generate Stringee JWT').first().json.jwt;\nconst leads  = $('⚙️ Normalize & Select').all();\nconst ANSWER_BASE = 'https://landmarket-n8n.dhsoig.easypanel.host/webhook/stringee-answer';\nconst FROM_NUMBER = '917971441787';\nconst results = [];\n\nfor (const item of leads) {\n  const lead  = item.json;\n  const phone = String(lead.phone || '').replace(/^\\+/, ''); // sin + para Stringee\n  const answerUrl = ANSWER_BASE + '?lead_id=' + encodeURIComponent(lead.lead_id) + '&phone=' + encodeURIComponent(lead.phone);\n\n  const body = {\n    from: { type: 'external', number: FROM_NUMBER, alias: FROM_NUMBER },\n    to: [{ type: 'external', number: phone, alias: phone }],\n    answer_url: answerUrl\n  };\n\n  console.log('📞 Stringee callout → ', phone, '| lead_id:', lead.lead_id);\n\n  let resp, statusCode, callId = '';\n  try {\n    resp = await this.helpers.httpRequest({\n      method: 'POST',\n      url: 'https://api.stringee.com/v1/call2/callout',\n      headers: {\n        'Content-Type': 'application/json',\n        'X-STRINGEE-AUTH': jwt\n      },\n      body: JSON.stringify(body),\n      returnFullResponse: true,\n      timeout: 30000\n    });\n    statusCode = resp.statusCode || 200;\n    const parsed = typeof resp.body === 'string' ? JSON.parse(resp.body) : resp.body;\n    callId = String(parsed.call_id || parsed.callId || parsed.data?.call_id || '');\n    console.log('✅ Stringee response:', statusCode, '| call_id:', callId, '| r:', parsed.r);\n  } catch(e) {\n    statusCode = 500;\n    console.error('🔴 Stringee error:', e.message);\n  }\n\n  results.push({ json: {\n    lead_id:              lead.lead_id,\n    phone:                lead.phone,\n    stringee_call_id:     callId,\n    stringee_status_code: statusCode,\n    lead_json:            lead\n  }});\n}\n\nreturn results;\n"
+      },
+      "id": "9d0d11d0-5237-4d27-8237-d9927e1555e6",
+      "name": "📞 Stringee Callout",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Clasifica el resultado del callout de Stringee\n// r=0 en Stringee significa éxito (igual que HTTP 200 en ElevenLabs)\nconst items = $input.all();\nconst now   = new Date().toISOString();\nconst cooldownDate = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();\n\nreturn items.map(item => {\n  const r    = item.json;\n  const lead = r.lead_json || {};\n  const ok   = r.stringee_status_code >= 200 && r.stringee_status_code < 300 && r.stringee_call_id;\n\n  let status, last_call_status, notes, callback_date;\n  if (ok) {\n    status           = 'CALL_IN_PROGRESS';\n    last_call_status = 'INITIATED';\n    notes            = '🟢 Stringee call sent: ' + r.stringee_call_id;\n    callback_date    = '';\n  } else {\n    status           = 'DIAL_FAILED';\n    last_call_status = 'HTTP_' + r.stringee_status_code;\n    notes            = '🔴 Stringee ' + r.stringee_status_code;\n    callback_date    = cooldownDate;\n  }\n\n  console.log('📊 Classify | lead_id:', lead.lead_id, '| status:', status, '| call_id:', r.stringee_call_id);\n\n  return { json: {\n    lead_id:          lead.lead_id,\n    elevenlabs_call_id: r.stringee_call_id,  // reutilizamos la misma columna\n    status,\n    last_call_status,\n    notes,\n    callback_date,\n    call_attempts:    Number(lead.call_attempts || 0) + 1,\n    last_call_time:   now\n  }};\n});\n"
+      },
+      "id": "fa4290ce-4360-413b-b6ed-19fb2d8a55c3",
+      "name": "🔍 Classify Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "leads"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "lead_id"
+          ]
+        },
+        "options": {}
+      },
+      "id": "35fa818e-e419-4671-9312-b34f54eba084",
+      "name": "💾 Save Final Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1568,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "⏰ Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "📋 Sheet → Pull All Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Sheet → Pull All Leads": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalize & Select",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalize & Select": {
+      "main": [
+        [
+          {
+            "node": "✏️ Mark DIALING in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✏️ Mark DIALING in Sheet": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Generate Stringee JWT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Generate Stringee JWT": {
+      "main": [
+        [
+          {
+            "node": "📞 Stringee Callout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📞 Stringee Callout": {
+      "main": [
+        [
+          {
+            "node": "🔍 Classify Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Classify Result": {
+      "main": [
+        [
+          {
+            "node": "💾 Save Final Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:⏰ Schedule Trigger": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": null,
+  "tags": [
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "ewb8t7katYNDAFKZ",
+      "name": "stringee",
+      "createdAt": "2026-08-05T07:26:05.946Z",
+      "updatedAt": "2026-08-05T07:26:05.946Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "Mvkt0b6hVqoNRjNT",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-08-05T07:26:39.990Z",
+      "updatedAt": "2026-08-05T07:26:39.990Z"
+    }
+  ],
+  "activeVersion": null
+}

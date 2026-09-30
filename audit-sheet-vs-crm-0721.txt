@@ -1,0 +1,7 @@
+
+══════════ 0. ¿EXISTEN panel_leads / panel_conversions (Sheet legacy)? ══════════
+panel_leads: lead_id,full_name,phone,country,language,status,last_call_status,call_attempts,last_call_time,duration_secs,synced_at
+panel_conversions: lead_id,full_name,phone,country,atlantis_user,account_id,created_at,synced_at
+columna teléfono detectada: phone | status: status | país: country | último contacto: last_call_time
+
+══════════ 1. ¿LOS 5-6 NÚMEROS EN LOOP DE MÉXICO ESTÁN EN panel_leads (Sheet)? ══════════

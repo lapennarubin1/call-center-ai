@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Panel{% endblock %} · Landmark Markets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='panel.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <div>
+      <strong>Landmark Markets</strong>
+      <span class="sub">Centro de operaciones · India</span>
+    </div>
+  </div>
+  <div class="topbar-right">
+    {% if r is defined %}
+      <span class="mono stamp">actualizado {{ r.generated[11:16] }}</span>
+      <a class="btn ghost" href="/export/summary.csv?period={{ p.period }}&start={{ p.start or '' }}&end={{ p.end or '' }}">Resumen</a>
+      <a class="btn ghost" href="/export/conversions.csv?period={{ p.period }}&start={{ p.start or '' }}&end={{ p.end or '' }}">Cuentas</a>
+    {% endif %}
+    <a class="btn ghost" href="/logout">Salir</a>
+  </div>
+</header>
+
+<main class="wrap">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="foot mono">
+  <span>Tarifa aplicada ${{ '%.2f'|format(r.rate) if r is defined else '0.06' }}/min · facturación por minuto completo</span>
+  <span>Fuente: CDR Asterisk + leads sincronizados</span>
+</footer>
+
+</body>
+</html>

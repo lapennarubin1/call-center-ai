@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% set active='plans' %}
+{% block heading %}Planes y tarifas{% endblock %}
+{% block content %}
+<div class="panel">
+  <div class="panel-h"><h2>Planes de tarifas (venta)</h2>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('plan_form') }}">Nuevo plan</a></div>
+  <div class="panel-b flush">
+    {% if plans %}
+    <table>
+      <thead><tr><th>Plan</th><th>Moneda</th><th>Descripción</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+      {% for p in plans %}
+        <tr>
+          <td class="mono">{{ p.name }}</td>
+          <td>{{ p.currency }}</td>
+          <td>{{ p.description or '—' }}</td>
+          <td>{% if p.active %}<span class="pill pill-ok">activo</span>{% else %}<span class="pill pill-off">inactivo</span>{% endif %}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <a class="btn btn-sm" href="{{ url_for('plan_rates', pid=p.id) }}">Tarifas</a>
+            <a class="btn btn-sm" href="{{ url_for('plan_form', pid=p.id) }}">Editar</a>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">Sin planes. Crea uno y añade tarifas por prefijo.</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

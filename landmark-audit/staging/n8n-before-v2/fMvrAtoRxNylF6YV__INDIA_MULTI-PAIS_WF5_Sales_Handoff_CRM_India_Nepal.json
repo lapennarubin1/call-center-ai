@@ -1,0 +1,955 @@
+{
+  "id": "fMvrAtoRxNylF6YV",
+  "name": "INDIA MULTI-PAIS WF5 — Sales Handoff & CRM (India + Nepal)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-08T12:30:16.564Z",
+  "updatedAt": "2026-09-09T08:25:44.197Z",
+  "isArchived": false,
+  "versionId": "aa54e755-2b90-4750-adeb-9ee0ad47d36c",
+  "versionCounter": 35,
+  "sourceWorkflowId": null,
+  "triggerCount": 2,
+  "nodes": [
+    {
+      "parameters": {
+        "chatId": "-1004454561082",
+        "text": "=🔥 *SALES HANDOFF — {{ String($json.country || 'unknown').toUpperCase() }}*\n\n*Lead:* {{ $json.full_name || 'Sin nombre' }}\n*Teléfono:* {{ $json.phone }}\n*Status:* {{ $json._action }}\n*Acción:* {{ $json.next_action }}\n*Resumen:* {{ String($json.conversation_summary || '').slice(0, 300) }}\n\n_{{ $now.toISO() }}_",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "name": "📢 Telegram Alert — Sales Handoff",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        784,
+        384
+      ],
+      "id": "8abd684c-cd89-469c-bfd4-c4f088156b21",
+      "webhookId": "c3c837e0-9421-4bfa-8372-098fe1cae655",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      },
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1920373080,
+          "mode": "list",
+          "cachedResultName": "handoff",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1920373080"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "full_name": "={{ $json.full_name || '' }}",
+            "phone": "={{ $json.phone }}",
+            "status": "SALES_HANDOFF",
+            "conversation_summary": "={{ String($json.conversation_summary || '').slice(0, 300) }}",
+            "next_action": "={{ $json.next_action }}",
+            "assigned_to": "={{ $json.assigned_agent || 'unassigned' }}",
+            "created_at": "={{ $now.toISO() }}",
+            "notes": "={{ $json.notes || '' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "next_action",
+              "displayName": "next_action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "assigned_to",
+              "displayName": "assigned_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ef126c24-e4b6-4c4d-a2a7-00c98c83bf4a",
+      "name": "Append to Handoff Tab1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        928,
+        240
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf5-handoff",
+        "options": {}
+      },
+      "id": "6c0160ed-02a3-445e-b5ae-431caa98c49d",
+      "name": "Manual Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -848,
+        512
+      ],
+      "webhookId": "wf5-handoff"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bucket rows: HANDOFF | CONVERTED | SKIP\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  const status = String(r.status || '').toUpperCase();\n  const interested = String(r.interested || '').toUpperCase() === 'TRUE';\n  const accountOpened = String(r.account_opened || '').toUpperCase();\n  let action = 'SKIP';\n  let next_action = '';\n  if (accountOpened === 'TRUE' && status !== 'CONVERTED') {\n    action = 'CONVERTED';\n    next_action = 'Welcome onboarding + first deposit follow-up';\n  } else if ((interested || accountOpened === 'PENDING') && !['SALES_HANDOFF', 'CONVERTED'].includes(status)) {\n    action = 'HANDOFF';\n    next_action = accountOpened === 'PENDING'\n      ? 'Call advisor: confirm credentials received + assist deposit of Rs 5000'\n      : 'Call advisor: nurture & confirm account opening';\n  }\n  if (action !== 'SKIP') out.push({ json: { ...r, _action: action, next_action } });\n}\nreturn out;"
+      },
+      "id": "2d23d1de-b420-42c7-92d8-2b2716413740",
+      "name": "Compute Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "h1",
+                    "leftValue": "={{ $json._action }}",
+                    "rightValue": "HANDOFF",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "h2",
+                    "leftValue": "={{ $json._action }}",
+                    "rightValue": "CONVERTED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ff4205a2-2e13-42c1-baaf-386f8f0e21eb",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        368,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json._source_sheet || ({india:'leads',nepal:'leads nepal',slot3:'leads slot3',slot4:'leads slot4'})[String($json.country || '').toLowerCase()] }}",
+          "mode": "expression"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "status": "SALES_HANDOFF",
+            "assigned_agent": "={{ $json.assigned_agent || 'unassigned' }}",
+            "notes": "=Handoff: {{ $json.next_action }} | Summary: {{ String($json.conversation_summary || '').slice(0, 200) }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "51890713-cce3-4552-ba7d-8e6100c805d6",
+      "name": "Mark SALES_HANDOFF",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        784,
+        112
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json._source_sheet || ({india:'leads',nepal:'leads nepal',slot3:'leads slot3',slot4:'leads slot4'})[String($json.country || '').toLowerCase()] }}",
+          "mode": "expression"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "status": "CONVERTED",
+            "account_opened": "TRUE",
+            "notes": "=Converted: {{ $json.next_action }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "65a79a50-55b8-4523-b771-d5180ea30ee3",
+      "name": "Mark CONVERTED",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        624,
+        736
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1999552215"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "full_name": "={{ $json.full_name }}",
+            "phone": "={{ $json.phone }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "whatsapp_phone",
+              "displayName": "whatsapp_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "atlantis_username",
+              "displayName": "atlantis_username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "atlantis_password",
+              "displayName": "atlantis_password",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversion_date",
+              "displayName": "conversion_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "deposit_status",
+              "displayName": "deposit_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "paid",
+              "displayName": "paid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "out_trade_no",
+              "displayName": "out_trade_no",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "27845cd8-3c92-468e-8442-db6199518b16",
+      "name": "Append Conversion Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        800,
+        608
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF5",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+            "message": "={{ JSON.stringify($json).slice(0, 5000) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "b0fd288c-1878-4783-b093-24b3bd2b0919",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -352,
+        864
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 11-18 * * *"
+            }
+          ]
+        }
+      },
+      "id": "f85144f8-c0f4-434c-82ae-1074e0d36828",
+      "name": "Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -848,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=210138417"
+        },
+        "options": {}
+      },
+      "id": "274a73a0-01cb-43f6-8f09-baf4350a8ccd",
+      "name": "📋 Read India — leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -592,
+        272
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1838507431,
+          "mode": "list",
+          "cachedResultName": "leads nepal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1838507431"
+        },
+        "options": {}
+      },
+      "id": "2d9f41d5-0fe1-44dc-8c65-eb8791405b96",
+      "name": "📋 Read Nepal — leads nepal",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -592,
+        512
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const out=[];\nfor (const item of $input.all()) {\n  const r={...(item.json||{})};\n  r.country='india';\n  r.language=String(r.language||'hi').trim().toLowerCase();\n  r._source_country='india';\n  r._source_sheet='leads';\n  out.push({json:r});\n}\nreturn out;"
+      },
+      "id": "8162cca8-bfdf-454d-a67b-31f4e1d850cc",
+      "name": "🏷️ Tag India",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        272
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const out=[];\nfor (const item of $input.all()) {\n  const r={...(item.json||{})};\n  r.country='nepal';\n  // Nepal reutiliza temporalmente la configuración de idioma de India.\n  // Cambiar aquí cuando se defina un idioma/agente dedicado.\n  r.language=String(r.language||'hi').trim().toLowerCase();\n  r._source_country='nepal';\n  r._source_sheet='leads nepal';\n  out.push({json:r});\n}\nreturn out;"
+      },
+      "id": "d12d8298-0d21-4ff4-9730-12bfc90a323f",
+      "name": "🏷️ Tag Nepal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        512
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "3a185163-c8b3-44c6-8b3e-c46045a0ef1f",
+      "name": "🔀 Merge India + Nepal",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -112,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "India y Nepal se escanean por separado y luego comparten la misma lógica.\nSolo los updates de estado vuelven a la pestaña de origen mediante `_source_sheet`.\n\n`handoff` y `conversions` siguen siendo tablas comunes de CRM.",
+        "height": 240,
+        "width": 620,
+        "color": 5
+      },
+      "id": "9a05f020-8c3f-46f7-ab53-e2334aaec9c0",
+      "name": "🌍 Sales Handoff Architecture",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Every 15 min": {
+      "main": [
+        [
+          {
+            "node": "📋 Read India — leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Read Nepal — leads nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Webhook": {
+      "main": [
+        [
+          {
+            "node": "📋 Read India — leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Read Nepal — leads nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Read India — leads": {
+      "main": [
+        [
+          {
+            "node": "🏷️ Tag India",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Read Nepal — leads nepal": {
+      "main": [
+        [
+          {
+            "node": "🏷️ Tag Nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏷️ Tag India": {
+      "main": [
+        [
+          {
+            "node": "🔀 Merge India + Nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏷️ Tag Nepal": {
+      "main": [
+        [
+          {
+            "node": "🔀 Merge India + Nepal",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "🔀 Merge India + Nepal": {
+      "main": [
+        [
+          {
+            "node": "Compute Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Action": {
+      "main": [
+        [
+          {
+            "node": "Route Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [
+          {
+            "node": "Mark SALES_HANDOFF",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Append to Handoff Tab1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📢 Telegram Alert — Sales Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark CONVERTED",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Append Conversion Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Every 15 min": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": null,
+  "tags": [
+    {
+      "id": "EWlF9l3b9w6Vq3NA",
+      "name": "landmark",
+      "createdAt": "2026-07-27T09:29:13.383Z",
+      "updatedAt": "2026-07-27T09:29:13.383Z"
+    },
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "LismWLdOzwMudnEo",
+      "name": "compliant-v1",
+      "createdAt": "2026-07-27T09:29:13.400Z",
+      "updatedAt": "2026-07-27T09:29:13.400Z"
+    },
+    {
+      "id": "4QiZI0ncQuXkUBYA",
+      "name": "wf5-handoff",
+      "createdAt": "2026-07-27T12:29:08.664Z",
+      "updatedAt": "2026-07-27T12:29:08.664Z"
+    },
+    {
+      "id": "ZF3ImiIOdnoSG1Py",
+      "name": "hindi",
+      "createdAt": "2026-07-27T09:29:13.407Z",
+      "updatedAt": "2026-07-27T09:29:13.407Z"
+    },
+    {
+      "id": "pRf4hChU7hBS26VE",
+      "name": "wf5",
+      "createdAt": "2026-07-27T12:29:08.661Z",
+      "updatedAt": "2026-07-27T12:29:08.661Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "fMvrAtoRxNylF6YV",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-08T12:30:16.564Z",
+      "updatedAt": "2026-09-08T12:30:16.564Z"
+    }
+  ],
+  "activeVersion": null
+}

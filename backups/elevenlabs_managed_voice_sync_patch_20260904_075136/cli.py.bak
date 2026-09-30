@@ -1,0 +1,63 @@
+"""Comandos operativos. Uso (dentro del contenedor o con el venv):
+  flask --app app create-tenant     # crea el tenant inicial + owner desde SAAS_INITIAL_* del .env
+  flask --app app enable-module --tenant <slug> --module crm
+"""
+import os
+import click
+from flask import current_app
+from sqlalchemy import text
+from werkzeug.security import generate_password_hash
+from .db import saas_session
+
+SPRINT1_MODULES = ("voice_ai", "crm")
+
+
+def register_cli(app):
+    @app.cli.command("create-tenant")
+    @click.option("--slug", default=lambda: os.getenv("SAAS_INITIAL_TENANT_SLUG"))
+    @click.option("--name", default=lambda: os.getenv("SAAS_INITIAL_TENANT_NAME"))
+    @click.option("--admin-user", default=lambda: os.getenv("SAAS_INITIAL_ADMIN_USER"))
+    @click.option("--admin-pass", default=lambda: os.getenv("SAAS_INITIAL_ADMIN_PASS"))
+    @click.option("--plan", default="internal-unlimited")
+    @click.option("--tenant-id", type=int, default=None,
+                  help="Forzar id (ej. 1 para alinear con asterisk.tenants id=1 de Fase 0)")
+    def create_tenant(slug, name, admin_user, admin_pass, plan, tenant_id):
+        if not all([slug, name, admin_user, admin_pass]):
+            raise click.ClickException("Faltan slug/name/admin-user/admin-pass (o SAAS_INITIAL_* en .env)")
+        with saas_session() as s:
+            plan_id = s.execute(text("SELECT id FROM plans WHERE slug=:p"), {"p": plan}).scalar()
+            if not plan_id:
+                raise click.ClickException(f"Plan '{plan}' no existe (¿se aplicaron las migraciones?)")
+            if s.execute(text("SELECT 1 FROM tenants WHERE slug=:s"), {"s": slug}).first():
+                raise click.ClickException(f"El tenant '{slug}' ya existe")
+            if tenant_id:
+                s.execute(text("INSERT INTO tenants (id, slug, name, plan_id) VALUES (:i, :s, :n, :p)"),
+                          {"i": tenant_id, "s": slug, "n": name, "p": plan_id})
+                tid = tenant_id
+            else:
+                tid = s.execute(text("INSERT INTO tenants (slug, name, plan_id) VALUES (:s, :n, :p)"),
+                                {"s": slug, "n": name, "p": plan_id}).lastrowid
+            s.execute(text("INSERT INTO subscriptions (tenant_id, plan_id, status) VALUES (:t, :p, 'active')"),
+                      {"t": tid, "p": plan_id})
+            s.execute(text("INSERT INTO users (tenant_id, username, password_hash, role) VALUES (:t, :u, :h, 'owner')"),
+                      {"t": tid, "u": admin_user, "h": generate_password_hash(admin_pass)})
+            for m in SPRINT1_MODULES:
+                s.execute(text("INSERT IGNORE INTO tenant_modules (tenant_id, module_key) VALUES (:t, :m)"), {"t": tid, "m": m})
+        click.echo(f"OK tenant id={tid} slug={slug} owner={admin_user} modulos={','.join(SPRINT1_MODULES)}")
+
+    @app.cli.command("enable-module")
+    @click.option("--tenant", required=True, help="slug del tenant")
+    @click.option("--module", "module_key", required=True)
+    @click.option("--disable", is_flag=True)
+    def enable_module(tenant, module_key, disable):
+        from .core.registry import MODULES
+        if module_key not in MODULES:
+            raise click.ClickException(f"Modulo desconocido: {module_key}. Disponibles: {', '.join(MODULES)}")
+        status = "disabled" if disable else "enabled"
+        with saas_session() as s:
+            tid = s.execute(text("SELECT id FROM tenants WHERE slug=:s"), {"s": tenant}).scalar()
+            if not tid:
+                raise click.ClickException("Tenant no encontrado")
+            s.execute(text("""INSERT INTO tenant_modules (tenant_id, module_key, status) VALUES (:t, :m, :st)
+                              ON DUPLICATE KEY UPDATE status=:st"""), {"t": tid, "m": module_key, "st": status})
+        click.echo(f"OK {module_key} -> {status} para {tenant}")

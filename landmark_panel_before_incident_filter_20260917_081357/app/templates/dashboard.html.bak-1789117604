@@ -1,0 +1,836 @@
+{% extends "base.html" %}
+{% block title %}Panel · {{ r.label }}{% endblock %}
+
+{% macro delta(v, invert=false) %}
+  {%- if v is not none -%}
+    {%- set good = (v < 0) if invert else (v > 0) -%}
+    <span class="delta {{ 'up' if good else 'down' }}">
+      {{ '+' if v > 0 else '' }}{{ v|p }}%
+    </span>
+  {%- else -%}
+    <span class="delta flat">sin comparación</span>
+  {%- endif -%}
+{% endmacro %}
+
+{% block content %}
+
+<!-- ══ SELECTOR DE PAÍS ═════════════════════════════════════════ -->
+<nav class="countries" aria-label="Country">
+  {% for k, lbl in countries %}
+    <a class="chip {{ 'on' if p.country == k }}"
+       href="?country={{ k }}&period={{ p.period }}{% if p.period == 'custom' %}&start={{ p.start or '' }}&end={{ p.end or '' }}{% endif %}">{{ lbl }}</a>
+  {% endfor %}
+</nav>
+
+<!-- ══ BARRA DE PERIOD ══════════════════════════════════════════ -->
+<nav class="periods" aria-label="Date range">
+  {% for k, lbl in [('today','Today'),('yesterday','Yesterday'),('week','Week'),
+                    ('month','Month'),('last7','7 days'),('last30','30 days'),
+                    ('last90','90 days'),('year','Year')] %}
+    <a class="chip {{ 'on' if p.period == k }}" href="?period={{ k }}&country={{ p.country }}">{{ lbl }}</a>
+  {% endfor %}
+  <form class="range" method="get">
+    <input type="hidden" name="period" value="custom">
+    <input type="hidden" name="country" value="{{ p.country }}">
+    <input type="date" name="start" value="{{ p.start or r.range.start }}" aria-label="From">
+    <span class="to">→</span>
+    <input type="date" name="end" value="{{ p.end or r.range.end }}" aria-label="To">
+    <button type="submit">Apply</button>
+  </form>
+</nav>
+
+{% if r.sync.available and r.sync.stale %}
+<p class="notice stale-warn">
+  {% if r.sync.ever %}
+    Lead data has not been updated for {{ r.sync.age_min }} minutes (last update {{ r.sync.last }}).
+    Check that <b>WF14</b> is still active in n8n — call figures are current, conversion figures are not.
+  {% else %}
+    Leads not yet synced. Import and enable <b>WF14</b> in n8n to see conversion, accounts opened and cost per acquisition.
+  {% endif %}
+</p>
+{% endif %}
+
+<!-- ══ SIGNATURE: CALL TRAFFIC ═════════════════════════════════ -->
+<section class="panel trace-panel">
+  <header class="panel-head">
+    <div>
+      <span class="eyebrow">Call traffic</span>
+      <h2>{{ r.label }}</h2>
+    </div>
+    <div class="legend">
+      <button type="button" class="tr-toggle tr-lg tr-attempts active" onclick="toggleTrace('attempts', this)">● attempts</button>
+      <button type="button" class="tr-toggle tr-lg tr-answered active" onclick="toggleTrace('answered', this)">● answered</button>
+      <button type="button" class="tr-toggle tr-lg tr-cost active" onclick="toggleTrace('cost', this)">● cost</button>
+      <span class="sep"></span>
+      <span class="mono muted" id="tr-peak-axis">peak axis {{ trace.y_max|n }}</span>
+    </div>
+  </header>
+
+  {% if trace.empty %}
+    <p class="empty">No calls recorded in this range. Select another period or check that the CDR is writing.</p>
+  {% else %}
+  <svg class="trace" id="trace-svg" viewBox="0 0 {{ trace.w }} {{ trace.h }}" preserveAspectRatio="none" role="img"
+       data-w="{{ trace.w }}" data-h="{{ trace.h }}" data-pad-t="{{ trace.pad_t }}" data-pad-b="{{ trace.pad_b }}"
+       aria-label="Call volume by period with answered portion and cost line">
+    <g id="tr-gridlines">
+      {% for g in trace.gridlines %}
+        <line class="grid" x1="0" y1="{{ g.y }}" x2="{{ trace.w }}" y2="{{ g.y }}"/>
+      {% endfor %}
+    </g>
+    <g class="tr-series-group" data-series="attempts" data-visible="true">
+      {% for b in trace.bars %}
+        <rect class="b-tot" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" data-raw="{{ b.total }}" data-cx="{{ b.cx }}"/>
+      {% endfor %}
+      {% if trace.show_all_labels %}
+        {% for b in trace.bars %}
+          <text class="tr-pt-label mono tr-attempts" x="{{ b.cx }}" y="{{ b.y - 6 }}" text-anchor="{{ b.anchor }}">{{ b.total|n }}</text>
+        {% endfor %}
+      {% else %}
+        <text class="tr-last-label mono tr-attempts" x="{{ trace.last_bar.cx }}" y="{{ trace.last_bar.y - 6 }}" text-anchor="end">{{ trace.last_bar.total|n }}</text>
+      {% endif %}
+    </g>
+    <g class="tr-series-group" data-series="answered" data-visible="true">
+      {% for b in trace.bars %}
+        <rect class="b-ans" x="{{ b.x }}" y="{{ b.ay }}" width="{{ b.w }}" height="{{ b.ah }}" data-raw="{{ b.answered }}" data-cx="{{ b.cx }}"/>
+      {% endfor %}
+    </g>
+    <g class="tr-series-group" data-series="cost" data-visible="true">
+      <path class="cost-line" d="{{ trace.cost_path }}" data-raw-points='{{ trace.cost_raw | tojson }}'/>
+      {% for p in trace.cost_points %}
+        <circle class="cost-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="3"/>
+      {% endfor %}
+      {% if trace.show_all_labels %}
+        {% for p in trace.cost_points %}
+          <text class="tr-pt-label mono tr-cost" x="{{ p.x }}" y="{{ p.y - 8 }}" text-anchor="middle" data-raw="{{ p.v }}">${{ '%.2f'|format(p.v) }}</text>
+        {% endfor %}
+      {% else %}
+        <text class="tr-last-label mono tr-cost" x="{{ trace.last_cost.x - 6 }}" y="{{ trace.last_cost.y - 8 }}" text-anchor="end">${{ '%.2f'|format(trace.last_cost.v) }}</text>
+      {% endif %}
+    </g>
+    {% for b in trace.bars %}
+      <rect class="b-hit" x="{{ b.x }}" y="0" width="{{ b.w }}" height="{{ trace.h }}">
+        <title>{{ b.label }}
+Attempts {{ b.total|n }}
+Answered {{ b.answered|n }} ({{ b.asr|p }}%)
+Minutes {{ b.minutes|n }}
+Cost ${{ b.cost|m }}</title>
+      </rect>
+    {% endfor %}
+  </svg>
+  <div class="axis mono">
+    <span>{{ trace.bars[0].label }}</span>
+    <span class="muted" id="tr-cost-max">cost max ${{ trace.cost_max|m }}</span>
+    <span>{{ trace.bars[-1].label }}</span>
+  </div>
+  {% endif %}
+</section>
+
+<!-- ══ INDICADORES PRINCIPALES ═══════════════════════════════════ -->
+<section class="kpis">
+  <article class="kpi">
+    <span class="k-label">Call attempts</span>
+    <strong class="k-val mono">{{ r.traffic.total_calls|n }}</strong>
+    <span class="k-foot">{{ delta(r.deltas.total_calls) }} vs previous period</span>
+  </article>
+
+  <article class="kpi accent-ok">
+    <span class="k-label">Answered</span>
+    <strong class="k-val mono">{{ r.traffic.answered|n }}</strong>
+    <span class="k-foot"><b class="mono">{{ r.traffic.asr|p }}%</b> answer rate {{ delta(r.deltas.asr) }}</span>
+  </article>
+
+  <article class="kpi accent-cost">
+    <span class="k-label">Period cost</span>
+    <strong class="k-val mono">${{ r.traffic.cost|m }}</strong>
+    <span class="k-foot">{{ r.traffic.billed_minutes|n }} billed minutes {{ delta(r.deltas.cost, invert=true) }}</span>
+  </article>
+
+  <article class="kpi">
+    <span class="k-label">Avg duration</span>
+    <strong class="k-val mono">{{ r.traffic.acd|sec }}<em>s</em></strong>
+    <span class="k-foot">{{ r.traffic.talk_minutes|m }} total talk minutes</span>
+  </article>
+
+  <article class="kpi">
+    <span class="k-label">Cost per answered</span>
+    <strong class="k-val mono">${{ r.traffic.cost_per_answered|usd4 }}</strong>
+    <span class="k-foot">${{ r.traffic.cost_per_call|usd4 }} per attempt</span>
+  </article>
+
+  <article class="kpi {{ 'accent-bad' if r.traffic.failure_rate > 5 }}">
+    <span class="k-label">Technical failures</span>
+    <strong class="k-val mono">{{ r.traffic.tech_failures|n }}</strong>
+    <span class="k-foot"><b class="mono">{{ r.traffic.failure_rate|p }}%</b> · network effectiveness {{ r.traffic.ner|p }}%</span>
+  </article>
+</section>
+
+<!-- ══ ESCALERA DEL EMBUDO ═══════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div>
+      <span class="eyebrow">Funnel</span>
+      <h2>From dial to account opened</h2>
+    </div>
+    <span class="mono muted">each step shows what remains from the previous</span>
+  </header>
+
+  <ol class="ladder">
+    {% for s in ladder %}
+    <li class="rung r-{{ s.key }}">
+      <div class="rung-head">
+        <span class="rung-label">{{ s.label }}</span>
+        <span class="rung-note">{{ s.note }}</span>
+      </div>
+      <div class="rung-bar"><span style="width: {{ s.width }}%"></span></div>
+      <div class="rung-nums mono">
+        <b>{{ s.v|n }}</b>
+        {% if s.pct_prev is not none %}
+          <span class="keep">{{ s.pct_prev|p }}% of previous</span>
+        {% else %}
+          <span class="keep">base</span>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+
+  {% if not funnel_trend.empty %}
+  <div class="funnel-trend-wrap">
+    <div class="ft-head">
+      <span class="eyebrow">Funnel over time</span>
+      <div class="ft-legend mono">
+        <button type="button" class="ft-toggle ft-lg ft-answered active" onclick="toggleSeries('answered', this)">● Answered</button>
+        <button type="button" class="ft-toggle ft-lg ft-realconv active" onclick="toggleSeries('realconv', this)">● Real conversation</button>
+        <button type="button" class="ft-toggle ft-lg ft-accounts active" onclick="toggleSeries('accounts', this)">● Account opened</button>
+      </div>
+    </div>
+    <svg class="funnel-trend" id="funnel-trend-svg" viewBox="0 0 {{ funnel_trend.w }} {{ funnel_trend.h }}" preserveAspectRatio="none" role="img"
+         data-w="{{ funnel_trend.w }}" data-h="{{ funnel_trend.h }}" data-pad-t="{{ funnel_trend.pad_t }}" data-pad-b="{{ funnel_trend.pad_b }}"
+         aria-label="Funnel stages over time, as percentage of attempts per period">
+      <g id="ft-gridlines">
+        {% for g in funnel_trend.gridlines %}
+          <line class="grid" x1="0" y1="{{ g.y }}" x2="{{ funnel_trend.w }}" y2="{{ g.y }}"/>
+          <text class="grid-label mono" x="4" y="{{ g.y - 4 }}">{{ g.v }}%</text>
+        {% endfor %}
+      </g>
+      {% for s in funnel_trend.series.values() %}
+        <g class="ft-series-group" data-series="{{ s.slug }}" data-visible="true">
+          <path class="ft-path {{ s.css }}" d="{{ s.path }}" data-raw-points='{{ s.raw_points | tojson }}'/>
+          {% for p in s.points %}
+            <circle class="ft-dot {{ s.css }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3" data-pct="{{ p.pct }}"/>
+            {% if funnel_trend.show_all_labels %}
+              <text class="ft-pt-label mono {{ s.css }}" x="{{ p.x }}" y="{{ p.label_y }}" text-anchor="{{ p.anchor }}" data-pct="{{ p.pct }}">{{ p.pct }}%</text>
+            {% endif %}
+          {% endfor %}
+          {% if not funnel_trend.show_all_labels %}
+            <text class="ft-last-label mono {{ s.css }}" x="{{ s.points[-1].x - 6 }}" y="{{ s.last_label_y }}" text-anchor="end" data-pct="{{ s.points[-1].pct }}">{{ s.points[-1].pct }}%</text>
+          {% endif %}
+        </g>
+      {% endfor %}
+      {% for col in funnel_trend.cols %}
+        <rect class="ft-hit" x="{{ col.x - funnel_trend.col_w / 2 }}" y="0" width="{{ funnel_trend.col_w }}" height="{{ funnel_trend.h }}">
+          <title>{{ col.label }}
+Attempts {{ col.attempts|n }}
+Answered {{ col.answered|n }} ({{ col.pct_answered }}%)
+Real conversation {{ col.real_conv|n }} ({{ col.pct_real_conv }}%)
+Account opened {{ col.accounts|n }} ({{ col.pct_accounts }}%)</title>
+        </rect>
+      {% endfor %}
+    </svg>
+    <div class="axis mono ft-axis">
+      {% for tick in funnel_trend.ticks %}
+        <span style="left: {{ (tick.x / funnel_trend.w * 100)|round(2) }}%">{{ tick.label }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if r.funnel.available %}
+  <div class="ladder-foot">
+    <div><span class="lf-label">Cost per account opened</span><b class="mono">${{ r.funnel.cpa|m }}</b></div>
+    <div><span class="lf-label">Cost per contact</span><b class="mono">${{ r.funnel.cost_per_contact|m }}</b></div>
+    <div><span class="lf-label">Scheduled callbacks</span><b class="mono">{{ r.funnel.scheduled|n }}</b></div>
+    <div><span class="lf-label">Voicemail</span><b class="mono">{{ r.funnel.voicemail|n }}</b></div>
+  </div>
+  {% else %}
+  <p class="notice">Lead data not yet synced. Enable <b>WF14</b> in n8n to see conversion and cost per account.</p>
+  {% endif %}
+</section>
+
+<!-- ══ HOURLY ACTIVITY — panel dinámico, solo horas activas ══════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div><span class="eyebrow">Daily rhythm</span><h2>Hourly activity <span class="mono muted">{{ r.tz_label }}</span></h2></div>
+    <div class="legend hr-legend">
+      <button type="button" class="hr-toggle hr-lg hr-attempts active" onclick="toggleHourly('attempts', this)">● attempts</button>
+      <button type="button" class="hr-toggle hr-lg hr-answered active" onclick="toggleHourly('answered', this)">● answered</button>
+      <button type="button" class="hr-toggle hr-lg hr-accounts active" onclick="toggleHourly('accounts', this)">● accounts</button>
+    </div>
+  </header>
+  {% if hourly.empty %}
+    <p class="empty">No hourly activity in this range.</p>
+  {% else %}
+  <svg class="hourly" id="hourly-svg" viewBox="0 0 {{ hourly.w }} {{ hourly.h }}" role="img"
+       data-w="{{ hourly.w }}" data-h="{{ hourly.h }}" data-pad-t="{{ hourly.pad_t }}" data-pad-b="{{ hourly.pad_b }}" data-pad-l="{{ hourly.pad_l }}"
+       aria-label="Calls by hour of day in {{ r.tz_label }}, active hours only, attempts/answered/accounts as separate bars">
+    <g id="hr-gridlines">
+      {% for g in hourly.gridlines %}
+        <line class="grid" x1="{{ hourly.pad_l }}" y1="{{ g.y }}" x2="{{ hourly.w }}" y2="{{ g.y }}"/>
+        <text class="h-axis-lbl mono" x="{{ hourly.pad_l - 6 }}" y="{{ g.y + 3 }}" text-anchor="end" font-size="9">{{ g.v|n }}</text>
+      {% endfor %}
+    </g>
+    <g class="hr-series-group" data-series="attempts" data-visible="true">
+      {% for b in hourly.attempts_bars %}
+        <rect class="h-tot {{ 'is-peak' if b.peak }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="1" data-raw="{{ b.raw }}"/>
+      {% endfor %}
+    </g>
+    <g class="hr-series-group" data-series="answered" data-visible="true">
+      {% for b in hourly.answered_bars %}
+        <rect class="h-ans" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="1" data-raw="{{ b.raw }}" data-cx="{{ b.cx }}"/>
+      {% endfor %}
+      {% for b in hourly.answered_bars %}
+        {% if b.raw > 0 %}
+          <text class="hr-pct-label mono" x="{{ b.cx }}" y="{{ b.y - 4 }}" text-anchor="middle">{{ b.asr|p }}%</text>
+        {% endif %}
+      {% endfor %}
+    </g>
+    <g class="hr-series-group" data-series="accounts" data-visible="true">
+      {% for b in hourly.accounts_bars %}
+        <rect class="h-accounts" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="1" data-raw="{{ b.raw }}"/>
+      {% endfor %}
+    </g>
+    {% for g in hourly.groups %}
+      <text class="h-lbl mono {{ 'is-peak' if g.peak }}" x="{{ g.cx }}" y="{{ hourly.h - 6 }}">{{ '%02d'|format(g.hour) }}</text>
+      <rect class="h-hit" x="{{ g.x }}" y="0" width="{{ g.w }}" height="{{ hourly.h }}">
+        <title>{{ '%02d'|format(g.hour) }}:00 {{ r.tz_label }}
+Attempts {{ g.total|n }}
+Answered {{ g.answered|n }} ({{ g.asr|p }}%)
+Accounts {{ g.accounts|n }}</title>
+      </rect>
+    {% endfor %}
+  </svg>
+  <p class="cap">{{ '%02d'|format(hourly.hour_lo) }}:00–{{ '%02d'|format(hourly.hour_hi) }}:59 {{ r.tz_label }} — only the hours with activity in this range. Three bars per hour: attempts / answered / accounts opened — attempts and answered share one scale (left axis), accounts has its own. The marked hour is the volume peak. Hover any hour for exact numbers.</p>
+  {% endif %}
+</section>
+
+<!-- ══ DOS COLUMNAS ══════════════════════════════════════════════ -->
+<div class="grid-2">
+
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">Contact quality</span><h2>How long answered calls last</h2></div>
+    </header>
+    <div class="split">
+      <ul class="hbars dur-bars">
+        {% for b in durbars %}
+        <li>
+          <span class="hb-label mono">{{ b.label }}</span>
+          <span class="hb-track"><i style="width: {{ b.w }}%" class="{{ 'strong' if b.lo >= 30 }}"></i></span>
+          <span class="hb-val mono">{{ b.count|n }}<em>{{ b.pct|p }}%</em></span>
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="stat-block">
+        <span class="sb-num mono">{{ r.durations.meaningful_pct|p }}%</span>
+        <span class="sb-label">of answered calls last more than 60 seconds</span>
+        <p class="sb-note">Below 60s is almost always an immediate hang-up: the phone was answered but no conversation happened.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">Call outcome</span><h2>How each call ended</h2></div>
+    </header>
+    <div class="split donut-row">
+      <svg viewBox="0 0 {{ donut.size }} {{ donut.size }}" class="donut" role="img" aria-label="Call outcome distribution">
+        {% for s in donut.segments %}
+          <circle class="seg tone-{{ s.tone }}" cx="{{ donut.cx }}" cy="{{ donut.cy }}" r="{{ donut.r }}"
+                  fill="none" stroke-width="{{ donut.thickness }}"
+                  stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}"
+                  transform="rotate(-90 {{ donut.cx }} {{ donut.cy }})">
+            <title>{{ s.label }}: {{ s.value|n }} ({{ s.pct|p }}%)</title>
+          </circle>
+        {% endfor %}
+        <text class="d-num mono" x="{{ donut.cx }}" y="{{ donut.cy - 2 }}">{{ r.traffic.asr|p }}%</text>
+        <text class="d-cap" x="{{ donut.cx }}" y="{{ donut.cy + 14 }}">answered</text>
+      </svg>
+      <ul class="dlegend">
+        {% for s in donut.segments %}
+        <li><i class="dot tone-{{ s.tone }}"></i>
+          <span class="dl-label">{{ s.label }}</span>
+          <span class="mono dl-val">{{ s.value|n }}<em>{{ s.pct|p }}%</em></span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">Database</span><h2>Pipeline status</h2></div>
+      <span class="mono muted">{{ r.pipeline.total|n if r.pipeline.available else '—' }} leads · {{ r.label }}</span>
+    </header>
+    {% if r.pipeline.available %}
+      <ul class="hbars">
+        {% for s in pipebars %}
+        <li title="{{ s.description }}">
+          <span class="hb-label">{{ s.status|estado }} <i class="info-dot" aria-hidden="true">?</i></span>
+          <span class="hb-track"><i style="width: {{ s.w }}%" class="st-{{ (s.status or 'none')|lower }}"></i></span>
+          <span class="hb-val mono">{{ s.n|n }}<em>{{ s.pct|p }}%</em></span>
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="ladder-foot compact">
+        <div title="Leads currently waiting — WF2 has not called them yet. Always shows the real-time total, not scoped to the selected period.">
+          <span class="lf-label">Pending calls <i class="info-dot" aria-hidden="true">?</i></span><b class="mono">{{ r.pipeline.pending|n }}</b>
+        </div>
+        <div title="Calls being dialed or actively in conversation right now. Always shows the real-time total, not scoped to the selected period.">
+          <span class="lf-label">In progress now <i class="info-dot" aria-hidden="true">?</i></span><b class="mono">{{ r.pipeline.in_flight|n }}</b>
+        </div>
+        <div title="Leads permanently excluded from calling. Always shows the real-time total, not scoped to the selected period.">
+          <span class="lf-label">Do not call <i class="info-dot" aria-hidden="true">?</i></span><b class="mono">{{ r.pipeline.do_not_call|n }}</b>
+        </div>
+      </div>
+      <p class="cap">Bars above reflect leads last touched during <b>{{ r.label }}</b>. The three totals below are always current, regardless of period.</p>
+    {% else %}
+      <p class="notice">Sync leads with <b>WF14</b> to see pipeline status.</p>
+    {% endif %}
+  </section>
+</div>
+
+<!-- ══ TABLA DETAIL ═════════════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div><span class="eyebrow">Detail</span><h2>Breakdown by {{ 'hour' if r.grain=='hour' else 'day' if r.grain=='day' else 'month' }}</h2></div>
+    <a class="btn" href="/export/daily.csv?period={{ p.period }}&start={{ p.start or '' }}&end={{ p.end or '' }}&country={{ p.country }}">Download CSV</a>
+  </header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Period ({{ r.tz_label }})</th><th class="r">Attempts</th><th class="r">Answered</th>
+          <th class="r">Rate</th><th class="r">No answer</th><th class="r">Failed</th>
+          <th class="r">Minutes</th><th class="r">Avg</th><th class="r">Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in r.series|reverse %}
+        <tr>
+          <td class="mono">{{ row.bucket }}</td>
+          <td class="r mono">{{ row.total_calls|n }}</td>
+          <td class="r mono">{{ row.answered|n }}</td>
+          <td class="r mono"><span class="pill {{ 'good' if row.asr >= 12 else 'mid' if row.asr >= 8 }}">{{ row.asr|p }}%</span></td>
+          <td class="r mono muted">{{ row.no_answer|n }}</td>
+          <td class="r mono {{ 'bad-txt' if row.failed > row.total_calls * 0.05 }}">{{ row.failed|n }}</td>
+          <td class="r mono">{{ row.billed_minutes|n }}</td>
+          <td class="r mono muted">{{ row.acd|sec }}s</td>
+          <td class="r mono strong-txt">${{ row.cost|m }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Total</td>
+          <td class="r mono">{{ r.traffic.total_calls|n }}</td>
+          <td class="r mono">{{ r.traffic.answered|n }}</td>
+          <td class="r mono">{{ r.traffic.asr|p }}%</td>
+          <td class="r mono">{{ r.traffic.no_answer|n }}</td>
+          <td class="r mono">{{ r.traffic.tech_failures|n }}</td>
+          <td class="r mono">{{ r.traffic.billed_minutes|n }}</td>
+          <td class="r mono">{{ r.traffic.acd|sec }}s</td>
+          <td class="r mono">${{ r.traffic.cost|m }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</section>
+
+<!-- ══ FUNNEL TOGGLES ══════════════════════════════════════════ -->
+<style>
+.ft-toggle {
+    background: transparent;
+    border: 2px solid currentColor;
+    padding: 4px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
+    transition: all 0.25s ease;
+    opacity: 0.35;
+    margin: 0 2px;
+}
+.ft-toggle.active {
+    opacity: 1;
+    color: #fff !important;
+}
+.ft-toggle.ft-answered.active { background: #2563eb; border-color: #2563eb; }
+.ft-toggle.ft-realconv.active { background: #059669; border-color: #059669; }
+.ft-toggle.ft-accounts.active { background: #dc2626; border-color: #dc2626; }
+</style>
+<script>
+(function() {
+    var svg = document.getElementById('funnel-trend-svg');
+    if (!svg) return;
+
+    var W = parseFloat(svg.dataset.w);
+    var H = parseFloat(svg.dataset.h);
+    var PAD_T = parseFloat(svg.dataset.padT);
+    var PAD_B = parseFloat(svg.dataset.padB);
+    var PLOT_H = H - PAD_B - PAD_T;
+
+    function niceMax(v, steps) {
+        steps = steps || 4;
+        if (v <= 0) return steps;
+        var mag = Math.pow(10, Math.floor(Math.log10(v)));
+        var mags = [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10];
+        for (var i = 0; i < mags.length; i++) {
+            if (mag * mags[i] >= v) return mag * mags[i];
+        }
+        return mag * 10;
+    }
+
+    function yOf(pct, yMax) {
+        return PAD_T + PLOT_H - (PLOT_H * Math.min(pct, yMax) / yMax);
+    }
+
+    function recalcScale() {
+        var groups = svg.querySelectorAll('.ft-series-group');
+        var visiblePcts = [];
+
+        groups.forEach(function(g) {
+            if (g.dataset.visible === 'true') {
+                var path = g.querySelector('.ft-path');
+                var raw = JSON.parse(path.dataset.rawPoints || '[]');
+                raw.forEach(function(p) { visiblePcts.push(p.pct); });
+            }
+        });
+
+        var maxPct = visiblePcts.length > 0 ? Math.max.apply(null, visiblePcts) : 1;
+        var yMax = niceMax(maxPct);
+        if (yMax < 1) yMax = 1;
+
+        var gridGroup = document.getElementById('ft-gridlines');
+        gridGroup.innerHTML = '';
+        for (var i = 0; i <= 4; i++) {
+            var val = (yMax * i / 4);
+            var y = yOf(val, yMax);
+            var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('class', 'grid');
+            line.setAttribute('x1', '0');
+            line.setAttribute('y1', y);
+            line.setAttribute('x2', W);
+            line.setAttribute('y2', y);
+            gridGroup.appendChild(line);
+
+            var text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('class', 'grid-label mono');
+            text.setAttribute('x', '4');
+            text.setAttribute('y', y - 4);
+            text.textContent = (Math.round(val * 10) / 10) + '%';
+            gridGroup.appendChild(text);
+        }
+
+        groups.forEach(function(g) {
+            var isVisible = g.dataset.visible === 'true';
+            var path = g.querySelector('.ft-path');
+            var raw = JSON.parse(path.dataset.rawPoints || '[]');
+            var newPath = 'M' + raw.map(function(p) {
+                return p.x + ',' + yOf(p.pct, yMax);
+            }).join(' L');
+            path.setAttribute('d', newPath);
+
+            var dots = g.querySelectorAll('.ft-dot');
+            dots.forEach(function(dot, idx) {
+                dot.setAttribute('cy', yOf(raw[idx].pct, yMax));
+            });
+
+            var labels = g.querySelectorAll('.ft-pt-label, .ft-last-label');
+            labels.forEach(function(lbl) {
+                var pct = parseFloat(lbl.dataset.pct);
+                lbl.dataset.naturalY = yOf(pct, yMax) - 10;
+            });
+
+            g.style.opacity = isVisible ? '1' : '0';
+        });
+
+        // Anti-colisión: si quedan 2-3 líneas visibles con valores parecidos
+        // en el mismo instante de tiempo, sus labels pueden pisarse al
+        // recalcular. Se agrupan por X (mismo punto en el tiempo) y se
+        // separan solo los que realmente chocan — mismo criterio que ya
+        // se usa en el servidor para el dibujo inicial.
+        var byX = {};
+        svg.querySelectorAll('.ft-series-group[data-visible="true"] .ft-pt-label, .ft-series-group[data-visible="true"] .ft-last-label')
+            .forEach(function(lbl) {
+                var x = Math.round(parseFloat(lbl.getAttribute('x')));
+                (byX[x] = byX[x] || []).push(lbl);
+            });
+        var MIN_GAP = 15;
+        Object.keys(byX).forEach(function(x) {
+            var lbls = byX[x].sort(function(a, b) {
+                return parseFloat(a.dataset.naturalY) - parseFloat(b.dataset.naturalY);
+            });
+            var prevY = null;
+            lbls.forEach(function(lbl) {
+                var y = parseFloat(lbl.dataset.naturalY);
+                if (prevY !== null && y < prevY + MIN_GAP) y = prevY + MIN_GAP;
+                prevY = y;
+                lbl.setAttribute('y', Math.min(Math.max(y, 10), H - 4));
+            });
+        });
+    }
+
+    window.toggleSeries = function(seriesName, btn) {
+        btn.classList.toggle('active');
+        var isActive = btn.classList.contains('active');
+        var group = svg.querySelector('.ft-series-group[data-series="' + seriesName + '"]');
+        if (group) {
+            group.dataset.visible = isActive ? 'true' : 'false';
+        }
+        recalcScale();
+    };
+
+    recalcScale();
+})();
+</script>
+
+<script>
+(function() {
+    var svg = document.getElementById('trace-svg');
+    if (!svg) return;
+
+    var W = parseFloat(svg.dataset.w);
+    var H = parseFloat(svg.dataset.h);
+    var PAD_T = parseFloat(svg.dataset.padT);
+    var PAD_B = parseFloat(svg.dataset.padB);
+    var PLOT_H = H - PAD_B - PAD_T;
+
+    function niceMax(v, steps) {
+        steps = steps || 4;
+        if (v <= 0) return steps;
+        var mag = Math.pow(10, Math.floor(Math.log10(v)));
+        var mags = [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10];
+        for (var i = 0; i < mags.length; i++) {
+            if (mag * mags[i] >= v) return mag * mags[i];
+        }
+        return mag * 10;
+    }
+
+    function recalcTrace() {
+        var attemptsGroup = svg.querySelector('.tr-series-group[data-series="attempts"]');
+        var answeredGroup = svg.querySelector('.tr-series-group[data-series="answered"]');
+        var costGroup = svg.querySelector('.tr-series-group[data-series="cost"]');
+        if (!attemptsGroup || !answeredGroup || !costGroup) return;
+
+        var attemptsVisible = attemptsGroup.dataset.visible === 'true';
+        var answeredVisible = answeredGroup.dataset.visible === 'true';
+        var costVisible = costGroup.dataset.visible === 'true';
+
+        // "attempts" y "answered" comparten el mismo eje de conteo — al
+        // apagar una, la que queda se reescala a SU propio máximo para
+        // ocupar todo el espacio. "cost" vive en su propio eje en dólares
+        // y no necesita reescalarse por esto (nada más comparte su escala).
+        var vals = [];
+        if (attemptsVisible) {
+            attemptsGroup.querySelectorAll('.b-tot').forEach(function(r) { vals.push(parseFloat(r.dataset.raw)); });
+        }
+        if (answeredVisible) {
+            answeredGroup.querySelectorAll('.b-ans').forEach(function(r) { vals.push(parseFloat(r.dataset.raw)); });
+        }
+
+        if (vals.length > 0) {
+            var yMax = niceMax(Math.max.apply(null, vals));
+
+            var gridGroup = document.getElementById('tr-gridlines');
+            gridGroup.innerHTML = '';
+            for (var i = 0; i <= 4; i++) {
+                var y = PAD_T + PLOT_H - (PLOT_H * (yMax * i / 4) / yMax);
+                var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('class', 'grid');
+                line.setAttribute('x1', '0'); line.setAttribute('y1', y);
+                line.setAttribute('x2', W); line.setAttribute('y2', y);
+                gridGroup.appendChild(line);
+            }
+            var peakEl = document.getElementById('tr-peak-axis');
+            if (peakEl) peakEl.textContent = 'peak axis ' + Math.round(yMax).toLocaleString();
+
+            attemptsGroup.querySelectorAll('.b-tot').forEach(function(r) {
+                var v = parseFloat(r.dataset.raw);
+                var h = PLOT_H * Math.min(v, yMax) / yMax;
+                r.setAttribute('height', h);
+                r.setAttribute('y', PAD_T + PLOT_H - h);
+            });
+            answeredGroup.querySelectorAll('.b-ans').forEach(function(r) {
+                var v = parseFloat(r.dataset.raw);
+                var h = PLOT_H * Math.min(v, yMax) / yMax;
+                r.setAttribute('height', h);
+                r.setAttribute('y', PAD_T + PLOT_H - h);
+            });
+
+            svg.querySelectorAll('.tr-attempts').forEach(function(lbl) {
+                if (lbl.tagName !== 'text') return;
+                var cx = parseFloat(lbl.getAttribute('x'));
+                var match = null;
+                attemptsGroup.querySelectorAll('.b-tot').forEach(function(r) {
+                    if (Math.abs(parseFloat(r.dataset.cx) - cx) < 0.5) match = r;
+                });
+                if (match) lbl.dataset.naturalY = parseFloat(match.getAttribute('y')) - 6;
+            });
+        }
+
+        attemptsGroup.style.opacity = attemptsVisible ? '1' : '0';
+        answeredGroup.style.opacity = answeredVisible ? '1' : '0';
+        costGroup.style.opacity = costVisible ? '1' : '0';
+
+        svg.querySelectorAll('.tr-cost').forEach(function(lbl) {
+            if (lbl.tagName !== 'text') return;
+            if (!lbl.dataset.naturalY) lbl.dataset.naturalY = lbl.getAttribute('y');
+        });
+
+        // Anti-colisión entre labels visibles en la misma columna (X) —
+        // mismo criterio que ya usa el gráfico de funnel over time.
+        var byX = {};
+        svg.querySelectorAll('.tr-series-group[data-visible="true"] .tr-pt-label, .tr-series-group[data-visible="true"] .tr-last-label')
+            .forEach(function(lbl) {
+                if (!lbl.dataset.naturalY) lbl.dataset.naturalY = lbl.getAttribute('y');
+                var x = Math.round(parseFloat(lbl.getAttribute('x')));
+                (byX[x] = byX[x] || []).push(lbl);
+            });
+        var MIN_GAP = 15;
+        Object.keys(byX).forEach(function(x) {
+            var lbls = byX[x].sort(function(a, b) { return parseFloat(a.dataset.naturalY) - parseFloat(b.dataset.naturalY); });
+            var prevY = null;
+            lbls.forEach(function(lbl) {
+                var y = parseFloat(lbl.dataset.naturalY);
+                if (prevY !== null && y < prevY + MIN_GAP) y = prevY + MIN_GAP;
+                prevY = y;
+                lbl.setAttribute('y', Math.min(Math.max(y, 10), H - 4));
+            });
+        });
+    }
+
+    window.toggleTrace = function(seriesName, btn) {
+        btn.classList.toggle('active');
+        var isActive = btn.classList.contains('active');
+        var group = svg.querySelector('.tr-series-group[data-series="' + seriesName + '"]');
+        if (group) group.dataset.visible = isActive ? 'true' : 'false';
+        recalcTrace();
+    };
+
+    recalcTrace();
+})();
+</script>
+
+<script>
+(function() {
+    var svg = document.getElementById('hourly-svg');
+    if (!svg) return;
+
+    var H = parseFloat(svg.dataset.h);
+    var PAD_T = parseFloat(svg.dataset.padT);
+    var PAD_B = parseFloat(svg.dataset.padB);
+    var PLOT_H = H - PAD_B - PAD_T;
+    var W = parseFloat(svg.dataset.w);
+
+    function niceMax(v, steps) {
+        steps = steps || 4;
+        if (v <= 0) return steps;
+        var mag = Math.pow(10, Math.floor(Math.log10(v)));
+        var mags = [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10];
+        for (var i = 0; i < mags.length; i++) {
+            if (mag * mags[i] >= v) return mag * mags[i];
+        }
+        return mag * 10;
+    }
+
+    function recalcHourly() {
+        var attemptsGroup = svg.querySelector('.hr-series-group[data-series="attempts"]');
+        var answeredGroup = svg.querySelector('.hr-series-group[data-series="answered"]');
+        var accountsGroup = svg.querySelector('.hr-series-group[data-series="accounts"]');
+        if (!attemptsGroup || !answeredGroup || !accountsGroup) return;
+
+        var PAD_L = parseFloat(svg.dataset.padL) || 0;
+
+        var attemptsVisible = attemptsGroup.dataset.visible === 'true';
+        var answeredVisible = answeredGroup.dataset.visible === 'true';
+        var accountsVisible = accountsGroup.dataset.visible === 'true';
+
+        // "attempts"/"answered" comparten eje de conteo, igual que en
+        // Call Traffic — "accounts" tiene su propio eje y se reescala
+        // siempre a su propio máximo, independiente de los otros dos.
+        var countVals = [];
+        if (attemptsVisible) attemptsGroup.querySelectorAll('.h-tot').forEach(function(r) { countVals.push(parseFloat(r.dataset.raw)); });
+        if (answeredVisible) answeredGroup.querySelectorAll('.h-ans').forEach(function(r) { countVals.push(parseFloat(r.dataset.raw)); });
+
+        if (countVals.length > 0) {
+            var yMax = niceMax(Math.max.apply(null, countVals));
+            var gridGroup = document.getElementById('hr-gridlines');
+            gridGroup.innerHTML = '';
+            for (var i = 0; i <= 4; i++) {
+                var y = PAD_T + PLOT_H - (PLOT_H * (yMax * i / 4) / yMax);
+                var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('class', 'grid');
+                line.setAttribute('x1', PAD_L); line.setAttribute('y1', y);
+                line.setAttribute('x2', W); line.setAttribute('y2', y);
+                gridGroup.appendChild(line);
+
+                var lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                lbl.setAttribute('class', 'h-axis-lbl mono');
+                lbl.setAttribute('x', PAD_L - 6); lbl.setAttribute('y', y + 3);
+                lbl.setAttribute('text-anchor', 'end'); lbl.setAttribute('font-size', '9');
+                lbl.textContent = Math.round(yMax * i / 4);
+                gridGroup.appendChild(lbl);
+            }
+            attemptsGroup.querySelectorAll('.h-tot').forEach(function(r) {
+                var v = parseFloat(r.dataset.raw);
+                var h = PLOT_H * Math.min(v, yMax) / yMax;
+                r.setAttribute('height', h);
+                r.setAttribute('y', PAD_T + PLOT_H - h);
+            });
+            answeredGroup.querySelectorAll('.h-ans').forEach(function(r) {
+                var v = parseFloat(r.dataset.raw);
+                var h = PLOT_H * Math.min(v, yMax) / yMax;
+                r.setAttribute('height', h);
+                r.setAttribute('y', PAD_T + PLOT_H - h);
+            });
+            answeredGroup.querySelectorAll('.hr-pct-label').forEach(function(lbl) {
+                var cx = parseFloat(lbl.getAttribute('x'));
+                var match = null;
+                answeredGroup.querySelectorAll('.h-ans').forEach(function(r) {
+                    if (Math.abs(parseFloat(r.dataset.cx) - cx) < 0.5) match = r;
+                });
+                if (match) lbl.setAttribute('y', parseFloat(match.getAttribute('y')) - 4);
+            });
+        }
+
+        // "accounts" siempre a su propia escala máxima — no depende de qué
+        // más esté visible, así que se recalcula igual, siempre.
+        var accountVals = [];
+        accountsGroup.querySelectorAll('.h-accounts').forEach(function(r) { accountVals.push(parseFloat(r.dataset.raw)); });
+        if (accountVals.length > 0) {
+            var aMax = niceMax(Math.max.apply(null, accountVals));
+            accountsGroup.querySelectorAll('.h-accounts').forEach(function(r) {
+                var v = parseFloat(r.dataset.raw);
+                var h = PLOT_H * Math.min(v, aMax) / aMax;
+                r.setAttribute('height', h);
+                r.setAttribute('y', PAD_T + PLOT_H - h);
+            });
+        }
+
+        attemptsGroup.style.opacity = attemptsVisible ? '1' : '0';
+        answeredGroup.style.opacity = answeredVisible ? '1' : '0';
+        accountsGroup.style.opacity = accountsVisible ? '1' : '0';
+    }
+
+    window.toggleHourly = function(seriesName, btn) {
+        btn.classList.toggle('active');
+        var isActive = btn.classList.contains('active');
+        var group = svg.querySelector('.hr-series-group[data-series="' + seriesName + '"]');
+        if (group) group.dataset.visible = isActive ? 'true' : 'false';
+        recalcHourly();
+    };
+
+    recalcHourly();
+})();
+</script>
+{% endblock %}

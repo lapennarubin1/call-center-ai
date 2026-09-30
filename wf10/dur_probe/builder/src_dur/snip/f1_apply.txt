@@ -1,0 +1,11 @@
+  const evGap = Object.assign({}, ev, { followup_id: gapOurs ? String(gapOurs.id) : null });
+  // Duración real: CDR.billsec -> ElevenLabs -> 0 (LeadStudio no permite corregirla después del POST)
+  const cdr = pickCdr(ev, startMs, endMs, dur);
+  // CDR tardío (p. ej. Asterisk escribe el CDR en lotes): sólo diferidas con conversación real, y sólo unos segundos tras colgar
+  if (deferred && !cdr && dur > 0 && !CDR_FAILED && ageSec(endMs) < WAIT.CDR_LATE_SEC) return requeue(ev, 45, Object.assign({}, base, { resolution: 'WAITING_CDR' }));
+  const dd = withRealDuration(cls, cdr);
+  return applyCall(evGap, {
+    provider: 'asterisk', leadId, phone, N: dyn.call_attempts, refs: ['elevenlabs:' + convId],
+    cls: dd.cls, callStartMs: startMs, callEndMs: endMs, convId, resolutionPrefix: deferred ? 'ASTERISK_DEFER' : 'ASTERISK_GAP',
+    deferred, durationSource: (deferred || dd.source === 'cdr') ? dd.source : null, fcfEpochMs: cdr ? cdr.startMs : null
+  }, ctx);

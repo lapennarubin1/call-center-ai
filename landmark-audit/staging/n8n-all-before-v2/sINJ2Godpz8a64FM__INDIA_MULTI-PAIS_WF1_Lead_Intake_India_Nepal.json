@@ -1,0 +1,1414 @@
+{
+  "id": "sINJ2Godpz8a64FM",
+  "name": "INDIA MULTI-PAIS WF1 — Lead Intake (India + Nepal)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-08T09:29:47.697Z",
+  "updatedAt": "2026-09-09T12:16:35.151Z",
+  "isArchived": false,
+  "versionId": "4d1dbc1e-8c0f-4b76-9aa8-8e073e34b914",
+  "versionCounter": 41,
+  "sourceWorkflowId": null,
+  "triggerCount": 2,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ad7142d5-e783-4e14-8c96-f0227ac8214d",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "237b0ed5-9264-43e8-bd98-26bfc42f1b48",
+      "name": "Every 3 hours (original cadence)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -880,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf1-validate-lead",
+        "options": {}
+      },
+      "id": "e6e6c3af-a654-4f13-93eb-3288ea59ead5",
+      "name": "Manual Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        512
+      ],
+      "webhookId": "wf1-validate-lead"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF1",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+            "message": "={{ JSON.stringify($json).slice(0, 5000) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8be7cdf2-0435-430f-8c28-3252ff8e9b6b",
+      "name": "Log Error1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -320,
+        864
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=210138417"
+        },
+        "options": {}
+      },
+      "id": "8f91fede-f71d-4109-af58-46f8c00d8e3b",
+      "name": "📋 Read India — leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -560,
+        272
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1838507431,
+          "mode": "list",
+          "cachedResultName": "leads nepal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1838507431"
+        },
+        "options": {}
+      },
+      "id": "91352f28-0e96-4055-9dd5-2fb939e092ee",
+      "name": "📋 Read Nepal — leads nepal",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -560,
+        512
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const out=[];\nfor (const item of $input.all()) {\n  const r={...(item.json||{})};\n  r.country='india';\n  r.language=String(r.language||'hi').trim().toLowerCase();\n  r._source_country='india';\n  r._source_sheet='leads';\n  out.push({json:r});\n}\nreturn out;"
+      },
+      "id": "1c5a4897-c9ca-41c4-8149-aff35279d736",
+      "name": "🏷️ Tag India",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const out=[];\nfor (const item of $input.all()) {\n  const r={...(item.json||{})};\n  r.country='nepal';\n  // Nepal reutiliza temporalmente la configuración de idioma de India.\n  // Cambiar aquí cuando se defina un idioma/agente dedicado.\n  r.language=String(r.language||'hi').trim().toLowerCase();\n  r._source_country='nepal';\n  r._source_sheet='leads nepal';\n  out.push({json:r});\n}\nreturn out;"
+      },
+      "id": "4ef863e5-cf3f-489c-9c72-db8cb3b797ee",
+      "name": "🏷️ Tag Nepal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        512
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {},
+      "id": "d34515c5-5ca8-45a7-b6cc-e902d79632fc",
+      "name": "🔀 Merge India + Nepal",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -80,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick rows that need validation (status empty or PENDING_VALIDATION)\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json || {};\n  const status = String(r.status || '').trim().toUpperCase();\n  if (status === '' || status === 'PENDING_VALIDATION') out.push({ json: r });\n}\nreturn out;"
+      },
+      "id": "47caff23-b1cc-4637-883f-33c824150547",
+      "name": "Filter Pending",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validación compartida, pero dedup SEPARADO por pestaña/país.\n// India y Nepal nunca se mezclan para determinar duplicados.\nconst COUNTRY_CFG = {\n  india: {enabled:true, prefix:'+91', language:'hi', sheet:'leads'},\n  nepal: {enabled:true, prefix:'+977', language:'hi', sheet:'leads nepal'},\n  slot3: {enabled:false, prefix:'', language:'', sheet:'leads slot3'},\n  slot4: {enabled:false, prefix:'', language:'', sheet:'leads slot4'}\n};\n\nfunction normalizePhone(raw, cfg) {\n  let p=String(raw||'').replace(/[^0-9+]/g,'');\n  if (!p) return '';\n  if (p.startsWith('+')) return p;\n  const digits=cfg.prefix.replace('+','');\n  if (digits && p.startsWith(digits) && p.length > digits.length + 6) return '+'+p;\n  return cfg.prefix ? cfg.prefix+p : ('+'+p);\n}\n\nconst all = $('🔀 Merge India + Nepal').all().map(i=>i.json);\nconst pending = $input.all().map(i=>i.json);\nconst out=[];\n\nfor (const c of pending) {\n  const errors=[];\n  const country=String(c._source_country||c.country||'').trim().toLowerCase();\n  const cfg=COUNTRY_CFG[country];\n  const sourceSheet=String(c._source_sheet||cfg?.sheet||'').trim();\n\n  const leadId=String(c.lead_id||'').trim();\n  const fullName=String(c.full_name||'').trim();\n  const phone=cfg ? normalizePhone(c.phone,cfg) : String(c.phone||'').replace(/[^0-9+]/g,'');\n  const language=String(c.language||cfg?.language||'').trim().toLowerCase();\n\n  if (!leadId) errors.push('missing lead_id');\n  if (!c.phone) errors.push('missing phone');\n  if (!cfg) errors.push('unsupported country');\n  if (cfg && !cfg.enabled) errors.push('country disabled');\n  if (!sourceSheet) errors.push('missing source sheet');\n  if (phone && !/^\\+[1-9]\\d{7,14}$/.test(phone)) errors.push('invalid phone format');\n\n  // DEDUP solo dentro de la misma pestaña.\n  const peers = all.filter(r => String(r._source_sheet||'') === sourceSheet);\n  const isActive=s => s && !['','PENDING_VALIDATION','INVALID_LEAD'].includes(String(s).toUpperCase());\n  const sameRow = r => String(r.row_number||'') === String(c.row_number||'');\n  const dupId = peers.find(r => String(r.lead_id||'').trim()===leadId && !sameRow(r) && isActive(r.status));\n  const dupPhone = peers.find(r => {\n    const rp = cfg ? normalizePhone(r.phone,cfg) : String(r.phone||'').replace(/[^0-9+]/g,'');\n    return rp===phone && !sameRow(r) && isActive(r.status);\n  });\n  if (dupId) errors.push('duplicate lead_id in '+sourceSheet);\n  else if (dupPhone) errors.push('duplicate phone in '+sourceSheet);\n\n  const valid=errors.length===0;\n  out.push({json:{\n    lead_id:leadId,\n    phone,\n    full_name:fullName,\n    country,\n    language,\n    _source_country:country,\n    _source_sheet:sourceSheet,\n    _valid:valid,\n    _errors:errors.join('; '),\n    status:valid?'READY_TO_CALL':'INVALID_LEAD',\n    notes:valid?'Validated OK':('VALIDATION FAIL: '+errors.join('; '))\n  }});\n}\nreturn out;"
+      },
+      "id": "23c0f3cc-134e-4645-9762-a76422e08513",
+      "name": "Validate + Dedup (per country)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json._valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "380d55f8-a476-415f-8f6a-36ea0a3fb432",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        624,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{\n\n{\n\nindia:'210138417',\n\nnepal:'1838507431'\n\n}[String($json.country || '').toLowerCase()]\n\n}}",
+          "mode": "expression"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "call_trigger",
+              "displayName": "call_trigger",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "assigned_agent",
+              "displayName": "assigned_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_call_status",
+              "displayName": "last_call_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_call_time",
+              "displayName": "last_call_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "call_attempts",
+              "displayName": "call_attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "elevenlabs_call_id",
+              "displayName": "elevenlabs_call_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "interested",
+              "displayName": "interested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "callback_requested",
+              "displayName": "callback_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "callback_date",
+              "displayName": "callback_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "execution",
+              "displayName": "execution",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_row_number",
+              "displayName": "_row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_valid",
+              "displayName": "_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_errors",
+              "displayName": "_errors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_raw",
+              "displayName": "status_raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "duration_secs",
+              "displayName": "duration_secs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "classification",
+              "displayName": "classification",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "from",
+              "displayName": "from",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "isFromMe",
+              "displayName": "isFromMe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "raw",
+              "displayName": "raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pushName",
+              "displayName": "pushName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "headers",
+              "displayName": "headers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "statusCode",
+              "displayName": "statusCode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "statusMessage",
+              "displayName": "statusMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_source_country",
+              "displayName": "_source_country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_source_sheet",
+              "displayName": "_source_sheet",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "556d03c0-670f-42d0-bd29-cac459805ffd",
+      "name": "✅ Mark READY_TO_CALL",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        848,
+        304
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ ({india:210138417, nepal:1838507431})[String($json.country || '').toLowerCase()] || 210138417 }}",
+          "mode": "expression"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "call_trigger",
+              "displayName": "call_trigger",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "assigned_agent",
+              "displayName": "assigned_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_call_status",
+              "displayName": "last_call_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_call_time",
+              "displayName": "last_call_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "call_attempts",
+              "displayName": "call_attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "elevenlabs_call_id",
+              "displayName": "elevenlabs_call_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "interested",
+              "displayName": "interested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "callback_requested",
+              "displayName": "callback_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "callback_date",
+              "displayName": "callback_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution",
+              "displayName": "execution",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "_row_number",
+              "displayName": "_row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "_valid",
+              "displayName": "_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "_errors",
+              "displayName": "_errors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status_raw",
+              "displayName": "status_raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duration_secs",
+              "displayName": "duration_secs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "classification",
+              "displayName": "classification",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "from",
+              "displayName": "from",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "isFromMe",
+              "displayName": "isFromMe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "raw",
+              "displayName": "raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pushName",
+              "displayName": "pushName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "headers",
+              "displayName": "headers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "statusCode",
+              "displayName": "statusCode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "statusMessage",
+              "displayName": "statusMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d2b878ba-7114-4c87-8196-1ed5ec7803d0",
+      "name": "⛔ Mark INVALID_LEAD",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        848,
+        496
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "### INDIA + NEPAL — tabs separados\n- India → `leads`\n- Nepal → `leads nepal`\n- Slot 3 → reservado\n- Slot 4 → reservado\n\n**Agregar otro país:** duplica `Read Nepal + Tag Nepal`, cambia pestaña/país/prefijo, conecta al Merge y aumenta `numberInputs`.\n\nLas escrituras usan `_source_sheet`; un lead Nepal no puede caer en `leads` por fallback.",
+        "height": 280,
+        "width": 610,
+        "color": 5
+      },
+      "id": "714f8a98-3062-4d23-8f1d-a7582624b7fc",
+      "name": "🌍 Architecture / Future Slots",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 3 hours (original cadence)": {
+      "main": [
+        [
+          {
+            "node": "📋 Read India — leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Read Nepal — leads nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Webhook1": {
+      "main": [
+        [
+          {
+            "node": "📋 Read India — leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Read Nepal — leads nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Read India — leads": {
+      "main": [
+        [
+          {
+            "node": "🏷️ Tag India",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Read Nepal — leads nepal": {
+      "main": [
+        [
+          {
+            "node": "🏷️ Tag Nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏷️ Tag India": {
+      "main": [
+        [
+          {
+            "node": "🔀 Merge India + Nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏷️ Tag Nepal": {
+      "main": [
+        [
+          {
+            "node": "🔀 Merge India + Nepal",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "🔀 Merge India + Nepal": {
+      "main": [
+        [
+          {
+            "node": "Filter Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Pending": {
+      "main": [
+        [
+          {
+            "node": "Validate + Dedup (per country)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate + Dedup (per country)": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "✅ Mark READY_TO_CALL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⛔ Mark INVALID_LEAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Every 3 hours (original cadence)": {
+      "recurrenceRules": [
+        3
+      ],
+      "recurrenceRuleSignatures": [
+        "hours:3"
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": null,
+  "tags": [
+    {
+      "id": "EWlF9l3b9w6Vq3NA",
+      "name": "landmark",
+      "createdAt": "2026-07-27T09:29:13.383Z",
+      "updatedAt": "2026-07-27T09:29:13.383Z"
+    },
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "LismWLdOzwMudnEo",
+      "name": "compliant-v1",
+      "createdAt": "2026-07-27T09:29:13.400Z",
+      "updatedAt": "2026-07-27T09:29:13.400Z"
+    },
+    {
+      "id": "ZF3ImiIOdnoSG1Py",
+      "name": "hindi",
+      "createdAt": "2026-07-27T09:29:13.407Z",
+      "updatedAt": "2026-07-27T09:29:13.407Z"
+    },
+    {
+      "id": "0cHA3q57oqQtIxKm",
+      "name": "wf1-validate",
+      "createdAt": "2026-07-27T11:37:04.865Z",
+      "updatedAt": "2026-07-27T11:37:04.865Z"
+    },
+    {
+      "id": "tge8Fb3bDa0wowvF",
+      "name": "wf1",
+      "createdAt": "2026-07-27T11:37:04.869Z",
+      "updatedAt": "2026-07-27T11:37:04.869Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "sINJ2Godpz8a64FM",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-08T09:29:47.697Z",
+      "updatedAt": "2026-09-08T09:29:47.697Z"
+    }
+  ],
+  "activeVersion": null
+}

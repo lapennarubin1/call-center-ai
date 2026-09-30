@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Panel · Reconciliation{% endblock %}
+
+{#  Solo rol master. Los issues los ABRE n8n (WF14 y el motor) escribiendo en
+    wf_reconciliation_issues; acá solo se leen y se cierran. El panel NUNCA
+    corrige un dato local: un issue se resuelve a mano y se marca como tal. #}
+
+{% block content %}
+
+<nav class="countries" aria-label="Call Center">
+  <a class="chip" href="/callcenter">Switches</a>
+  <a class="chip" href="/callcenter/routes">Countries &amp; Routes</a>
+  <a class="chip" href="/callcenter/billing">Billing</a>
+  <a class="chip" href="/callcenter/legacy">Legacy Backup</a>
+  <a class="chip" href="/callcenter/analytics">Analytics</a>
+  <a class="chip on" href="/callcenter/issues">Reconciliation</a>
+  <a class="chip" href="/callcenter/settings">Settings</a>
+</nav>
+
+<section class="kpis">
+  <article class="kpi {{ 'accent-bad' if health.issues_open }}">
+    <span class="k-label">Open issues</span>
+    <strong class="k-val mono">{{ health.issues_open|n }}</strong>
+    <span class="k-foot">requieren decisión humana</span>
+  </article>
+  <article class="kpi {{ 'accent-bad' if health.jobs_needs_reconciliation }}">
+    <span class="k-label">Calls to reconcile</span>
+    <strong class="k-val mono">{{ health.jobs_needs_reconciliation|n }}</strong>
+    <span class="k-foot">UNKNOWN + NEEDS_RECONCILIATION · <b>nunca se re-despachan solas</b></span>
+  </article>
+  <article class="kpi">
+    <span class="k-label">Calls in flight</span>
+    <strong class="k-val mono">{{ health.jobs_in_flight|n }}</strong>
+    <span class="k-foot">CLAIMED · DISPATCHING · DISPATCHED</span>
+  </article>
+  <article class="kpi">
+    <span class="k-label">Released (technical)</span>
+    <strong class="k-val mono">{{ health.jobs_released|n }}</strong>
+    <span class="k-foot">esperando backoff · no consumieron intento</span>
+  </article>
+  <article class="kpi">
+    <span class="k-label">Conversation ledger stuck</span>
+    <strong class="k-val mono">{{ health.ledger_stuck|n }}</strong>
+    <span class="k-foot">el POST /followups pudo haberse ejecutado</span>
+  </article>
+  <article class="kpi">
+    <span class="k-label">Orphan recordings</span>
+    <strong class="k-val mono">{{ health.recordings_orphan|n }}</strong>
+    <span class="k-foot">sin llamada a la que adjuntarlas</span>
+  </article>
+</section>
+
+<p class="cap" style="margin:8px 0 14px">
+  Un issue es una <b>diferencia</b> entre lo local y el CRM o el proveedor, o una operación
+  cuyo resultado no se pudo confirmar. Resolverlo es una decisión humana: el suite
+  <b>nunca</b> reintenta a ciegas un POST que pudo haberse ejecutado, porque eso duplica
+  follow-ups, cuentas o links de pago. <code>occurrences</code> cuenta cuántas veces se
+  volvió a detectar el mismo desajuste; no crea filas nuevas.
+</p>
+
+<!-- ══ RESUMEN POR TIPO ══════════════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head"><div><span class="eyebrow">Summary</span><h2>Por tipo</h2></div></header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Issue type</th><th>State</th><th>Count</th><th>Last seen</th></tr></thead>
+      <tbody>
+      {% for s in summary %}
+        <tr class="mono">
+          <td><b>{{ s.issue_type }}</b></td>
+          <td><span class="pill {{ 'bad' if s.state == 'OPEN' else '' }}">{{ s.state }}</span></td>
+          <td>{{ s.n|n }}</td>
+          <td>{{ s.last_seen }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="empty">Sin issues registrados. </td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══ LISTADO ═══════════════════════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div><span class="eyebrow">Issues</span><h2>{{ state }}</h2></div>
+    <div>
+      {% for st in ['OPEN', 'RESOLVED', 'IGNORED', 'ALL'] %}
+        <a class="chip {{ 'on' if state == st }}" href="/callcenter/issues?state={{ st }}">{{ st }}</a>
+      {% endfor %}
+    </div>
+  </header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>Type</th><th>Entity</th><th>Lead</th><th>Country</th><th>Sev</th>
+        <th>Occ.</th><th>First seen</th><th>Last seen</th><th>Detail</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for i in issues %}
+        <tr>
+          <td class="mono"><b>{{ i.issue_type }}</b></td>
+          <td class="mono">{{ i.entity_type }}:{{ i.entity_id }}</td>
+          <td class="mono">{{ i.lead_id or '—' }}</td>
+          <td class="mono">{{ i.country_iso or '—' }}</td>
+          <td><span class="pill {{ 'bad' if i.severity == 'ERROR' }}">{{ i.severity }}</span></td>
+          <td class="mono">{{ i.occurrences }}</td>
+          <td class="mono">{{ i.first_seen_at }}</td>
+          <td class="mono">{{ i.last_seen_at }}</td>
+          <td class="mono" style="max-width:360px; word-break:break-all">{{ i.detail_json or '' }}</td>
+          <td>
+            {% if i.state == 'OPEN' %}
+            <form method="post" action="/callcenter/issues/{{ i.issue_key|urlencode }}/resolve"
+                  style="display:inline">
+              <input type="hidden" name="back" value="/callcenter/issues?state={{ state }}">
+              <button class="btn ghost" type="submit">Resolve</button>
+            </form>
+            <form method="post" action="/callcenter/issues/{{ i.issue_key|urlencode }}/resolve"
+                  style="display:inline">
+              <input type="hidden" name="ignore" value="1">
+              <input type="hidden" name="back" value="/callcenter/issues?state={{ state }}">
+              <button class="btn ghost" type="submit">Ignore</button>
+            </form>
+            {% else %}
+              <span class="muted mono">{{ i.state }} · {{ i.resolved_by or '' }}</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="10" class="empty">Nada pendiente en este estado.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="cap">
+    Tipos posibles: <span class="mono">{{ issue_types|join(' · ') }}</span>.
+    <b>Resolve</b> = lo revisé y está corregido en el CRM. <b>Ignore</b> = no es un problema real.
+    Ninguna de las dos acciones toca los datos locales.
+  </p>
+</section>
+
+{% endblock %}

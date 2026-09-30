@@ -1,0 +1,439 @@
+AUDITORÍA CRM/MX — 2026-09-24 06:48:56 UTC
+
+══════════ 0. RELOJ Y ESQUEMA ══════════
++---------------------+---------------------+-----------+------------+
+| db_now              | utc_now             | tz_global | tz_sistema |
++---------------------+---------------------+-----------+------------+
+| 2026-09-24 06:48:56 | 2026-09-24 06:48:56 | SYSTEM    | UTC        |
++---------------------+---------------------+-----------+------------+
+crm_conversions [BASE TABLE]: lead_id,full_name,phone,country,provider,stage,created_at,synced_at,account_opened_at
+crm_leads [BASE TABLE]: lead_id,full_name,phone,country,country_code,language,status,stage,call_attempts,do_not_call,last_contacted_at,next_follow_up_at,provider,synced_at
+cdr_panel [VIEW]: id,calldate,clid,src,dst,dcontext,channel,dstchannel,lastapp,lastdata,duration,billsec,disposition,accountcode,uniqueid
+stringee_calls [BASE TABLE]: id,call_id,conversation_id,lead_id,phone,country,answered,duration_secs,start_time,answer_time,stop_time,created_at,sheet_synced,sheet_synced_recording
+support_actions [BASE TABLE]: id,created_at,actor,country,action,phone,full_name,amount,currency,result,detail
+wf_call_followups [BASE TABLE]: id,phone,lead_id,followup_id,provider,outcome,call_status,recording_synced,created_at
++---------------------+---------------------+
+| ultimo_cdr          | primer_cdr          |
++---------------------+---------------------+
+| 2026-09-24 06:48:07 | 2026-07-29 08:36:04 |
++---------------------+---------------------+
+Día auditado (IST): 2026-09-23  → UTC [2026-09-22 18:30:00 , 2026-09-23 18:30:00)   | semana desde 2026-09-21 | mes desde UTC 2026-08-31 18:30:00
+
+══════════ 1. CUENTAS ABIERTAS — lo que muestra el panel, por día IST × país × proveedor (35 días) ══════════
++------------+-------+---------------------------+---------+
+| dia_ist    | pais  | proveedor_panel           | cuentas |
++------------+-------+---------------------------+---------+
+| 2026-09-23 | india | Provider1 (asterisk+NULL) |     185 |
+| 2026-09-23 | india | Stringee                  |       3 |
+| 2026-09-22 | india | Provider1 (asterisk+NULL) |       2 |
+| 2026-09-22 | india | Stringee                  |       1 |
+| 2026-09-21 | india | Provider1 (asterisk+NULL) |       1 |
+| 2026-09-21 | india | Stringee                  |       2 |
+| 2026-09-17 | india | Provider1 (asterisk+NULL) |       7 |
+| 2026-09-16 | india | Provider1 (asterisk+NULL) |       5 |
++------------+-------+---------------------------+---------+
+-- totales sin filtro de fecha:
++-------+---------------------------+---------+---------------------+---------------------+
+| pais  | proveedor_panel           | cuentas | primera             | ultima              |
++-------+---------------------------+---------+---------------------+---------------------+
+| india | Provider1 (asterisk+NULL) |     200 | 2026-09-16 08:45:41 | 2026-09-23 13:13:59 |
+| india | Stringee                  |       6 | 2026-09-21 09:35:02 | 2026-09-23 13:05:24 |
++-------+---------------------------+---------+---------------------+---------------------+
+
+══════════ 2. ¿DE DÓNDE SALE LA FECHA de las cuentas de 2026-09-23? (el panel usa la primera no-nula) ══════════
++-------+---------------------------+---------------+------------------------+-----------------+--------------+-----+
+| pais  | proveedor_panel           | provider_real | fecha_tomada_de        | origen          | en_crm_leads | n   |
++-------+---------------------------+---------------+------------------------+-----------------+--------------+-----+
+| india | Provider1 (asterisk+NULL) | asterisk      | conv.created_at        | crm_conversions | SI           | 184 |
+| india | Stringee                  | stringee      | lead.last_contacted_at | crm_conversions | SI           |   3 |
+| india | Provider1 (asterisk+NULL) | asterisk      | lead.last_contacted_at | crm_conversions | SI           |   1 |
++-------+---------------------------+---------------+------------------------+-----------------+--------------+-----+
+-- estado/intentos del lead de esas cuentas (India):
++------------+-------------+-----+
+| status     | intentos    | n   |
++------------+-------------+-----+
+| CONTACTED  | 0 intentos  | 184 |
+| ATTEMPTING | >0 intentos |   2 |
+| CONTACTED  | >0 intentos |   2 |
++------------+-------------+-----+
+
+══════════ 3. ¿CUENTAS REALES NUESTRAS? ══════════
+-- [día 2026-09-23] ¿las llamamos nosotros? (CDR Asterisk 60d / Stringee / WF9 followups / Support)
+--------------
+SELECT a.ckey pais, IF(a.prov='stringee','Stringee','Provider1 (asterisk+NULL)') proveedor_panel, COUNT(*) cuentas_panel,
+            SUM(COALESCE(cd.llamadas,0)>0) con_cdr_asterisk, SUM(COALESCE(cd.contestadas,0)>0) asterisk_contesto, SUM(COALESCE(cd.conv60,0)>0) asterisk_conv_60s,
+            SUM(COALESCE(st.llamadas,0)>0) con_stringee, SUM(COALESCE(st.contestadas,0)>0) stringee_contesto,
+            SUM(COALESCE(fu.n,0)>0) con_followup_wf9, SUM(COALESCE(su.n,0)>0) abierta_desde_support,
+            SUM(COALESCE(cd.llamadas,0)=0 AND COALESCE(st.llamadas,0)=0 AND COALESCE(fu.n,0)=0) SIN_NINGUNA_LLAMADA_NUESTRA
+     FROM (
+  SELECT c.lead_id, COALESCE(l.phone,c.phone) phone,
+         COALESCE(NULLIF(l.provider,''), NULLIF(c.provider,'')) prov,
+         COALESCE(c.account_opened_at, l.last_contacted_at, c.created_at) opened_at, CASE WHEN c.account_opened_at IS NOT NULL THEN 'account_opened_at' WHEN l.last_contacted_at IS NOT NULL THEN 'lead.last_contacted_at' ELSE 'conv.created_at' END opened_src,
+         COALESCE(COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END), COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END)) ckey,
+         IF(l.lead_id IS NULL,'NO','SI') en_crm_leads, l.call_attempts, l.status,
+         l.last_contacted_at, c.created_at conv_created, c.account_opened_at aoa, 'crm_conversions' origen
+  FROM crm_conversions c LEFT JOIN crm_leads l ON l.lead_id=c.lead_id
+  UNION ALL
+  SELECT l.lead_id, l.phone, NULLIF(l.provider,''), l.last_contacted_at, 'lead.last_contacted_at',
+         COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END), 'SI', l.call_attempts, l.status,
+         l.last_contacted_at, NULL, NULL, 'crm_leads INTERESTED'
+  FROM crm_leads l LEFT JOIN crm_conversions c ON c.lead_id=l.lead_id
+  WHERE c.lead_id IS NULL AND UPPER(COALESCE(l.stage,''))='INTERESTED'
+) a LEFT JOIN (SELECT RIGHT(dst,10) p10, COUNT(*) llamadas, SUM(disposition='ANSWERED') contestadas,
+               SUM(disposition='ANSWERED' AND billsec>=60) conv60, MAX(calldate) ultima_llamada
+        FROM cdr_panel WHERE calldate >= UTC_TIMESTAMP() - INTERVAL 60 DAY AND dst REGEXP '^[+]?(91|977|52)[0-9]{10}$'
+        GROUP BY RIGHT(dst,10)) cd ON cd.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) llamadas, SUM(answered=1) contestadas, SUM(answered=1 AND duration_secs>=60) conv60 FROM stringee_calls WHERE phone IS NOT NULL GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) st ON st.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) n FROM wf_call_followups GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) fu ON fu.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) n, MIN(created_at) primera FROM support_actions WHERE action='account_open' GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) su ON su.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+     WHERE a.opened_at >= '2026-09-22 18:30:00' AND a.opened_at < '2026-09-23 18:30:00'
+     GROUP BY pais, proveedor_panel ORDER BY pais, proveedor_panel
+--------------
+
+ERROR 1267 (HY000) at line 1: Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT) and (utf8mb4_general_ci,IMPLICIT) for operation '='
+-- [semana desde 2026-09-21] ¿las llamamos nosotros? (CDR Asterisk 60d / Stringee / WF9 followups / Support)
+--------------
+SELECT a.ckey pais, IF(a.prov='stringee','Stringee','Provider1 (asterisk+NULL)') proveedor_panel, COUNT(*) cuentas_panel,
+            SUM(COALESCE(cd.llamadas,0)>0) con_cdr_asterisk, SUM(COALESCE(cd.contestadas,0)>0) asterisk_contesto, SUM(COALESCE(cd.conv60,0)>0) asterisk_conv_60s,
+            SUM(COALESCE(st.llamadas,0)>0) con_stringee, SUM(COALESCE(st.contestadas,0)>0) stringee_contesto,
+            SUM(COALESCE(fu.n,0)>0) con_followup_wf9, SUM(COALESCE(su.n,0)>0) abierta_desde_support,
+            SUM(COALESCE(cd.llamadas,0)=0 AND COALESCE(st.llamadas,0)=0 AND COALESCE(fu.n,0)=0) SIN_NINGUNA_LLAMADA_NUESTRA
+     FROM (
+  SELECT c.lead_id, COALESCE(l.phone,c.phone) phone,
+         COALESCE(NULLIF(l.provider,''), NULLIF(c.provider,'')) prov,
+         COALESCE(c.account_opened_at, l.last_contacted_at, c.created_at) opened_at, CASE WHEN c.account_opened_at IS NOT NULL THEN 'account_opened_at' WHEN l.last_contacted_at IS NOT NULL THEN 'lead.last_contacted_at' ELSE 'conv.created_at' END opened_src,
+         COALESCE(COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END), COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END)) ckey,
+         IF(l.lead_id IS NULL,'NO','SI') en_crm_leads, l.call_attempts, l.status,
+         l.last_contacted_at, c.created_at conv_created, c.account_opened_at aoa, 'crm_conversions' origen
+  FROM crm_conversions c LEFT JOIN crm_leads l ON l.lead_id=c.lead_id
+  UNION ALL
+  SELECT l.lead_id, l.phone, NULLIF(l.provider,''), l.last_contacted_at, 'lead.last_contacted_at',
+         COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END), 'SI', l.call_attempts, l.status,
+         l.last_contacted_at, NULL, NULL, 'crm_leads INTERESTED'
+  FROM crm_leads l LEFT JOIN crm_conversions c ON c.lead_id=l.lead_id
+  WHERE c.lead_id IS NULL AND UPPER(COALESCE(l.stage,''))='INTERESTED'
+) a LEFT JOIN (SELECT RIGHT(dst,10) p10, COUNT(*) llamadas, SUM(disposition='ANSWERED') contestadas,
+               SUM(disposition='ANSWERED' AND billsec>=60) conv60, MAX(calldate) ultima_llamada
+        FROM cdr_panel WHERE calldate >= UTC_TIMESTAMP() - INTERVAL 60 DAY AND dst REGEXP '^[+]?(91|977|52)[0-9]{10}$'
+        GROUP BY RIGHT(dst,10)) cd ON cd.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) llamadas, SUM(answered=1) contestadas, SUM(answered=1 AND duration_secs>=60) conv60 FROM stringee_calls WHERE phone IS NOT NULL GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) st ON st.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) n FROM wf_call_followups GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) fu ON fu.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) n, MIN(created_at) primera FROM support_actions WHERE action='account_open' GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) su ON su.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+     WHERE a.opened_at >= '2026-09-20 18:30:00' AND a.opened_at < '2026-09-24 06:48:57'
+     GROUP BY pais, proveedor_panel ORDER BY pais, proveedor_panel
+--------------
+
+ERROR 1267 (HY000) at line 1: Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT) and (utf8mb4_general_ci,IMPLICIT) for operation '='
+-- [mes] ¿las llamamos nosotros? (CDR Asterisk 60d / Stringee / WF9 followups / Support)
+--------------
+SELECT a.ckey pais, IF(a.prov='stringee','Stringee','Provider1 (asterisk+NULL)') proveedor_panel, COUNT(*) cuentas_panel,
+            SUM(COALESCE(cd.llamadas,0)>0) con_cdr_asterisk, SUM(COALESCE(cd.contestadas,0)>0) asterisk_contesto, SUM(COALESCE(cd.conv60,0)>0) asterisk_conv_60s,
+            SUM(COALESCE(st.llamadas,0)>0) con_stringee, SUM(COALESCE(st.contestadas,0)>0) stringee_contesto,
+            SUM(COALESCE(fu.n,0)>0) con_followup_wf9, SUM(COALESCE(su.n,0)>0) abierta_desde_support,
+            SUM(COALESCE(cd.llamadas,0)=0 AND COALESCE(st.llamadas,0)=0 AND COALESCE(fu.n,0)=0) SIN_NINGUNA_LLAMADA_NUESTRA
+     FROM (
+  SELECT c.lead_id, COALESCE(l.phone,c.phone) phone,
+         COALESCE(NULLIF(l.provider,''), NULLIF(c.provider,'')) prov,
+         COALESCE(c.account_opened_at, l.last_contacted_at, c.created_at) opened_at, CASE WHEN c.account_opened_at IS NOT NULL THEN 'account_opened_at' WHEN l.last_contacted_at IS NOT NULL THEN 'lead.last_contacted_at' ELSE 'conv.created_at' END opened_src,
+         COALESCE(COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END), COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END)) ckey,
+         IF(l.lead_id IS NULL,'NO','SI') en_crm_leads, l.call_attempts, l.status,
+         l.last_contacted_at, c.created_at conv_created, c.account_opened_at aoa, 'crm_conversions' origen
+  FROM crm_conversions c LEFT JOIN crm_leads l ON l.lead_id=c.lead_id
+  UNION ALL
+  SELECT l.lead_id, l.phone, NULLIF(l.provider,''), l.last_contacted_at, 'lead.last_contacted_at',
+         COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END), 'SI', l.call_attempts, l.status,
+         l.last_contacted_at, NULL, NULL, 'crm_leads INTERESTED'
+  FROM crm_leads l LEFT JOIN crm_conversions c ON c.lead_id=l.lead_id
+  WHERE c.lead_id IS NULL AND UPPER(COALESCE(l.stage,''))='INTERESTED'
+) a LEFT JOIN (SELECT RIGHT(dst,10) p10, COUNT(*) llamadas, SUM(disposition='ANSWERED') contestadas,
+               SUM(disposition='ANSWERED' AND billsec>=60) conv60, MAX(calldate) ultima_llamada
+        FROM cdr_panel WHERE calldate >= UTC_TIMESTAMP() - INTERVAL 60 DAY AND dst REGEXP '^[+]?(91|977|52)[0-9]{10}$'
+        GROUP BY RIGHT(dst,10)) cd ON cd.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) llamadas, SUM(answered=1) contestadas, SUM(answered=1 AND duration_secs>=60) conv60 FROM stringee_calls WHERE phone IS NOT NULL GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) st ON st.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) n FROM wf_call_followups GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) fu ON fu.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) n, MIN(created_at) primera FROM support_actions WHERE action='account_open' GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) su ON su.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+     WHERE a.opened_at >= '2026-08-31 18:30:00' AND a.opened_at < '2026-09-24 06:48:57'
+     GROUP BY pais, proveedor_panel ORDER BY pais, proveedor_panel
+--------------
+
+ERROR 1267 (HY000) at line 1: Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT) and (utf8mb4_general_ci,IMPLICIT) for operation '='
+-- muestra 30 cuentas India de 2026-09-23:
+--------------
+SELECT a.lead_id, a.phone, COALESCE(a.prov,'(NULL)') prov, a.opened_src, a.opened_at, a.conv_created, a.status, a.call_attempts,
+          COALESCE(cd.llamadas,0) cdr, COALESCE(cd.contestadas,0) cdr_ans, cd.ultima_llamada, COALESCE(st.llamadas,0) stringee,
+          COALESCE(fu.n,0) wf9, COALESCE(su.n,0) support
+   FROM (
+  SELECT c.lead_id, COALESCE(l.phone,c.phone) phone,
+         COALESCE(NULLIF(l.provider,''), NULLIF(c.provider,'')) prov,
+         COALESCE(c.account_opened_at, l.last_contacted_at, c.created_at) opened_at, CASE WHEN c.account_opened_at IS NOT NULL THEN 'account_opened_at' WHEN l.last_contacted_at IS NOT NULL THEN 'lead.last_contacted_at' ELSE 'conv.created_at' END opened_src,
+         COALESCE(COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END), COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(NULL,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(c.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END)) ckey,
+         IF(l.lead_id IS NULL,'NO','SI') en_crm_leads, l.call_attempts, l.status,
+         l.last_contacted_at, c.created_at conv_created, c.account_opened_at aoa, 'crm_conversions' origen
+  FROM crm_conversions c LEFT JOIN crm_leads l ON l.lead_id=c.lead_id
+  UNION ALL
+  SELECT l.lead_id, l.phone, NULLIF(l.provider,''), l.last_contacted_at, 'lead.last_contacted_at',
+         COALESCE((CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '91%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '977%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=13 THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '52%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'mexico' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-','') LIKE '971%' AND LENGTH(REPLACE(REPLACE(REPLACE(COALESCE(l.phone,''),'+',''),' ',''),'-',''))=12 THEN 'dubai' ELSE NULL END), CASE WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='91' THEN 'india' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='977' THEN 'nepal' WHEN REPLACE(REPLACE(REPLACE(COALESCE(l.country_code,''),'+',''),' ',''),'-','')='52' THEN 'mexico' END, CASE WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('india','in','ind') THEN 'india' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('nepal','np','npl') THEN 'nepal' WHEN LOWER(TRIM(COALESCE(l.country,''))) IN ('mexico','méxico','mx','mex') THEN 'mexico' END), 'SI', l.call_attempts, l.status,
+         l.last_contacted_at, NULL, NULL, 'crm_leads INTERESTED'
+  FROM crm_leads l LEFT JOIN crm_conversions c ON c.lead_id=l.lead_id
+  WHERE c.lead_id IS NULL AND UPPER(COALESCE(l.stage,''))='INTERESTED'
+) a LEFT JOIN (SELECT RIGHT(dst,10) p10, COUNT(*) llamadas, SUM(disposition='ANSWERED') contestadas,
+               SUM(disposition='ANSWERED' AND billsec>=60) conv60, MAX(calldate) ultima_llamada
+        FROM cdr_panel WHERE calldate >= UTC_TIMESTAMP() - INTERVAL 60 DAY AND dst REGEXP '^[+]?(91|977|52)[0-9]{10}$'
+        GROUP BY RIGHT(dst,10)) cd ON cd.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) llamadas, SUM(answered=1) contestadas, SUM(answered=1 AND duration_secs>=60) conv60 FROM stringee_calls WHERE phone IS NOT NULL GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) st ON st.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) n FROM wf_call_followups GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) fu ON fu.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+       LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, COUNT(*) n, MIN(created_at) primera FROM support_actions WHERE action='account_open' GROUP BY RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10)) su ON su.p10 = RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(a.phone,''),'+',''),' ',''),'-',''),10)
+   WHERE a.opened_at >= '2026-09-22 18:30:00' AND a.opened_at < '2026-09-23 18:30:00' AND a.ckey='india'
+   ORDER BY a.opened_at LIMIT 30
+--------------
+
+ERROR 1267 (HY000) at line 1: Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT) and (utf8mb4_general_ci,IMPLICIT) for operation '='
+
+══════════ 4. crm_conversions CRUDO — ¿cuándo se cargó? ══════════
++-------+-----------------------+---------------------+---------------------+---------------------+---------------------+
+| total | con_account_opened_at | min_created         | max_created         | min_synced          | max_synced          |
++-------+-----------------------+---------------------+---------------------+---------------------+---------------------+
+|   206 |                     0 | 2026-09-18 06:38:32 | 2026-09-23 13:13:59 | 2026-09-24 06:43:41 | 2026-09-24 06:43:41 |
++-------+-----------------------+---------------------+---------------------+---------------------+---------------------+
++-----------------+-------+----------+-----+
+| dia_ist_created | pais  | prov     | n   |
++-----------------+-------+----------+-----+
+| 2026-09-23      | india | asterisk | 199 |
+| 2026-09-23      | india | stringee |   6 |
+| 2026-09-18      | india | asterisk |   1 |
++-----------------+-------+----------+-----+
+-- leads con stage INTERESTED en crm_leads:
++-------+----------+------------+----------+-----+
+| pais  | prov     | status     | intentos | n   |
++-------+----------+------------+----------+-----+
+| india | (NULL)   | CONTACTED  | 0        | 184 |
+| india | asterisk | CONTACTED  | >0       |  12 |
+| india | asterisk | ATTEMPTING | >0       |   4 |
+| india | stringee | ATTEMPTING | >0       |   4 |
+| india | stringee | CONTACTED  | >0       |   2 |
++-------+----------+------------+----------+-----+
++------------+-------+
+| stage      | n     |
++------------+-------+
+| NEW        | 60352 |
+| FOLLOW_UP  |   519 |
+| CONTACTED  |   353 |
+| INTERESTED |   206 |
+| ENGAGED    |    97 |
++------------+-------+
+-- aperturas REALES registradas desde Support/Telegram, por día:
++------------+---------+--------+---+
+| dia        | country | result | n |
++------------+---------+--------+---+
+| 2026-09-10 | india   | ok     | 1 |
+| 2026-08-27 | india   | ok     | 5 |
++------------+---------+--------+---+
+
+══════════ 5. API LEADSTUDIO — ¿qué fecha real de apertura trae el lead? (GET /api/leads, sin cupo) ══════════
+-- dialCode +91, stage=INTERESTED:
+  total API: 213 | devueltos: 200 | counts: {"all": 213, "mine": 0, "unassigned": 200, "due": 16, "opened": 162}
+  stage en respuesta: {'INTERESTED': 200}
+  campos del lead: ['assignedTo', 'assignedToId', 'attempts', 'bestTimeToCall', 'cashStudioMarket', 'city', 'company', 'country', 'createdAt', 'doNotCall', 'id', 'importBatchId', 'language', 'lastContactedAt', 'nextFollowUpAt', 'priority', 'score', 'source', 'stage', 'status', 'tags', 'talkTimeSeconds', 'updatedAt']
+    cashStudioMarket → [('IND', 140), ('None', 36), ('ATL_IND', 23), ('SA', 1)]
+   accountOpenedAt por día: [('None', 200)]
+   updatedAt por día: [('2026-09-23', 198), ('2026-09-18', 2)]
+   createdAt por día: [('2026-09-23', 25), ('2026-09-18', 13), ('2026-09-16', 108), ('2026-09-15', 54)]
+   lastContactedAt por día: [('None', 181), ('2026-09-23', 4), ('2026-09-22', 6), ('2026-09-21', 3), ('2026-09-17', 1), ('2026-09-16', 5)]
+-- dialCode +977, stage=INTERESTED:
+  total API: 0 | devueltos: 0 | counts: {"all": 0, "mine": 0, "unassigned": 0, "due": 0, "opened": 0}
+-- dialCode +52, stage=INTERESTED:
+  total API: 0 | devueltos: 0 | counts: {"all": 0, "mine": 0, "unassigned": 0, "due": 0, "opened": 0}
+
+══════════ 6. MÉXICO — CDR Asterisk por día (hora CST) ══════════
+precio MX configurado en SIP Balance: 0.0600 USD/min (el dashboard usa 0.06 fijo)
++------------+----------+-------------+-------+----------------+-----------------+----------------+---------+---------------------+---------------------+
+| dia_cst    | intentos | contestadas | seg   | min_facturados | costo_panel_usd | costo_real_usd | numeros | primera_utc         | ultima_utc          |
++------------+----------+-------------+-------+----------------+-----------------+----------------+---------+---------------------+---------------------+
+| 2026-09-23 |     1202 |         360 |  4813 |            360 |           21.60 |          21.60 |       6 | 2026-09-23 12:40:54 | 2026-09-23 18:30:09 |
+| 2026-09-22 |     1202 |         336 |  4425 |            336 |           20.16 |          20.16 |       6 | 2026-09-22 10:50:54 | 2026-09-22 18:30:08 |
+| 2026-09-21 |     1198 |         337 |  4544 |            337 |           20.22 |          20.22 |       5 | 2026-09-21 16:30:50 | 2026-09-21 18:30:07 |
+| 2026-09-20 |        6 |           0 |     0 |              0 |            0.00 |           0.00 |       1 | 2026-09-20 07:02:55 | 2026-09-20 07:05:21 |
+| 2026-09-19 |      295 |           0 |     0 |              0 |            0.00 |           0.00 |       2 | 2026-09-19 09:23:28 | 2026-09-19 11:20:56 |
+| 2026-09-18 |     2390 |         679 | 24945 |            679 |           40.74 |          40.74 |       7 | 2026-09-18 16:30:53 | 2026-09-18 21:05:18 |
+| 2026-09-16 |     1112 |         291 |  3862 |            291 |           17.46 |          17.46 |       7 | 2026-09-16 09:58:02 | 2026-09-16 18:14:04 |
+| 2026-09-15 |     1204 |         357 |  4765 |            357 |           21.42 |          21.42 |       6 | 2026-09-15 10:16:16 | 2026-09-15 18:30:08 |
+| 2026-09-14 |     1216 |         367 |  4910 |            367 |           22.02 |          22.02 |       6 | 2026-09-14 14:30:15 | 2026-09-14 18:30:08 |
+| 2026-09-13 |        8 |           2 |   118 |              2 |            0.12 |           0.12 |       1 | 2026-09-13 13:01:51 | 2026-09-13 13:09:44 |
+| 2026-09-11 |     1200 |         351 |  4721 |            351 |           21.06 |          21.06 |       5 | 2026-09-11 16:30:47 | 2026-09-11 18:30:07 |
+| 2026-09-10 |     1199 |         341 |  4616 |            341 |           20.46 |          20.46 |       5 | 2026-09-10 16:30:48 | 2026-09-10 18:30:07 |
+| 2026-09-09 |     1200 |           0 |     0 |              0 |            0.00 |           0.00 |       5 | 2026-09-09 16:31:13 | 2026-09-09 18:30:03 |
+| 2026-09-08 |     1200 |         101 |  1421 |            101 |            6.06 |           6.06 |       5 | 2026-09-08 16:30:44 | 2026-09-08 18:30:07 |
+| 2026-09-07 |     1200 |         354 |  4768 |            354 |           21.24 |          21.24 |       5 | 2026-09-07 16:30:35 | 2026-09-07 18:30:04 |
+| 2026-09-04 |     1423 |         409 |  6631 |            409 |           24.54 |          24.54 |       6 | 2026-09-04 06:01:06 | 2026-09-04 18:30:07 |
+| 2026-09-03 |       50 |          27 |   370 |             27 |            1.62 |           1.62 |      25 | 2026-09-04 05:48:00 | 2026-09-04 05:58:45 |
+| 2026-08-25 |      259 |         114 |  2079 |            123 |            7.38 |           7.38 |     141 | 2026-08-25 10:43:34 | 2026-08-25 21:02:35 |
+| 2026-08-24 |     1830 |         781 | 11185 |            778 |           46.68 |          46.68 |     945 | 2026-08-24 16:30:42 | 2026-08-24 19:35:39 |
+| 2026-08-21 |     6764 |         924 | 30249 |           1189 |           71.34 |          71.34 |    3522 | 2026-08-21 16:30:36 | 2026-08-21 22:09:06 |
+| 2026-08-20 |      223 |          50 |  1523 |             57 |            3.42 |           3.42 |     161 | 2026-08-20 06:56:35 | 2026-08-20 10:16:37 |
+| 2026-08-18 |        2 |           0 |     0 |              0 |            0.00 |           0.00 |       1 | 2026-08-18 10:14:08 | 2026-08-18 10:26:39 |
++------------+----------+-------------+-------+----------------+-----------------+----------------+---------+---------------------+---------------------+
+-- por día × origen × trunk × accountcode:
++------------+------------------------+-------------------------------------------------------+--------------------+----------+------+------+----------+
+| dia_cst    | contexto               | origen                                                | trunk              | acode    | n    | ans  | min_fact |
++------------+------------------------+-------------------------------------------------------+--------------------+----------+------+------+----------+
+| 2026-09-23 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | MX       | 1202 |  360 |      360 |
+| 2026-09-22 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1202 |  336 |      336 |
+| 2026-09-21 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1198 |  337 |      337 |
+| 2026-09-20 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  |    6 |    0 |        0 |
+| 2026-09-19 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  |  163 |    0 |        0 |
+| 2026-09-19 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor1   | (vacío)  |  132 |    0 |        0 |
+| 2026-09-18 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1795 |  506 |      506 |
+| 2026-09-18 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor1   | (vacío)  |  595 |  173 |      173 |
+| 2026-09-16 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1076 |  291 |      291 |
+| 2026-09-16 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor1   | (vacío)  |   36 |    0 |        0 |
+| 2026-09-15 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1204 |  357 |      357 |
+| 2026-09-14 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1216 |  367 |      367 |
+| 2026-09-13 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  |    8 |    2 |        2 |
+| 2026-09-11 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1200 |  351 |      351 |
+| 2026-09-10 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1199 |  341 |      341 |
+| 2026-09-09 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1200 |    0 |        0 |
+| 2026-09-08 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1200 |  101 |      101 |
+| 2026-09-07 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1200 |  354 |      354 |
+| 2026-09-04 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1423 |  409 |      409 |
+| 2026-09-03 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  |   50 |   27 |       27 |
+| 2026-08-25 | from-client-elevenlabs | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  |  240 |  105 |      114 |
+| 2026-08-25 | outbound-mexico        | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  |   15 |    7 |        7 |
+| 2026-08-25 | from-client-elevenlabs | Local/+528127316552@from-client-elevenlabs-00000000;2 | PJSIP/proveedor-mx | (vacío)  |    1 |    0 |        0 |
+| 2026-08-25 | from-client-elevenlabs | Local/+528127316552@from-client-elevenlabs-00000001;2 | PJSIP/proveedor-mx | (vacío)  |    1 |    0 |        0 |
+| 2026-08-25 | from-client-elevenlabs | Local/+528127316552@from-client-elevenlabs-00000002;1 |                    | (vacío)  |    1 |    1 |        1 |
+| 2026-08-25 | from-client-elevenlabs | Local/+528127316552@from-client-elevenlabs-00000002;2 | PJSIP/proveedor-mx | (vacío)  |    1 |    1 |        1 |
+| 2026-08-24 | outbound-mexico        | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 1830 |  781 |      778 |
+| 2026-08-21 | outbound-mexico        | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  | 6764 |  924 |     1189 |
+| 2026-08-20 | outbound-mexico        | PJSIP/elevenlabs                                      | PJSIP/proveedor-mx | (vacío)  |  222 |   50 |       57 |
+| 2026-08-20 | outbound-mexico        | Local/+526563658205@from-client-elevenlabs-00000000;2 | PJSIP/proveedor-mx | (vacío)  |    1 |    0 |        0 |
+| 2026-08-18 | outbound-mexico        | Local/+526563658205@outbound-mexico-00000000;2        | PJSIP/proveedor-mx | (vacío)  |    1 |    0 |        0 |
+| 2026-08-18 | outbound-mexico        | Local/+526563658205@from-client-elevenlabs-00000001;2 | PJSIP/proveedor-mx | (vacío)  |    1 |    0 |        0 |
++------------+------------------------+-------------------------------------------------------+--------------------+----------+------+------+----------+
+-- últimas 40 llamadas MX una por una:
++---------------------+---------------------+---------------+------------------------+------------------+--------------------+-------+-------------+---------+
+| utc                 | cst                 | dst           | contexto               | origen           | trunk              | acode | disposition | billsec |
++---------------------+---------------------+---------------+------------------------+------------------+--------------------+-------+-------------+---------+
+| 2026-09-23 18:30:09 | 2026-09-23 12:30:09 | +524773206020 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:30:09 | 2026-09-23 12:30:09 | +524446513818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      13 |
+| 2026-09-23 18:30:09 | 2026-09-23 12:30:09 | +526567826818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      14 |
+| 2026-09-23 18:30:09 | 2026-09-23 12:30:09 | +529993920603 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      14 |
+| 2026-09-23 18:30:09 | 2026-09-23 12:30:09 | +528182795088 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:29:33 | 2026-09-23 12:29:33 | +524446513818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      13 |
+| 2026-09-23 18:29:33 | 2026-09-23 12:29:33 | +526567826818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      13 |
+| 2026-09-23 18:29:33 | 2026-09-23 12:29:33 | +524773206020 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:29:33 | 2026-09-23 12:29:33 | +528182795088 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:29:33 | 2026-09-23 12:29:33 | +529993920603 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:29:03 | 2026-09-23 12:29:03 | +526567826818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      13 |
+| 2026-09-23 18:29:03 | 2026-09-23 12:29:03 | +529993920603 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      14 |
+| 2026-09-23 18:29:03 | 2026-09-23 12:29:03 | +524446513818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      13 |
+| 2026-09-23 18:29:03 | 2026-09-23 12:29:03 | +528182795088 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:29:03 | 2026-09-23 12:29:03 | +524773206020 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:28:33 | 2026-09-23 12:28:33 | +526567826818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      13 |
+| 2026-09-23 18:28:33 | 2026-09-23 12:28:33 | +528182795088 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:28:33 | 2026-09-23 12:28:33 | +524773206020 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:28:33 | 2026-09-23 12:28:33 | +524446513818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:28:33 | 2026-09-23 12:28:33 | +529993920603 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:28:05 | 2026-09-23 12:28:05 | +524446513818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      13 |
+| 2026-09-23 18:28:04 | 2026-09-23 12:28:04 | +528182795088 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      14 |
+| 2026-09-23 18:28:04 | 2026-09-23 12:28:04 | +529993920603 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:28:04 | 2026-09-23 12:28:04 | +524773206020 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      14 |
+| 2026-09-23 18:28:04 | 2026-09-23 12:28:04 | +526567826818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:34 | 2026-09-23 12:27:34 | +528182795088 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:34 | 2026-09-23 12:27:34 | +526567826818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:33 | 2026-09-23 12:27:33 | +529993920603 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:33 | 2026-09-23 12:27:33 | +524773206020 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:33 | 2026-09-23 12:27:33 | +524446513818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:09 | 2026-09-23 12:27:09 | +526567826818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:03 | 2026-09-23 12:27:03 | +526567826818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:03 | 2026-09-23 12:27:03 | +524773206020 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:03 | 2026-09-23 12:27:03 | +528182795088 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      14 |
+| 2026-09-23 18:27:03 | 2026-09-23 12:27:03 | +524446513818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:27:03 | 2026-09-23 12:27:03 | +529993920603 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:26:34 | 2026-09-23 12:26:34 | +528182795088 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:26:33 | 2026-09-23 12:26:33 | +529993920603 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | ANSWERED    |      14 |
+| 2026-09-23 18:26:33 | 2026-09-23 12:26:33 | +524446513818 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
+| 2026-09-23 18:26:33 | 2026-09-23 12:26:33 | +524773206020 | from-client-elevenlabs | PJSIP/elevenlabs | PJSIP/proveedor-mx | MX    | NO ANSWER   |       0 |
++---------------------+---------------------+---------------+------------------------+------------------+--------------------+-------+-------------+---------+
+-- números MX más marcados (45d) y si existen como lead en el CRM:
+--------------
+SELECT RIGHT(c.dst,10) numero, COUNT(*) veces, COUNT(DISTINCT DATE(c.calldate)) dias, SUM(c.disposition='ANSWERED') ans,
+          MIN(c.calldate) primera, MAX(c.calldate) ultima, IF(MAX(l.lead_id) IS NULL,'NO está en CRM','lead CRM') en_crm
+   FROM cdr_panel c LEFT JOIN (SELECT RIGHT(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'+',''),' ',''),'-',''),10) p10, MAX(lead_id) lead_id FROM crm_leads GROUP BY 1) l ON l.p10 = RIGHT(c.dst,10)
+   WHERE c.dst REGEXP '^[+]?52[0-9]{10}$' AND c.calldate >= UTC_TIMESTAMP() - INTERVAL 45 DAY
+   GROUP BY RIGHT(c.dst,10) ORDER BY veces DESC LIMIT 25
+--------------
+
+ERROR 1267 (HY000) at line 1: Illegal mix of collations (utf8mb4_general_ci,IMPLICIT) and (utf8mb4_unicode_ci,IMPLICIT) for operation '='
+-- *** CRUCES: trunk proveedor-mx con destino NO mexicano, o MX por otro trunk (45d) ***
++------------+------------------+----------+---------+-----+----------+
+| dia        | trunk            | pais_dst | dst_ini | n   | min_fact |
++------------+------------------+----------+---------+-----+----------+
+| 2026-09-19 | PJSIP/proveedor1 | mexico   | 525598  | 132 |        0 |
+| 2026-09-18 | PJSIP/proveedor1 | mexico   | 525598  | 595 |      173 |
+| 2026-09-16 | PJSIP/proveedor1 | mexico   | 525598  |  36 |        0 |
+| 2026-08-25 |                  | mexico   | +52812  |   1 |        1 |
++------------+------------------+----------+---------+-----+----------+
+-- tabla cdr cruda, MX por día:
++------------+------+----------+
+| dia_cst    | n    | min_fact |
++------------+------+----------+
+| 2026-09-23 | 1202 |      360 |
+| 2026-09-22 | 1202 |      336 |
+| 2026-09-21 | 1198 |      337 |
+| 2026-09-20 |    6 |        0 |
+| 2026-09-19 |  295 |        0 |
+| 2026-09-18 | 2390 |      679 |
+| 2026-09-16 | 1112 |      291 |
+| 2026-09-15 | 1204 |      357 |
+| 2026-09-14 | 1216 |      367 |
+| 2026-09-13 |    8 |        2 |
+| 2026-09-11 | 1200 |      351 |
+| 2026-09-10 | 1199 |      341 |
+| 2026-09-09 | 1200 |        0 |
+| 2026-09-08 | 1200 |      101 |
+| 2026-09-07 | 1200 |      354 |
+| 2026-09-04 | 1423 |      409 |
+| 2026-09-03 |   50 |       27 |
+| 2026-08-25 |  259 |      123 |
+| 2026-08-24 | 1830 |      778 |
+| 2026-08-21 | 6764 |     1189 |
+| 2026-08-20 |  223 |       57 |
+| 2026-08-18 |    2 |        0 |
++------------+------+----------+
+
+══════════ 7. MÉXICO — Stringee, CRM, WF9, switches ══════════
++----------+---------+---------------------+
+| provider | enabled | updated_at          |
++----------+---------+---------------------+
+| asterisk |       1 | 2026-09-15 09:22:11 |
+| stringee |       1 | 2026-09-15 09:22:11 |
++----------+---------+---------------------+
++----+----------------------------+-----------------------------------------------------------------------------------------------------------------------------------------+---------------------+
+| id | label                      | workflow_ids                                                                                                                            | created_at          |
++----+----------------------------+-----------------------------------------------------------------------------------------------------------------------------------------+---------------------+
+|  1 | INDIA - NEPAL              | fMvrAtoRxNylF6YV,FZ5aGDTS19ud8F2z,gC0O8GN8pR0SoJyi,HweSXF3SbhNaCAE5,NWqT1VUJxYHPQ2bl,PlaDi1wsR1lWoZO8,sINJ2Godpz8a64FM,Th2Y8pLeBfNX00BC | 2026-08-21 08:45:03 |
+|  2 | PANEL                      | 2xjFB1FVTKYBvszp,fWDMTbgJR5Txillp,I4oWIsO3njQLNm6f,VZPJtmdeiujrJFLj,ZAduHUfEFXVylR6B                                                    | 2026-08-21 08:48:01 |
+|  3 | MEXICO                     | L25mrGgMDPpKpgAn,EILViUUYiG2ZL0Pf,P5ubGyb2etR46ftj,Vr2aeOmW9k6UK2vF,so0zWwX8da3s5jV9,TIDpFuTeThAQOsBw,HLusaKMqF2t4MhE3,ZS6FrUbdzcNS0QfA | 2026-08-21 08:49:00 |
+|  4 | INDIA - PROVEEDOR STRINGEE | tPPUIs72OniUrtzk                                                                                                                        | 2026-09-11 11:36:11 |
+|  5 | CRM INDIA - NEPAL          | 442FDm64j2YTx9mW,6ods2vlMKHhuhpQS,Bem8pAJ4gxZWrhDU,wNUh5ugIlHCyShyI                                                                     | 2026-09-18 08:14:42 |
+|  6 | CRM PANEL                  | ap50YtvxxjErCPtq,TW1CHksqyf66MjQz                                                                                                       | 2026-09-18 08:17:01 |
++----+----------------------------+-----------------------------------------------------------------------------------------------------------------------------------------+---------------------+
+-- log de Asterisk: veces que entró la rama 'Salida Mexico' por día:
+
+══════════ 8. FRESCURA WF14-CRM ══════════
++--------+---------+--------+---------------------+
+| source | rows_in | status | synced_at           |
++--------+---------+--------+---------------------+
+| crm    |   44253 | ok     | 2026-09-24 02:43:48 |
+| crm    |   44253 | ok     | 2026-09-24 02:38:05 |
+| crm    |   44253 | ok     | 2026-09-24 02:10:44 |
+| crm    |   18764 | ok     | 2026-09-23 09:28:33 |
+| crm    |   18764 | ok     | 2026-09-23 09:23:26 |
++--------+---------+--------+---------------------+
++---------------------+-------+
+| ult_sync_leads      | leads |
++---------------------+-------+
+| 2026-09-24 06:43:41 | 61527 |
++---------------------+-------+
+
+FIN — pegá todo este output en el chat.

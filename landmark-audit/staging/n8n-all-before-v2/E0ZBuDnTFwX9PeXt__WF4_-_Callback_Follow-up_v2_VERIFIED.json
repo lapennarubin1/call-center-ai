@@ -1,0 +1,581 @@
+{
+  "id": "E0ZBuDnTFwX9PeXt",
+  "name": "WF4 - Callback & Follow-up v2 (VERIFIED)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-07-29T07:23:13.588Z",
+  "updatedAt": "2026-07-30T07:07:56.397Z",
+  "isArchived": false,
+  "versionId": "2bb80fe9-156b-4853-aba4-56e4cac5a94c",
+  "versionCounter": 20,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */15 11-18 * * *"
+            }
+          ]
+        }
+      },
+      "id": "026b2460-84bb-4ebb-a5bb-91fe3d003ff3",
+      "name": "Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -880,
+        128
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "bf4d179b-4acc-498e-a2f2-8145240b1067",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=210138417"
+        },
+        "options": {}
+      },
+      "id": "cc1c58b3-45c2-428c-bf6f-1a5f3cba11dd",
+      "name": "Read All Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -656,
+        128
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f1",
+              "leftValue": "={{ String($json.callback_requested || '').toUpperCase() }}",
+              "rightValue": "TRUE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "f2",
+              "leftValue": "={{ String($json.status            || '').toUpperCase() }}",
+              "rightValue": "CONVERTED",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "f3",
+              "leftValue": "={{ String($json.status            || '').toUpperCase() }}",
+              "rightValue": "DO_NOT_CALL",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "f4",
+              "leftValue": "={{ $json.callback_date ? new Date($json.callback_date).getTime() : 0 }}",
+              "rightValue": "={{ $now.toMillis() }}",
+              "operator": {
+                "type": "number",
+                "operation": "smallerEqual"
+              }
+            },
+            {
+              "id": "ist1",
+              "leftValue": "={{ $now.setZone('Asia/Kolkata').hour }}",
+              "rightValue": 11,
+              "operator": {
+                "type": "number",
+                "operation": "largerEqual"
+              }
+            },
+            {
+              "id": "ist2",
+              "leftValue": "={{ $now.setZone('Asia/Kolkata').hour }}",
+              "rightValue": 19,
+              "operator": {
+                "type": "number",
+                "operation": "smaller"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a66be6fb-8718-4f76-b0e9-3f57bb79e08d",
+      "name": "Filter Due Callbacks",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        -432,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a1",
+              "leftValue": "={{ Number($json.call_attempts || 0) }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "smaller"
+              }
+            },
+            {
+              "id": "cb7ce684-b5b9-412b-a63e-466ea36856aa",
+              "leftValue": "={{ $json.call_attempts }}",
+              "rightValue": 2,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "04a00a36-b15e-43cc-98b6-8d7152fc29ef",
+      "name": "Attempts < 3?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -208,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "8c6c9eda-cd4a-4c9d-933e-9f942ed2aa59",
+      "name": "Loop One-by-One",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/convai/twilio/outbound-call",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent_id\": \"agent_5701kramx550e3qs2tm11661b48p\",\n  \"agent_phone_number_id\": \"phnum_3601kvqcgrbtf1n997j2dd8cz1qj\",\n  \"to_number\": \"{{ $json.phone }}\",\n  \"conversation_initiation_client_data\": {\n    \"conversation_config_override\": {\n      \"agent\": { \"language\": \"hi\" }\n    },\n    \"dynamic_variables\": {\n      \"lead_id\": \"{{ $json.lead_id }}\",\n      \"full_name\": \"{{ $json.full_name }}\",\n      \"phone\": \"{{ $json.phone }}\",\n      \"country\": \"{{ $json.country }}\",\n      \"language\": \"hi\",\n      \"is_followup\": \"true\",\n      \"call_attempts\": \"{{ Number($json.call_attempts || 0) + 1 }}\",\n      \"prior_summary\": \"{{ String($json.conversation_summary || '').replace(/\\\"/g, ' ').slice(0, 400) }}\"\n    }\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "26f8a632-8286-461e-9dbd-8433795bb6b6",
+      "name": "ElevenLabs Follow-up Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ui7o7nfbbbmdISf2",
+          "name": "Header Auth account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Classify the HTTP response the same way WF2 does\nconst resp = $input.first().json || {};\nconst lead = $('Loop One-by-One').item.json;\nconst statusCode = resp.statusCode || resp.status || (resp.headers ? 200 : null);\nconst body = resp.body || resp;\nconst conversationId = body.conversation_id || body.conversationId || body.call_sid || body.callSid || '';\n\nlet status, last_call_status, notes;\nif (statusCode && statusCode >= 200 && statusCode < 300 && conversationId) {\n  status = 'CALL_IN_PROGRESS';\n  last_call_status = 'FOLLOWUP_INITIATED';\n  notes = 'Follow-up dial sent: ' + conversationId;\n} else if (statusCode && statusCode >= 400) {\n  status = 'API_ERROR';\n  last_call_status = 'HTTP_' + statusCode;\n  notes = 'ElevenLabs error: ' + JSON.stringify(body).slice(0, 300);\n} else {\n  status = 'DIAL_FAILED';\n  last_call_status = 'NO_CONVERSATION_ID';\n  notes = 'Unexpected response: ' + JSON.stringify(body).slice(0, 300);\n}\n\nreturn [{ json: {\n  lead_id: lead.lead_id,\n  elevenlabs_call_id: conversationId,\n  status,\n  last_call_status,\n  notes,\n  call_attempts: Number(lead.call_attempts || 0) + 1,\n  last_call_time: new Date().toISOString()\n}}];"
+      },
+      "id": "c58d375a-2bcb-4626-af2e-85917aad7285",
+      "name": "Classify Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=210138417"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "status": "={{ $json.status }}",
+            "elevenlabs_call_id": "={{ $json.elevenlabs_call_id }}",
+            "call_attempts": "={{ $json.call_attempts }}",
+            "last_call_time": "={{ $json.last_call_time }}",
+            "last_call_status": "={{ $json.last_call_status }}",
+            "callback_date": "",
+            "notes": "={{ $json.notes }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "07b2b51a-c480-468c-841d-4c6237b3c240",
+      "name": "Persist Follow-up State",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=210138417"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "status": "MAX_ATTEMPTS_REACHED",
+            "callback_requested": "FALSE",
+            "callback_date": "",
+            "notes": "=Max attempts reached after {{ $json.call_attempts }} tries"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "5bff3f22-c0e2-4d3d-80ba-35c2b3721f61",
+      "name": "Mark MAX_ATTEMPTS_REACHED",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        272
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "errors",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF4",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+            "message": "={{ JSON.stringify($json).slice(0, 5000) }}"
+          },
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "b7dd5d3d-e00d-4a52-8fcc-631d37e390a8",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -640,
+        480
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 min": {
+      "main": [
+        [
+          {
+            "node": "Read All Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read All Leads": {
+      "main": [
+        [
+          {
+            "node": "Filter Due Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Due Callbacks": {
+      "main": [
+        [
+          {
+            "node": "Attempts < 3?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attempts < 3?": {
+      "main": [
+        [
+          {
+            "node": "Loop One-by-One",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark MAX_ATTEMPTS_REACHED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop One-by-One": {
+      "main": [
+        [
+          {
+            "node": "ElevenLabs Follow-up Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ElevenLabs Follow-up Call": {
+      "main": [
+        [
+          {
+            "node": "Classify Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Response": {
+      "main": [
+        [
+          {
+            "node": "Persist Follow-up State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Follow-up State": {
+      "main": [
+        [
+          {
+            "node": "Loop One-by-One",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Every 15 min": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "id": "x4iNrhKimNW0kGOh",
+      "name": "wf4",
+      "createdAt": "2026-07-27T12:22:25.825Z",
+      "updatedAt": "2026-07-27T12:22:25.825Z"
+    },
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "2Oh1wyPZW2lzXf4L",
+      "name": "wf4-callback",
+      "createdAt": "2026-07-27T12:22:25.825Z",
+      "updatedAt": "2026-07-27T12:22:25.825Z"
+    },
+    {
+      "id": "ZF3ImiIOdnoSG1Py",
+      "name": "hindi",
+      "createdAt": "2026-07-27T09:29:13.407Z",
+      "updatedAt": "2026-07-27T09:29:13.407Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "E0ZBuDnTFwX9PeXt",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-07-29T07:23:13.588Z",
+      "updatedAt": "2026-07-29T07:23:13.588Z"
+    }
+  ],
+  "activeVersion": null
+}

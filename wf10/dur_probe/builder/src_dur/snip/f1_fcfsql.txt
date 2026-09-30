@@ -1,0 +1,9 @@
+  const f = r.fcf;
+  // Asterisk: la fila se marca con la hora de INICIO de la llamada (no con la de este INSERT). WF10 empareja la
+  // grabación con la fila creada entre el inicio de la llamada y +15 min; esta Activity se crea al terminar la llamada.
+  const ce = Number(f.created_epoch);
+  const withTime = f.provider === 'asterisk' && Number.isFinite(ce) && ce > 1e9;
+  return 'INSERT INTO wf_call_followups (phone, lead_id, followup_id, provider, outcome, call_status, recording_synced' + (withTime ? ', created_at' : '') + ') ' +
+    'SELECT ' + [q(f.phone || ''), q(f.lead_id), q(f.followup_id), q(f.provider), q(f.outcome), q(f.call_status), q(Number(f.recording_synced) ? 1 : 0)]
+      .concat(withTime ? ['FROM_UNIXTIME(' + Math.trunc(ce) + ')'] : []).join(', ') +
+    ' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM wf_call_followups WHERE followup_id = ' + q(f.followup_id) + ')';

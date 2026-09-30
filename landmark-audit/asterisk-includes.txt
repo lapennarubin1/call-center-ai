@@ -1,0 +1,16 @@
+/etc/asterisk/pjsip.conf.bak-stringee-20260903-091500:104:#include landmark-extensions-pjsip.conf
+/etc/asterisk/pjsip.conf.backup-before-nepal:104:#include landmark-extensions-pjsip.conf
+/etc/asterisk/pjsip.conf.backup-before-nepal:105:#include stringee-test-pjsip.conf
+/etc/asterisk/pjsip.conf.bak-diagnostico-20260909-124621:121:#include landmark-extensions-pjsip.conf
+/etc/asterisk/pjsip.conf.bak-diagnostico-20260909-124621:122:#include stringee-test-pjsip.conf
+/etc/asterisk/pjsip.conf:121:#include landmark-extensions-pjsip.conf
+/etc/asterisk/pjsip.conf:122:#include stringee-test-pjsip.conf
+/etc/asterisk/extensions.conf.bak-stringee-20260903-091500:30:#include landmark-extensions-dialplan.conf
+/etc/asterisk/extensions.conf:38:#include landmark-extensions-dialplan.conf
+/etc/asterisk/extensions.conf:39:#include stringee-test-dialplan.conf
+/etc/asterisk/extensions.conf.backup-before-country-filter:30:#include landmark-extensions-dialplan.conf
+/etc/asterisk/extensions.conf.backup-before-country-filter:31:#include stringee-test-dialplan.conf
+/etc/asterisk/extensions.conf.bak-nepal-20260911-055336:30:#include landmark-extensions-dialplan.conf
+/etc/asterisk/extensions.conf.bak-nepal-20260911-055336:31:#include stringee-test-dialplan.conf
+/etc/asterisk/extensions.conf.bak-nepal-noplus-20260911-061233:37:#include landmark-extensions-dialplan.conf
+/etc/asterisk/extensions.conf.bak-nepal-noplus-20260911-061233:38:#include stringee-test-dialplan.conf

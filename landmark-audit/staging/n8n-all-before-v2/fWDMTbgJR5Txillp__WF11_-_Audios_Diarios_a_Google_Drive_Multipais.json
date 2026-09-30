@@ -1,0 +1,938 @@
+{
+  "id": "fWDMTbgJR5Txillp",
+  "name": "WF11 - Audios Diarios a Google Drive (Multipais)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-07-29T07:52:41.442Z",
+  "updatedAt": "2026-09-15T15:59:14.485Z",
+  "isArchived": false,
+  "versionId": "ec0bfcfd-ee86-4c74-9b69-1e5fa26c13c2",
+  "versionCounter": 47,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "92426588-1148-4eee-9fe9-92daa1405dd2",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        7872,
+        2144
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "e359d08d-d105-44e6-8f0d-c9467f514957",
+      "name": "Ejecutar Manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        7792,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 30 20 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a1da08f4-8bab-4189-9f39-0a1fd75bc8f1",
+      "name": "Diario 02:00 IST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        7792,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const KEY_INDIA = 'sk_79048a9776812db4416e5c690d0c047132d565fee7d43acd';\nconst KEY_NEPAL = 'sk_79048a9776812db4416e5c690d0c047132d565fee7d43acd';\nconst KEY_VZLA  = 'sk_79048a9776812db4416e5c690d0c047132d565fee7d43acd';\n\nconst AGENTS = [\n  { \n    agent_id: 'agent_5701kramx550e3qs2tm11661b48p', \n    key: KEY_INDIA, \n    country: 'india' \n  },\n\n  { \n    agent_id: 'agent_7601m209ntj3fyrbg0dcq6w507yq', \n    key: KEY_NEPAL, \n    country: 'nepal' \n  },\n\n  { \n    agent_id: 'agent_5801kt2n54gne8s8dwgb03sbwf02', \n    key: KEY_VZLA,  \n    country: 'venezuela' \n  }, // tambien colombia (mismo agente)\n\n  { \n    agent_id: 'agent_5801kt2n54gne8s8dwgb03sbwf02', \n    key: KEY_VZLA,  \n    country: 'mexico' \n  }\n];\n\n// Día anterior completo en horario IST (UTC+5:30) — se mantiene IST como referencia\n// de \"día calendario\" para todos los países por simplicidad operativa (un solo corte diario)\nconst nowIst = new Date(Date.now() + 19800*1000);\n\nconst ayer = new Date(nowIst);\nayer.setUTCDate(ayer.getUTCDate()-1);\n\nconst dia = ayer.toISOString().slice(0,10);\n\nconst desde =\n  Math.floor(\n    new Date(dia+'T00:00:00Z').getTime()/1000\n  ) - 19800;\n\nconst hasta = desde + 86400;\n\nconsole.log(\n  `🎧 Audios del ${dia} IST | ${desde} → ${hasta}`\n);\n\nconst base = 'https://api.elevenlabs.io/v1/convai/conversations';\n\nlet todas = [];\n\nfor (const ag of AGENTS) {\n\n  const H = {\n    'xi-api-key': ag.key\n  };\n\n  let cursor = '';\n  let p = 0;\n\n  do {\n\n    let u =\n      `${base}?page_size=100` +\n      `&call_start_after_unix=${desde}` +\n      `&call_start_before_unix=${hasta}` +\n      `&agent_id=${encodeURIComponent(ag.agent_id)}`;\n\n    if (cursor) {\n      u += `&cursor=${encodeURIComponent(cursor)}`;\n    }\n\n    const r =\n      await this.helpers.httpRequest({\n        method:'GET',\n        url:u,\n        headers:H,\n        json:true,\n        timeout:30000\n      });\n\n    const convos =\n      (r.conversations || []).map(c => ({\n        ...c,\n        _agent_key: ag.key,\n        _agent_country: ag.country\n      }));\n\n    todas = todas.concat(convos);\n\n    cursor =\n      r.has_more\n        ? (r.next_cursor || '')\n        : '';\n\n    p++;\n\n  } while (cursor && p < 20);\n}\n\nif (!todas.length) {\n  console.log('Sin llamadas ayer');\n  return [];\n}\n\n// Traer detalle solo de las que tienen audio (duración > 0)\nconst conAudio =\n  todas.filter(\n    c => Number(c.call_duration_secs || 0) > 0\n  );\n\nconsole.log(\n  `📞 ${todas.length} llamadas | ${conAudio.length} con audio`\n);\n\nconst out = [];\n\nfor (const c of conAudio) {\n\n  try {\n\n    const H = {\n      'xi-api-key': c._agent_key\n    };\n\n    const d =\n      await this.helpers.httpRequest({\n        method:'GET',\n        url:`${base}/${c.conversation_id}`,\n        headers:H,\n        json:true,\n        timeout:30000\n      });\n\n    out.push({\n      json: {\n        ...d,\n        _dia: dia,\n        _agent_key: c._agent_key,\n        _agent_country: c._agent_country\n      }\n    });\n\n  } catch(e) {\n\n    console.warn(\n      'detalle falló ' + c.conversation_id\n    );\n\n  }\n\n  await new Promise(\n    r => setTimeout(r,120)\n  );\n}\n\nreturn out;"
+      },
+      "id": "6820d429-2370-4529-9a45-fe6a643205a9",
+      "name": "Listar Llamadas de Ayer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8032,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══ Metadata y nombre de archivo para cada audio ═══\nconst items = $input.all();\nconst out = [];\n\nfor (const it of items) {\n  const c = it.json;\n  const d = c.data || c;\n\n  const convId = String(d.conversation_id || '');\n  if (!convId) continue;\n\n  const ts = Number(\n    d.metadata?.start_time_unix_secs ||\n    c.start_time_unix_secs ||\n    0\n  );\n\n  if (!ts) continue;\n\n  // Carpeta = día calendario IST\n  const carpeta = new Date(\n    (ts + 19800) * 1000\n  ).toISOString().slice(0, 10);\n\n  const hora = new Date(\n    (ts + 19800) * 1000\n  )\n    .toISOString()\n    .slice(11, 16)\n    .replace(':', '');\n\n  const dyn =\n    d.conversation_initiation_client_data?.dynamic_variables ||\n    {};\n\n  const leadId =\n    String(dyn.lead_id || '').trim();\n\n  const phone =\n    String(\n      dyn.phone ||\n      d.metadata?.phone_call?.external_number ||\n      ''\n    )\n    .replace(/[^0-9]/g, '');\n\n  const dur =\n    Number(\n      d.metadata?.call_duration_secs ||\n      0\n    );\n\n  const success =\n    String(\n      d.analysis?.call_successful ||\n      ''\n    ).toLowerCase();\n\n  const interest =\n    String(\n      d.analysis?.data_collection_results?.user_interest?.value ||\n      ''\n    ).toLowerCase();\n\n  // Sanitizar: sin espacios, barras, ni caracteres raros\n  const safe = (s) =>\n    String(s).replace(\n      /[^a-zA-Z0-9_+-]/g,\n      ''\n    );\n\n  // Nombre: leadID_telefono_hora_resultado_convid.mp3\n  let etiqueta = 'otro';\n\n  if (dur === 0) {\n    etiqueta = 'noanswer';\n  }\n  else if (success === 'failure') {\n    etiqueta = 'failed';\n  }\n  else if (\n    ['interested', 'true', 'yes'].includes(interest)\n  ) {\n    etiqueta = 'INTERESADO';\n  }\n  else {\n    etiqueta = 'completada';\n  }\n\n  const idParte =\n    leadId\n      ? `lead${safe(leadId)}`\n      : (\n          phone\n            ? `tel${safe(phone)}`\n            : 'sinid'\n        );\n\n  const nombre =\n    `${idParte}_` +\n    `${safe(phone).slice(-10) || 'nophone'}_` +\n    `${hora}_` +\n    `${etiqueta}_` +\n    `${safe(convId).slice(-8)}.mp3`;\n\n  const country =\n    String(\n      c._agent_country ||\n      d.country ||\n      ''\n    )\n    .trim()\n    .toLowerCase();\n\n  const apiKey =\n    c._agent_key ||\n    '';\n\n  out.push({\n    json: {\n      conversation_id: convId,\n      country: country,\n      api_key: apiKey,\n      lead_id: leadId || null,\n      phone: phone || null,\n      carpeta_dia: carpeta,\n      nombre_archivo: nombre,\n      duracion_secs: dur,\n      tiene_audio: dur > 0\n    }\n  });\n}\n\nconsole.log(\n  `🎧 ${out.length} audios a procesar | ` +\n  `${out.filter(o => o.json.tiene_audio).length} con contenido`\n);\n\nreturn out;"
+      },
+      "id": "3d176b74-e74a-4a8e-9f6e-774884142777",
+      "name": "Nombres y Carpetas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8272,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has",
+              "leftValue": "={{ $json.tiene_audio }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3e6878e7-99a4-4dee-b971-4caf5bb2ecf0",
+      "name": "Solo con audio",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        8512,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "4173e054-c1c4-445a-85fd-51f15808f478",
+      "name": "Loop Audios",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        9264,
+        1808
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.elevenlabs.io/v1/convai/conversations/{{ $json.conversation_id }}/audio",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xi-api-key",
+              "value": "={{ $json.api_key }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "fbaff12b-497b-441e-aca9-ec96969c89f7",
+      "name": "Descargar MP3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        9536,
+        1824
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "name": "={{ $('Loop Audios').item.json.nombre_archivo }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "09e79670-8a36-4fa9-9ff1-3486d84bc55f",
+      "name": "Subir Audio",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        10736,
+        1792
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "nRDkHMWEthRzIhyc",
+          "name": "Google Drive account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 911769015,
+          "mode": "list",
+          "cachedResultName": "audios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=911769015"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $('Loop Audios').item.json.carpeta_dia }}",
+            "lead_id": "={{ $('Loop Audios').item.json.lead_id }}",
+            "phone": "={{ $('Loop Audios').item.json.phone }}",
+            "conversation_id": "={{ $('Loop Audios').item.json.conversation_id }}",
+            "duration_secs": "={{ $('Loop Audios').item.json.duracion_secs }}",
+            "drive_link": "={{ $json.webViewLink || '' }}",
+            "country": "={{ $('Loop Audios').item.json.country }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversation_id",
+              "displayName": "conversation_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duration_secs",
+              "displayName": "duration_secs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "file",
+              "displayName": "file",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "drive_link",
+              "displayName": "drive_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "uploaded_at",
+              "displayName": "uploaded_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ea6f5fd3-1196-41d3-9f23-22bcc985b5e3",
+      "name": "Registrar en Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        11392,
+        1968
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF11",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+            "message": "={{ JSON.stringify($json).slice(0,5000) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4e192a91-3acf-4f34-923c-ccf618b6eff2",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        8032,
+        2144
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 911769015,
+          "mode": "list",
+          "cachedResultName": "audios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=911769015"
+        },
+        "options": {}
+      },
+      "id": "935154e3-9068-49b3-bfe2-e397e89a7262",
+      "name": "Leer Audios Existentes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        8736,
+        1744
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══ Filtrar audios ya registrados (idempotencia entre re-ejecuciones) ═══\nconst candidatos = $('Solo con audio1').all().map(i => i.json);\nconst existentes  = $input.all().map(i => i.json);\n\nconst yaSubidos = new Set(\n  existentes.map(r => String(r.conversation_id || '').trim()).filter(Boolean)\n);\n\nconst out = candidatos.filter(c => !yaSubidos.has(String(c.conversation_id || '').trim()));\n\nconsole.log(`🔁 Dedupe: ${candidatos.length} candidatos | ${yaSubidos.size} ya en sheet | ${out.length} nuevos a subir`);\nreturn out.map(j => ({ json: j }));\n"
+      },
+      "id": "4d43e30c-227e-4453-949c-1c1f84d171bb",
+      "name": "Filtrar Ya Subidos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8944,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "queryString": "={{ $('Loop Audios').item.json.carpeta_dia }}",
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "=={{\n({\n  india: '1rgHKpXWJrxRWsZSJ9ATmvqOCUOnejdKz',\n  nepal: '1JLyAo5RKGT6hQtn3inrlocrwMl11YoUK',\n  mexico: '1dJjivIOZUkSMb5LkMRs9Sy9bjx1g51nK'\n})[$('Loop Audios').item.json.country] || '193cughhWGZ3_Bo95lE3cwlDgTgWq0g3J'\n}}",
+            "mode": "id"
+          },
+          "whatToSearch": "folders"
+        },
+        "options": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        }
+      },
+      "id": "5c59cc85-adfc-47cf-8de6-2bcbac601e70",
+      "name": "Buscar Carpeta del Día",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        9904,
+        1824
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "nRDkHMWEthRzIhyc",
+          "name": "Google Drive account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "e1",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e1744623-6a53-40c8-80f9-dddd58e863d4",
+      "name": "¿Ya Existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        10112,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $('Loop Audios').item.json.carpeta_dia }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "=={{\n({\n  india: '1rgHKpXWJrxRWsZSJ9ATmvqOCUOnejdKz',\n  nepal: '1JLyAo5RKGT6hQtn3inrlocrwMl11YoUK',\n  mexico: '1dJjivIOZUkSMb5LkMRs9Sy9bjx1g51nK'\n})[$('Loop Audios').item.json.country] || '193cughhWGZ3_Bo95lE3cwlDgTgWq0g3J'\n}}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "28901797-fb5c-4972-834a-5c7564ab091e",
+      "name": "Crear Carpeta del Día",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        10448,
+        1936
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "nRDkHMWEthRzIhyc",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "bin-ok",
+              "leftValue": "={{ $binary?.data ? 'ok' : '' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a3835a7a-e151-48dc-8f78-1b79930bef73",
+      "name": "¿Descargó el audio?1",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        9712,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "id": "4c20642a-eb41-4433-8d93-afdcc333ae6f",
+      "name": "Esperar 2s (cuota Sheets)1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        11072,
+        1776
+      ],
+      "webhookId": "c2ebc681-958e-4c25-8b9a-e57dfde34fce"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF11_SKIP",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "Descarga o carpeta falló",
+            "message": "={{ 'lead_id=' + ($('Loop Audios').item.json.lead_id || 'N/A') + ' conv=' + ($('Loop Audios').item.json.conversation_id || 'N/A') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "55eea62e-8f1d-4212-81ad-91615d2b1348",
+      "name": "Log Audio Saltado1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        8928,
+        2000
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Manualmente": {
+      "main": [
+        [
+          {
+            "node": "Listar Llamadas de Ayer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diario 02:00 IST": {
+      "main": [
+        [
+          {
+            "node": "Listar Llamadas de Ayer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listar Llamadas de Ayer": {
+      "main": [
+        [
+          {
+            "node": "Nombres y Carpetas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nombres y Carpetas": {
+      "main": [
+        [
+          {
+            "node": "Solo con audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solo con audio": {
+      "main": [
+        [
+          {
+            "node": "Leer Audios Existentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Audios": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Descargar MP3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar MP3": {
+      "main": [
+        [
+          {
+            "node": "¿Descargó el audio?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir Audio": {
+      "main": [
+        [
+          {
+            "node": "Esperar 2s (cuota Sheets)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar en Sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Audios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Audios Existentes": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Ya Subidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Ya Subidos": {
+      "main": [
+        [
+          {
+            "node": "Loop Audios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Carpeta del Día": {
+      "main": [
+        [
+          {
+            "node": "¿Ya Existe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Ya Existe?": {
+      "main": [
+        [
+          {
+            "node": "Subir Audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Crear Carpeta del Día",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Carpeta del Día": {
+      "main": [
+        [
+          {
+            "node": "Subir Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Descargó el audio?1": {
+      "main": [
+        [
+          {
+            "node": "Buscar Carpeta del Día",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar 2s (cuota Sheets)1": {
+      "main": [
+        [
+          {
+            "node": "Registrar en Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Audio Saltado1": {
+      "main": [
+        [
+          {
+            "node": "Loop Audios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Diario 02:00 IST": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "fWDMTbgJR5Txillp",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-07-29T07:52:41.442Z",
+      "updatedAt": "2026-07-29T07:52:41.442Z"
+    }
+  ],
+  "activeVersion": null
+}

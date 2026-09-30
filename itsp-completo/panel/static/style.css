@@ -1,0 +1,141 @@
+:root{
+  --bg:#EBEEF2; --surface:#FFFFFF; --surface-2:#F5F7F9;
+  --ink:#141922; --muted:#5C6672; --faint:#8A94A0;
+  --border:#D5DBE2; --border-strong:#BCC5CE;
+  --accent:#0C6E77; --accent-ink:#0A585F; --accent-soft:#E1F0F1;
+  --ok:#1B7A3D; --ok-soft:#E3F3E8;
+  --warn:#9A6512; --warn-soft:#FBEFD8;
+  --danger:#B4322A; --danger-soft:#F8E3E1;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--sans);background:var(--bg);color:var(--ink);
+  font-size:14px;line-height:1.45;
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ---- Layout ---- */
+.shell{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+.side{
+  background:#0E1620;color:#C6D0DA;padding:0;position:sticky;top:0;
+  height:100vh;overflow:auto;
+}
+.brand{
+  padding:18px 20px;border-bottom:1px solid #1E2A38;
+  font-family:var(--mono);font-weight:600;letter-spacing:.5px;
+  color:#EAF0F6;font-size:15px;
+}
+.brand small{display:block;color:#6B7B8C;font-weight:400;font-size:11px;
+  letter-spacing:1.5px;text-transform:uppercase;margin-top:3px}
+.nav{padding:10px 0}
+.nav a{
+  display:flex;align-items:center;gap:9px;padding:9px 20px;color:#AEB9C5;
+  font-size:13px;border-left:2px solid transparent;
+}
+.nav a:hover{background:#16212E;text-decoration:none;color:#EAF0F6}
+.nav a.active{background:#16212E;border-left-color:var(--accent);color:#fff}
+.nav .grp{padding:14px 20px 5px;font-size:10px;letter-spacing:1.5px;
+  text-transform:uppercase;color:#5A6A7B}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:5;
+}
+.topbar h1{font-size:16px;margin:0;font-weight:600}
+.content{padding:24px;max-width:1180px;width:100%}
+
+/* ---- Buttons ---- */
+.btn{
+  display:inline-flex;align-items:center;gap:6px;font-family:var(--sans);
+  font-size:13px;font-weight:500;padding:7px 14px;border-radius:6px;
+  border:1px solid var(--border-strong);background:var(--surface);color:var(--ink);
+  cursor:pointer;
+}
+.btn:hover{background:var(--surface-2);text-decoration:none}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-ink);color:#fff}
+.btn-danger{color:var(--danger);border-color:#E3B6B2}
+.btn-danger:hover{background:var(--danger-soft)}
+.btn-sm{padding:4px 9px;font-size:12px}
+
+/* ---- Cards / grid ---- */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:14px;margin-bottom:24px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:16px 18px}
+.card .k{font-size:11px;letter-spacing:1px;text-transform:uppercase;
+  color:var(--faint)}
+.card .v{font-family:var(--mono);font-size:26px;font-weight:600;margin-top:6px;
+  font-variant-numeric:tabular-nums}
+.card .v small{font-size:13px;color:var(--muted);font-weight:400}
+
+/* ---- Panels ---- */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  margin-bottom:22px;overflow:hidden}
+.panel-h{display:flex;align-items:center;justify-content:space-between;
+  padding:13px 18px;border-bottom:1px solid var(--border);background:var(--surface-2)}
+.panel-h h2{font-size:13px;margin:0;font-weight:600;letter-spacing:.3px;
+  text-transform:uppercase;color:var(--muted)}
+.panel-b{padding:18px}
+.panel-b.flush{padding:0}
+
+/* ---- Tables ---- */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 14px;font-size:11px;letter-spacing:.6px;
+  text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--border);
+  background:var(--surface-2);font-weight:600;white-space:nowrap}
+td{padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--surface-2)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.mono{font-family:var(--mono)}
+
+/* ---- Status pills ---- */
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;
+  border-radius:20px;letter-spacing:.3px}
+.pill-ok{background:var(--ok-soft);color:var(--ok)}
+.pill-off{background:var(--danger-soft);color:var(--danger)}
+.pill-warn{background:var(--warn-soft);color:var(--warn)}
+.pill-muted{background:#E7EBEF;color:var(--muted)}
+
+/* ---- Forms ---- */
+.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px 20px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field.full{grid-column:1 / -1}
+label{font-size:12px;font-weight:600;color:var(--muted)}
+label .hint{font-weight:400;color:var(--faint)}
+input,select,textarea{
+  font-family:var(--sans);font-size:13px;padding:8px 10px;border-radius:6px;
+  border:1px solid var(--border-strong);background:var(--surface);color:var(--ink);
+  width:100%;
+}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft);
+  border-color:var(--accent)}
+textarea{font-family:var(--mono);min-height:80px;resize:vertical}
+.actions{display:flex;gap:10px;margin-top:20px;padding-top:16px;
+  border-top:1px solid var(--border)}
+
+/* ---- Flash ---- */
+.flash{padding:11px 16px;border-radius:7px;margin-bottom:16px;font-size:13px}
+.flash-ok{background:var(--ok-soft);color:var(--ok);border:1px solid #BEE3CB}
+.flash-error{background:var(--danger-soft);color:var(--danger);border:1px solid #EEC4C0}
+
+/* ---- Login ---- */
+.login-wrap{display:flex;align-items:center;justify-content:center;
+  min-height:100vh;background:#0E1620}
+.login-box{background:var(--surface);border-radius:12px;padding:36px;width:340px;
+  box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.login-box .brand{border:none;padding:0 0 20px;color:var(--ink)}
+.login-box .brand small{color:var(--faint)}
+
+.empty{padding:40px;text-align:center;color:var(--faint);font-size:13px}
+.inline-form{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
+.inline-form .field{flex:1;min-width:120px}
+.tag{font-family:var(--mono);font-size:12px;background:var(--surface-2);
+  padding:2px 6px;border-radius:4px;border:1px solid var(--border)}

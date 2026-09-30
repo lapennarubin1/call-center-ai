@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% set active='invoices' %}
+{% block heading %}Facturas{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <div class="panel-h"><h2>Generar facturación</h2></div>
+  <div class="panel-b">
+    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">
+      <form method="post" action="{{ url_for('billing_run') }}" style="margin:0">
+        <p style="margin:0 0 10px;color:var(--muted);font-size:13px">Paso 1 — tarificar las llamadas nuevas (CDR → importes).</p>
+        <button class="btn btn-primary" type="submit">Tarificar llamadas pendientes</button>
+      </form>
+      <form method="post" action="{{ url_for('invoice_generate') }}" style="margin:0;flex:1;min-width:320px">
+        <p style="margin:0 0 10px;color:var(--muted);font-size:13px">Paso 2 — agrupar en facturas por periodo.</p>
+        <div class="inline-form">
+          <div class="field"><label>Desde</label><input name="period_start" type="date" required></div>
+          <div class="field"><label>Hasta</label><input name="period_end" type="date" required></div>
+          <div class="field"><label>Cliente</label>
+            <select name="client"><option value="">Todos</option>
+              {% for c in clients %}<option value="{{ c.client }}">{{ c.client }} — {{ c.name }}</option>{% endfor %}
+            </select></div>
+          <button class="btn btn-primary" type="submit">Generar facturas</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-h"><h2>Facturas emitidas</h2></div>
+  <div class="panel-b flush">
+    {% if invoices %}
+    <table>
+      <thead><tr><th>#</th><th>Cliente</th><th>Periodo</th><th class="num">Llamadas</th>
+        <th class="num">Minutos</th><th class="num">Importe</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+      {% for i in invoices %}
+        <tr>
+          <td class="mono">{{ i.id }}</td>
+          <td class="mono">{{ i.client }}</td>
+          <td class="mono">{{ i.period_start }} → {{ i.period_end }}</td>
+          <td class="num">{{ i.total_calls }}</td>
+          <td class="num">{{ '%.2f'|format(i.total_minutes|float) }}</td>
+          <td class="num">{{ '%.2f'|format(i.total_amount|float) }} {{ i.currency }}</td>
+          <td>
+            {% if i.status=='paid' %}<span class="pill pill-ok">pagada</span>
+            {% elif i.status=='issued' %}<span class="pill pill-warn">emitida</span>
+            {% else %}<span class="pill pill-muted">borrador</span>{% endif %}
+          </td>
+          <td style="text-align:right"><a class="btn btn-sm" href="{{ url_for('invoice_detail', iid=i.id) }}">Ver</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">Aún no hay facturas generadas.</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

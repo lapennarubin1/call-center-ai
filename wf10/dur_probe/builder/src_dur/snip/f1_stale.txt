@@ -1,0 +1,6 @@
+  // Llamada Asterisk diferida por WF2: el lead sigue ATTEMPTING por nuestra retención (el Mantenimiento no lo libera).
+  // Mientras no exista un despacho MÁS NUEVO del mismo lead, un cambio posterior a la llamada (p. ej. una
+  // automatización post-llamada) no significa que exista un estado más nuevo: se aplica el ciclo de vida.
+  const heldByUs = !!x.deferred && status === 'ATTEMPTING' && !(Number(ev.lead_newer_dispatch) > 0);
+  if (x.deferred && Number(ev.lead_newer_dispatch) > 0) reasons.push('newer_dispatch');
+  if (!heldByUs && upd > Math.max(x.callEndMs, oursMs) + 120e3) reasons.push(status === 'ATTEMPTING' ? 'relocked_by_newer_dispatch' : 'lead_updated_after_call');

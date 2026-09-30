@@ -1,0 +1,43 @@
+  // ------------------------------------------------------------
+  // DIFERIDA (llamada contestada)
+  // LeadStudio fija durationSeconds en el POST y no lo deja editar
+  // después. Esta llamada acaba de ser contestada: todavía no existe
+  // el billsec. WF9 crea la ÚNICA Activity al terminar la llamada
+  // (durationSeconds = CDR.billsec) y aplica el ciclo de vida.
+  // Aquí NO se hace POST ni PATCH: el lead sigue ATTEMPTING y el
+  // Mantenimiento lo retiene mientras el registro esté sin resolver.
+  // Sólo si el registro durable quedó CONFIRMADO; si no, se conserva
+  // el comportamiento anterior (Activity inmediata): nunca se pierde
+  // una llamada.
+  // ------------------------------------------------------------
+  if (
+    String(j.outcome || '').toUpperCase() === 'CONNECTED' &&
+    String(j.callStatus || '').toUpperCase() === 'ANSWERED' &&
+    j.elevenlabs_call_id &&
+    confirmedKeys.has('elevenlabs:' + j.elevenlabs_call_id)
+  ) {
+    deferred++;
+    console.log(
+      `⏳ Asterisk ${j.lead_id}: contestada → la Activity la crea WF9 ` +
+      `al terminar (${j.elevenlabs_call_id})`
+    );
+    out.push({
+      json: {
+        ...j,
+        deferred_to_wf9: true,
+        patch_ok: null,
+        patch_http: null,
+        stage_requested: j.stage || null,
+        stage_ok: null,
+        stage_http: null,
+        followup_ok: null,
+        followup_id: null
+      }
+    });
+    continue;
+  }
+
+  // ------------------------------------------------------------
+  // FOLLOWUP
+  // ------------------------------------------------------------
+  let fu = null;

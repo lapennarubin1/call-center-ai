@@ -1,0 +1,2 @@
+conversation_id	call_job_id	route_key	lead_id	provider	attempt	source	claim_token	state	result	followup_id	error_code	error_detail	execution_id	claimed_at	completed_at	updated_at
+	NULL	NULL	NULL	NULL	NULL	dispatch	10d6efcb66b5a329ed75f23e5e8f194e	CLAIMED	NULL	NULL	NULL	NULL	NULL	2026-09-24 14:53:29	NULL	2026-09-24 14:53:29

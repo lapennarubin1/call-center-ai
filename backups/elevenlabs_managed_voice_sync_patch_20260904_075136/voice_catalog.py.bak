@@ -1,0 +1,46 @@
+"""Resolucion de voz por platform_voice_id — el cliente NUNCA envia ni ve
+un provider_voice_id (punto G/T del bloque).
+
+El backend resuelve: platform_voice_id -> provider -> provider account ->
+provider_voice_id -> metadata de pricing. Un platform_voice_id arbitrario
+que no exista en el catalogo (o que exista pero available=0) se rechaza.
+"""
+from sqlalchemy import text
+
+
+def resolve_voice(session, tenant_id: int, platform_voice_id: str):
+    """Devuelve la fila de voice_catalog si es valida y esta disponible
+    para este tenant, o None. Nunca expone provider_voice_id/provider_key/
+    provider_account_id fuera de este modulo — el llamador solo debe
+    persistir voice_catalog_id y (para cache interno) el provider_voice_id
+    resuelto en agents.voice_id."""
+    return session.execute(text("""
+        SELECT id, platform_voice_id, provider_key, provider_account_id, provider_voice_id,
+               name, language, available, customer_price_multiplier, pricing_tier
+        FROM voice_catalog
+        WHERE platform_voice_id = :pvid AND available = 1
+    """), {"pvid": platform_voice_id}).mappings().first()
+
+
+def resolve_provider_account(session, tenant_id: int, provider_key: str, voice_row=None):
+    """Cuenta de proveedor efectiva para este tenant+provider:
+    1) si la voz elegida ya especifica una cuenta (BYOK exclusiva), esa.
+    2) si el tenant tiene su propia cuenta BYOK activa para este provider, esa.
+    3) si no, la cuenta managed compartida (tenant_id NULL) activa.
+    Devuelve el id de ai_provider_accounts o None si no hay ninguna disponible."""
+    if voice_row and voice_row.get("provider_account_id"):
+        return voice_row["provider_account_id"]
+
+    byok = session.execute(text("""
+        SELECT id FROM ai_provider_accounts
+        WHERE provider_key=:p AND account_type='byok' AND tenant_id=:t AND status='active'
+    """), {"p": provider_key, "t": tenant_id}).scalar()
+    if byok:
+        return byok
+
+    managed = session.execute(text("""
+        SELECT id FROM ai_provider_accounts
+        WHERE provider_key=:p AND account_type='managed' AND tenant_id IS NULL AND status='active'
+        LIMIT 1
+    """), {"p": provider_key}).scalar()
+    return managed

@@ -1,0 +1,51 @@
+[
+  {
+    "file": "TEMPLATE_FOLLOWUP_ENGINE_V2.json",
+    "name": "TEMPLATE_FOLLOWUP_ENGINE_V2",
+    "id": "inaJdsQ139ffzhnu",
+    "active": false,
+    "status": "created"
+  },
+  {
+    "file": "TEMPLATE_WF2_CALL_DISPATCHER_V2.json",
+    "name": "TEMPLATE_WF2_CALL_DISPATCHER_V2",
+    "id": "nCZPy5XqRBMnwh80",
+    "active": false,
+    "status": "created"
+  },
+  {
+    "file": "TEMPLATE_WF3_ACCOUNT_CREATION_V2.json",
+    "name": "TEMPLATE_WF3_ACCOUNT_CREATION_V2",
+    "id": "QpyXxx1h42LkM5Y4",
+    "active": false,
+    "status": "created"
+  },
+  {
+    "file": "TEMPLATE_WF7_8_PAYMENT_CALLBACK_V2.json",
+    "name": "TEMPLATE_WF7_8_PAYMENT_CALLBACK_V2",
+    "id": "Y5XH5vV2ykAwJozg",
+    "active": false,
+    "status": "created"
+  },
+  {
+    "file": "TEMPLATE_WF9_POST_CALL_HANDLER_V2.json",
+    "name": "TEMPLATE_WF9_POST_CALL_HANDLER_V2",
+    "id": "xQoPolnqHuxfkWkT",
+    "active": false,
+    "status": "created"
+  },
+  {
+    "file": "TEMPLATE_WF10_RECORDINGS_V2.json",
+    "name": "TEMPLATE_WF10_RECORDINGS_V2",
+    "id": "8capACjGjSnSRFBV",
+    "active": false,
+    "status": "created"
+  },
+  {
+    "file": "TEMPLATE_WF14_RECONCILIATION_ANALYTICS_V2.json",
+    "name": "TEMPLATE_WF14_RECONCILIATION_ANALYTICS_V2",
+    "id": "2yAcJ7qW9CABbzbJ",
+    "active": false,
+    "status": "created"
+  }
+]

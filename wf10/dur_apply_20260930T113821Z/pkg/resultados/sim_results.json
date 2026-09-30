@@ -1,0 +1,260 @@
+[
+  {
+    "id": "17",
+    "name": "SIP 480 intento 7 → 1 Activity",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "17",
+    "name": "SIP 480 intento 7 → status NO_ANSWER, attempts 7",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "17",
+    "name": "SIP 480 intento 7 → próximo intento +2 h (desde la hora de la llamada)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "17",
+    "name": "SIP 480 → outcome NO_ANSWER / callStatus NO_ANSWER / nota con SIP 480",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "17",
+    "name": "evento DONE con followup_id y wf_call_followups recording_synced=1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "16",
+    "name": "mismo job_id re-ejecutado (callback duplicado + reproceso forzado) → sigue 1 Activity, attempts 7",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "16",
+    "name": "wf_call_followups sin duplicados",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "18",
+    "name": "intento 8 sin éxito → NO_ANSWER, attempts 8, +3 h",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "19",
+    "name": "intento 9 sin éxito → CLOSED + stage UNRESPONSIVE + nextFollowUpAt null",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "19",
+    "name": "intento 9 → NO se usa LOST y la Activity no programa otro intento",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "20",
+    "name": "intento 9 contestado (call_successful=failure pero con conversación real) → CONTACTED, stage ≠ UNRESPONSIVE",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "20",
+    "name": "Activity CONNECTED / ANSWERED, recording_synced=0",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "21",
+    "name": "llamada 13 (bug histórico) → Activity registrada, sin nextActionAt, CLOSED + UNRESPONSIVE",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "21",
+    "name": "nota: \"beyond the configured maximum of 9\"",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "22",
+    "name": "fallo telefónico (SIP 503, sin puente, sin conversación) → registrado en el CRM",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "22",
+    "name": "intento 3 (fin ciclo 1) → +2 días hábiles",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "22b",
+    "name": "FAILED sin evidencia telefónica → sin Activity, sin intento, NOT_CONTACTED, auditado",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "CONVID",
+    "name": "rama conv-id Stringee conservada (webhook y polling generan el UPDATE de stringee_calls)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "23",
+    "name": "contestada Stringee con conversación: callback + webhook + polling → exactamente 1 Activity",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "23",
+    "name": "evento ElevenLabs queda SKIPPED LINKED_TO_STRINGEE_JOB",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "24",
+    "name": "evento viejo (intento 7) → Activity histórica creada 1 vez",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "24",
+    "name": "evento viejo NO cambia status / stage / nextFollowUpAt (sigue CONTACTED)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "24",
+    "name": "evento viejo no programa reintento (sin nextActionAt)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "12",
+    "name": "conversación in-progress → NO se finaliza (RECEIVED, sin tocar el CRM)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "13",
+    "name": "conversación terminada → elegible y procesada (hueco Asterisk sin Activity de WF2 → 1 Activity)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "14",
+    "name": "POST al CRM falla → evento FAILED (no DONE), sin processed_at, error guardado",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "14",
+    "name": "reintento posterior → exactamente 1 Activity y DONE",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "14",
+    "name": "PATCH falla tras el POST → FAILED con followup_id; al reintentar: 1 sola Activity y status aplicado",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "15",
+    "name": "misma conversación ElevenLabs (webhook ×2 + polling ×2 + reproceso forzado) → 1 sola Activity",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A1",
+    "name": "Asterisk con Activity de WF2 → WF9 no crea un segundo followup (ASTERISK_OWNED_BY_WF2)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A2",
+    "name": "buzón de voz Asterisk (WF2=CONNECTED) → status NO_ANSWER sin Activity nueva",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A2",
+    "name": "reintento retenido en next_retry_at (+2 h desde la llamada, intento 4)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "S16",
+    "name": "contestada sin conversation_id → 1 Activity, NO_ANSWER (no CONTACTED), +2 h, recording_synced=0",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "S18",
+    "name": "callback pedido → CONNECTED / ANSWERED / CONTACTED, fecha pedida en nextFollowUpAt, sin outcome CALLBACK",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "S19",
+    "name": "worker 404 → FAILED con reintento, sin Activity, sin consumir intento",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "S20",
+    "name": "job no terminal → queda pendiente (RECEIVED, recheck 3 min), sin tocar el CRM",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "S24",
+    "name": "conversación Stringee sin job (pre-despliegue) → 1 Activity desde la conversación",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "S24",
+    "name": "si ya existe una Activity en la ventana (WF9 viejo) → ALREADY_IN_CRM, sin duplicar",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "CLAIM",
+    "name": "dos procesadores simultáneos: ningún evento reclamado dos veces y el mismo lead no se reparte",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "REPLAY",
+    "name": "replay 995edb6e con el lead en ATTEMPTING y re-marcado después → 1 Activity histórica, attempts 7, status/stage/nextFollowUpAt sin cambios",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "REPLAY",
+    "name": "replay 995edb6e con el lead en NO_ANSWER y re-marcado después → 1 Activity histórica, attempts 7, status/stage/nextFollowUpAt sin cambios",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "REF",
+    "name": "sin providerCallId en el CRM: reproceso forzado (Stringee y hueco Asterisk) no duplica gracias a \"Ref:\" en notes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "25",
+    "name": "todo texto persistido en el CRM está en inglés (21 notas revisadas)",
+    "pass": true,
+    "detail": ""
+  }
+]

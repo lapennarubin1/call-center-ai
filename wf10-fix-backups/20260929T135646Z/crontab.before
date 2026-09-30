@@ -1,0 +1,3 @@
+*/5 * * * * /root/scripts/send_recordings.sh >> /root/scripts/send_recordings.log 2>&1
+*/5 * * * * /root/scripts/watchdog-odbc.sh
+0 3 * * * /root/scripts/clean-stringee-recordings.sh

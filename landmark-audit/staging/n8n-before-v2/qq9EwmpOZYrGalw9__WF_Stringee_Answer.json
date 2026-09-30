@@ -1,0 +1,138 @@
+{
+  "id": "qq9EwmpOZYrGalw9",
+  "name": "WF_Stringee_Answer",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-08-05T07:26:07.842Z",
+  "updatedAt": "2026-08-10T06:44:54.697Z",
+  "isArchived": true,
+  "versionId": "311a6f86-eee9-4ae9-ab4e-5166335f7ad6",
+  "versionCounter": 22,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stringee-answer",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "0f69a61e-d123-43a2-83e7-b28eb4b4153d",
+      "name": "Webhook Answer",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        1888,
+        672
+      ],
+      "webhookId": "stringee-answer"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconsole.log('=== STRINGEE ANSWER WEBHOOK ===');\nconsole.log('Body:', JSON.stringify(body));\n\nconst callId = body.call_id || body.callId || '';\nconst fromNumber = body.from_number || body.from?.number || '917971730603';\nconst toNumber = body.to_number || body.to?.number || '919535983796';\n\n// Probemos con action: accept para mantener la llamada activa\nconst scco = [\n  {\n    action: 'accept'\n  }\n];\n\nconsole.log('SCCO Response:', JSON.stringify(scco));\n\nreturn {\n  json: {\n    scco,\n    callId,\n    fromNumber,\n    toNumber\n  }\n};"
+      },
+      "id": "d3fe23f4-f6d6-4104-a472-4e2c8a31dac8",
+      "name": "Build SCCO",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.scco) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "9f425e88-375a-4646-83ec-652f672be72c",
+      "name": "Respond SCCO",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2336,
+        672
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Answer": {
+      "main": [
+        [
+          {
+            "node": "Build SCCO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build SCCO": {
+      "main": [
+        [
+          {
+            "node": "Respond SCCO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "ewb8t7katYNDAFKZ",
+      "name": "stringee",
+      "createdAt": "2026-08-05T07:26:05.946Z",
+      "updatedAt": "2026-08-05T07:26:05.946Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "qq9EwmpOZYrGalw9",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-08-05T07:26:07.842Z",
+      "updatedAt": "2026-08-05T07:26:07.842Z"
+    }
+  ],
+  "activeVersion": null
+}

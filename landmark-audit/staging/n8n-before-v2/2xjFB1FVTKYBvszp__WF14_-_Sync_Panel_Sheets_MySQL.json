@@ -1,0 +1,909 @@
+{
+  "id": "2xjFB1FVTKYBvszp",
+  "name": "WF14 - Sync Panel (Sheets → MySQL)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-08-06T13:31:27.129Z",
+  "updatedAt": "2026-09-15T15:59:22.165Z",
+  "isArchived": false,
+  "versionId": "c7e7756b-df72-4774-a037-0a20743e3b56",
+  "versionCounter": 79,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1838507431,
+          "mode": "list",
+          "cachedResultName": "leads nepal",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1838507431"
+        },
+        "options": {}
+      },
+      "id": "36412918-c624-42d4-bec9-41bf5354236e",
+      "name": "📋 Leer hoja leads nepal",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3600,
+        4368
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convierte las filas de la hoja `leads` en filas listas para MySQL.\n// Sólo se toman los campos que el panel necesita: no copiamos la hoja\n// entera para no inflar la base ni duplicar datos personales de más.\nconst rows = $input.all().map(i => i.json);\nconst now  = new Date().toISOString().slice(0, 19).replace('T', ' ');\n\nfunction toMySqlDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nconst out = [];\nfor (const r of rows) {\n  const leadId = String(r.lead_id ?? '').trim();\n  if (!leadId) continue;                       // sin clave no se puede sincronizar\n\n  out.push({ json: {\n    lead_id         : leadId.slice(0, 64),\n    full_name       : String(r.full_name ?? '').trim().slice(0, 160) || null,\n    phone           : String(r.phone ?? '').replace(/[^0-9+]/g, '').slice(0, 32) || null,\n    country         : String(r.country ?? '').trim().slice(0, 64) || null,\n    language        : String(r.language ?? '').trim().slice(0, 16) || null,\n    status          : String(r.status ?? '').trim().toUpperCase().slice(0, 48) || null,\n    last_call_status: String(r.last_call_status ?? '').trim().toUpperCase().slice(0, 48) || null,\n    call_attempts   : Number(r.call_attempts ?? 0) || 0,\n    last_call_time  : toMySqlDate(r.last_call_time),\n    duration_secs   : Number(r.duration_secs ?? 0) || 0,\n    synced_at       : now\n  }});\n}\n\nconsole.log(`📥 Leads normalizados para el panel: ${out.length}`);\nreturn out;"
+      },
+      "id": "444e4c2e-7959-420f-badd-bddc7ce5f661",
+      "name": "⚙️ Normalizar leads nepal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3824,
+        4368
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction escNum(v) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : 0;\n}\n\n// Agrupa los leads normalizados en lotes de 500 filas por INSERT.\n// Con 33k+ leads, un INSERT por fila (33k round-trips) o un solo\n// INSERT gigante (n8n los concatena automáticamente: \"query batching\")\n// revientan la conexión. Lotes acotados es el punto medio correcto.\nconst BATCH = 500;\nconst rows = $input.all().map(i => i.json);\nconst cols = ['lead_id','full_name','phone','country','language','status',\n              'last_call_status','call_attempts','last_call_time','duration_secs','synced_at'];\n\nconst out = [];\nfor (let i = 0; i < rows.length; i += BATCH) {\n  const chunk = rows.slice(i, i + BATCH);\n  const values = chunk.map(r => '(' + [\n    esc(r.lead_id), esc(r.full_name), esc(r.phone), esc(r.country), esc(r.language),\n    esc(r.status), esc(r.last_call_status), escNum(r.call_attempts),\n    esc(r.last_call_time), escNum(r.duration_secs), esc(r.synced_at)\n  ].join(',') + ')').join(',\\n');\n\n  const updates = cols.filter(c => c !== 'lead_id').map(c => `${c}=VALUES(${c})`).join(',');\n  const sql = `INSERT INTO panel_leads (${cols.join(',')}) VALUES\\n${values}\\n`\n            + `ON DUPLICATE KEY UPDATE ${updates};`;\n\n  out.push({ json: { sql, batch_size: chunk.length, batch_num: Math.floor(i / BATCH) + 1 } });\n}\n\nconsole.log(`🧱 ${rows.length} leads agrupados en ${out.length} lotes de hasta ${BATCH}`);\nreturn out;"
+      },
+      "id": "ee26ed8a-c621-4e2a-a7cb-3583a71c8449",
+      "name": "🧱 Lotes de 500 (leads nepal)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4016,
+        4368
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "id": "1faaf824-ab78-463a-be5d-32a74318ff66",
+      "name": "💾 Guardar leads nepal",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4208,
+        4368
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads_venezuela"
+        },
+        "options": {}
+      },
+      "id": "d2d3a3e3-659a-4dc7-9a0a-75ccaca7e758",
+      "name": "📋 Leer leads_venezuela1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3600,
+        4576
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1546432888,
+          "mode": "list",
+          "cachedResultName": "leads_mexico"
+        },
+        "options": {}
+      },
+      "id": "fe66d4f3-f539-4f44-aa1b-3ed19e235397",
+      "name": "📋 Leer leads_mexico1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3840,
+        4576
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1VWr8FZznvKMxM0xCLzEWHRZh8WjbFf4EzedYTmzpwhc",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 580397522,
+          "mode": "list",
+          "cachedResultName": "leads_colombia"
+        },
+        "options": {}
+      },
+      "id": "1fd44ced-0e80-4a48-a004-fda12f20f448",
+      "name": "📋 Leer leads_colombia1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4064,
+        4576
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta las 3 pestañas LatAm en una sola lista, cada item ya sabe su país por la pestaña de origen.\nconst vzla = $('📋 Leer leads_venezuela1').all().map(i => ({ ...i.json, country: i.json.country || 'Venezuela' }));\nconst mx   = $('📋 Leer leads_mexico1').all().map(i => ({ ...i.json, country: i.json.country || 'Mexico' }));\nconst co   = $('📋 Leer leads_colombia1').all().map(i => ({ ...i.json, country: i.json.country || 'Colombia' }));\nconst all = [...vzla, ...mx, ...co];\nconsole.log(`📥 LatAm leads combinados: VZLA ${vzla.length} | MX ${mx.length} | CO ${co.length} | total ${all.length}`);\nreturn all.map(r => ({ json: r }));"
+      },
+      "id": "848767c5-3358-4b31-869e-16fd677f581c",
+      "name": "🔀 Unir leads LatAm1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4272,
+        4576
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions"
+        },
+        "options": {}
+      },
+      "id": "74d79151-9a11-4a37-9d55-3d13c28f28ca",
+      "name": "📋 Leer conversions LatAm1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3600,
+        4800
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Igual que \"Normalizar cuentas\" de India, pero agrega country (derivado\n// del prefijo del telefono, porque esta hoja de conversions es compartida\n// entre Venezuela/Mexico/Colombia y no trae un campo country propio).\nconst rows = $input.all().map(i => i.json);\nconst now  = new Date().toISOString().slice(0, 19).replace('T', ' ');\n\nfunction toMySqlDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace('T', ' ');\n}\nfunction findDate(r) {\n  if (r.conversion_date) return r.conversion_date;\n  if (r.created_at) return r.created_at;\n  if (r.timestamp)  return r.timestamp;\n  if (r.date)       return r.date;\n  for (const k in r) {\n    const v = r[k];\n    if (typeof v === 'string' && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.test(v)) return v;\n  }\n  return null;\n}\nfunction findStatus(r) {\n  if (r.deposit_status) return String(r.deposit_status).toUpperCase();\n  if (r.status) return String(r.status).toUpperCase();\n  for (const k in r) {\n    const v = r[k];\n    if (typeof v === 'string' && /^(ACCOUNT_CREATED|PAYMENT_LINK_SENT)$/.test(v.trim())) return v.trim().toUpperCase();\n  }\n  return '';\n}\nfunction countryFromPhone(phone) {\n  const d = String(phone || '').replace(/[^0-9]/g, '');\n  if (d.startsWith('52')) return 'Mexico';\n  if (d.startsWith('58')) return 'Venezuela';\n  if (d.startsWith('57')) return 'Colombia';\n  return null;\n}\n\nconst out = [];\nlet skippedNoDate = 0, skippedNotCreated = 0;\n\nfor (const r of rows) {\n  const leadId = String(r.lead_id ?? '').trim();\n  if (!leadId) continue;\n\n  const status = findStatus(r);\n  if (status && status !== 'ACCOUNT_CREATED') { skippedNotCreated++; continue; }\n\n  const created = toMySqlDate(findDate(r));\n  if (!created) skippedNoDate++;\n\n  out.push({ json: {\n    lead_id      : leadId.slice(0, 64),\n    full_name    : String(r.full_name ?? '').trim().slice(0, 160) || null,\n    phone        : String(r.phone ?? r.whatsapp_phone ?? '').replace(/[^0-9+]/g, '').slice(0, 32) || null,\n    country      : countryFromPhone(r.phone ?? r.whatsapp_phone),\n    atlantis_user: String(r.atlantis_username ?? r.atlantis_user ?? '').trim().slice(0, 80) || null,\n    account_id   : String(r.account_id ?? r.account ?? '').trim().slice(0, 80) || null,\n    created_at   : created,\n    synced_at    : now\n  }});\n}\n\nconsole.log(`📥 Cuentas LatAm: ${out.length} | sin fecha: ${skippedNoDate} | excluidas (no ACCOUNT_CREATED): ${skippedNotCreated}`);\nreturn out;"
+      },
+      "id": "d623e449-4414-435b-8af6-690434196217",
+      "name": "⚙️ Normalizar cuentas LatAm1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3824,
+        4800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normaliza las filas LatAm (Venezuela/México/Colombia unidas) Y las\n// agrupa en lotes de 500 por INSERT — antes este nodo solo normalizaba\n// y nunca armaba el SQL, por eso \"Guardar leads LatAm1\" recibía filas\n// crudas sin campo `sql` y tronaba.\nfunction esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction escNum(v) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : 0;\n}\n\nconst rows = $input.all().map(i => i.json);\nconst now  = new Date().toISOString().slice(0, 19).replace('T', ' ');\n\nfunction toMySqlDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nconst normalized = [];\nfor (const r of rows) {\n  const leadId = String(r.lead_id ?? '').trim();\n  if (!leadId) continue;\n\n  normalized.push({\n    lead_id         : leadId.slice(0, 64),\n    full_name       : String(r.full_name ?? '').trim().slice(0, 160) || null,\n    phone           : String(r.phone ?? '').replace(/[^0-9+]/g, '').slice(0, 32) || null,\n    country         : String(r.country ?? '').trim().slice(0, 64) || null,\n    language        : String(r.language ?? '').trim().slice(0, 16) || null,\n    status          : String(r.status ?? '').trim().toUpperCase().slice(0, 48) || null,\n    last_call_status: String(r.last_call_status ?? '').trim().toUpperCase().slice(0, 48) || null,\n    call_attempts   : Number(r.call_attempts ?? 0) || 0,\n    last_call_time  : toMySqlDate(r.last_call_time),\n    duration_secs   : Number(r.duration_secs ?? 0) || 0,\n    synced_at       : now\n  });\n}\n\nconst BATCH = 500;\nconst cols = ['lead_id','full_name','phone','country','language','status',\n              'last_call_status','call_attempts','last_call_time','duration_secs','synced_at'];\n\nconst out = [];\nfor (let i = 0; i < normalized.length; i += BATCH) {\n  const chunk = normalized.slice(i, i + BATCH);\n  const values = chunk.map(r => '(' + [\n    esc(r.lead_id), esc(r.full_name), esc(r.phone), esc(r.country), esc(r.language),\n    esc(r.status), esc(r.last_call_status), escNum(r.call_attempts),\n    esc(r.last_call_time), escNum(r.duration_secs), esc(r.synced_at)\n  ].join(',') + ')').join(',\\n');\n\n  const updates = cols.filter(c => c !== 'lead_id').map(c => `${c}=VALUES(${c})`).join(',');\n  const sql = `INSERT INTO panel_leads (${cols.join(',')}) VALUES\\n${values}\\n`\n            + `ON DUPLICATE KEY UPDATE ${updates};`;\n\n  out.push({ json: { sql, batch_size: chunk.length, batch_num: Math.floor(i / BATCH) + 1 } });\n}\n\nconsole.log(`🧱 ${normalized.length} leads LatAm agrupados en ${out.length} lotes de hasta ${BATCH}`);\nreturn out;"
+      },
+      "id": "b5fd73fe-8e56-4ed1-9289-dd51cabb427d",
+      "name": "🧱 Lotes de 500 (leads LatAm)1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4496,
+        4576
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "id": "e8e34a03-063b-4dcf-9777-457d04ac928a",
+      "name": "💾 Guardar leads LatAm1",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4704,
+        4576
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction escNum(v) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : 0;\n}\n\nconst BATCH = 500;\nconst rows = $input.all().map(i => i.json);\nconst cols = ['lead_id','full_name','phone','country','atlantis_user','account_id','created_at','synced_at'];\n\nconst out = [];\nfor (let i = 0; i < rows.length; i += BATCH) {\n  const chunk = rows.slice(i, i + BATCH);\n  const values = chunk.map(r => '(' + [\n    esc(r.lead_id), esc(r.full_name), esc(r.phone), esc(r.country),\n    esc(r.atlantis_user), esc(r.account_id), esc(r.created_at), esc(r.synced_at)\n  ].join(',') + ')').join(',\\n');\n\n  const updates = cols.filter(c => c !== 'lead_id').map(c => `${c}=VALUES(${c})`).join(',');\n  const sql = `INSERT INTO panel_conversions (${cols.join(',')}) VALUES\\n${values}\\n`\n            + `ON DUPLICATE KEY UPDATE ${updates};`;\n\n  out.push({ json: { sql, batch_size: chunk.length, batch_num: Math.floor(i / BATCH) + 1 } });\n}\n\nconsole.log(`🧱 ${rows.length} cuentas LatAm agrupadas en ${out.length} lotes de hasta ${BATCH}`);\nreturn out;"
+      },
+      "id": "892e775d-9f91-4e7c-991b-5fa01584be01",
+      "name": "🧱 Lotes de 500 (cuentas LatAm)1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4016,
+        4800
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "id": "a829f4bf-a049-4cc7-bb74-c4239fc5cb12",
+      "name": "💾 Guardar cuentas LatAm1",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4208,
+        4800
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=210138417"
+        },
+        "options": {}
+      },
+      "id": "929f60b5-5e9b-40f8-993c-13c3fe1f829c",
+      "name": "📋 Leer hoja leads3",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3600,
+        3968
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convierte las filas de la hoja `leads` en filas listas para MySQL.\n// Sólo se toman los campos que el panel necesita: no copiamos la hoja\n// entera para no inflar la base ni duplicar datos personales de más.\nconst rows = $input.all().map(i => i.json);\nconst now  = new Date().toISOString().slice(0, 19).replace('T', ' ');\n\nfunction toMySqlDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nconst out = [];\nfor (const r of rows) {\n  const leadId = String(r.lead_id ?? '').trim();\n  if (!leadId) continue;                       // sin clave no se puede sincronizar\n\n  out.push({ json: {\n    lead_id         : leadId.slice(0, 64),\n    full_name       : String(r.full_name ?? '').trim().slice(0, 160) || null,\n    phone           : String(r.phone ?? '').replace(/[^0-9+]/g, '').slice(0, 32) || null,\n    country         : String(r.country ?? '').trim().slice(0, 64) || null,\n    language        : String(r.language ?? '').trim().slice(0, 16) || null,\n    status          : String(r.status ?? '').trim().toUpperCase().slice(0, 48) || null,\n    last_call_status: String(r.last_call_status ?? '').trim().toUpperCase().slice(0, 48) || null,\n    call_attempts   : Number(r.call_attempts ?? 0) || 0,\n    last_call_time  : toMySqlDate(r.last_call_time),\n    duration_secs   : Number(r.duration_secs ?? 0) || 0,\n    synced_at       : now\n  }});\n}\n\nconsole.log(`📥 Leads normalizados para el panel: ${out.length}`);\nreturn out;"
+      },
+      "id": "2f957af7-b77a-4561-a4d6-96522a1fdfca",
+      "name": "⚙️ Normalizar leads3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3824,
+        3968
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction escNum(v) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : 0;\n}\n\n// Agrupa los leads normalizados en lotes de 500 filas por INSERT.\n// Con 33k+ leads, un INSERT por fila (33k round-trips) o un solo\n// INSERT gigante (n8n los concatena automáticamente: \"query batching\")\n// revientan la conexión. Lotes acotados es el punto medio correcto.\nconst BATCH = 500;\nconst rows = $input.all().map(i => i.json);\nconst cols = ['lead_id','full_name','phone','country','language','status',\n              'last_call_status','call_attempts','last_call_time','duration_secs','synced_at'];\n\nconst out = [];\nfor (let i = 0; i < rows.length; i += BATCH) {\n  const chunk = rows.slice(i, i + BATCH);\n  const values = chunk.map(r => '(' + [\n    esc(r.lead_id), esc(r.full_name), esc(r.phone), esc(r.country), esc(r.language),\n    esc(r.status), esc(r.last_call_status), escNum(r.call_attempts),\n    esc(r.last_call_time), escNum(r.duration_secs), esc(r.synced_at)\n  ].join(',') + ')').join(',\\n');\n\n  const updates = cols.filter(c => c !== 'lead_id').map(c => `${c}=VALUES(${c})`).join(',');\n  const sql = `INSERT INTO panel_leads (${cols.join(',')}) VALUES\\n${values}\\n`\n            + `ON DUPLICATE KEY UPDATE ${updates};`;\n\n  out.push({ json: { sql, batch_size: chunk.length, batch_num: Math.floor(i / BATCH) + 1 } });\n}\n\nconsole.log(`🧱 ${rows.length} leads agrupados en ${out.length} lotes de hasta ${BATCH}`);\nreturn out;"
+      },
+      "id": "ce15186a-9625-46d6-a2a3-de15e11c1844",
+      "name": "🧱 Lotes de 500 (leads)3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4016,
+        3968
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "id": "cf835ac5-19ba-4575-8708-fb9b4dabaf4a",
+      "name": "💾 Guardar leads3",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4208,
+        3968
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko",
+          "mode": "list",
+          "cachedResultName": "Landmark_Markets_Hindi_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1nUFFxuXJW2EQpUa0bNP16f0arMcvLKKBeOWaLofxZko/edit#gid=1999552215"
+        },
+        "options": {}
+      },
+      "id": "67ed738d-2f46-4a7c-99f4-b1da4bdea895",
+      "name": "📋 Leer hoja conversions3",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3600,
+        4160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nconst now  = new Date().toISOString().slice(0, 19).replace('T', ' ');\n\nfunction toMySqlDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nfunction findDate(r) {\n  if (r.created_at) return r.created_at;\n  if (r.timestamp)  return r.timestamp;\n  if (r.date)       return r.date;\n  for (const k in r) {\n    const v = r[k];\n    if (typeof v === 'string' && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.test(v)) return v;\n  }\n  return null;\n}\n\nfunction findStatus(r) {\n  if (r.status) return String(r.status).toUpperCase();\n  for (const k in r) {\n    const v = r[k];\n    if (typeof v === 'string' && /^(ACCOUNT_CREATED|PAYMENT_LINK_SENT)$/.test(v.trim())) return v.trim().toUpperCase();\n  }\n  return '';\n}\n\n// Deriva el país real: usa la columna country si la hoja la trae,\n// si no, cae al prefijo del teléfono (mismo criterio que WF10/WF11/WF13).\nfunction detectCountry(r) {\n  const c = String(r.country || '').trim().toLowerCase();\n  if (c === 'india' || c === 'nepal' || c === 'mexico') return c;\n  const p = String(r.phone || '').replace(/[^0-9]/g, '');\n  if (p.startsWith('977')) return 'nepal';\n  if (p.startsWith('91'))  return 'india';\n  if (p.startsWith('52'))  return 'mexico';\n  return 'india'; // último fallback conservador\n}\n\nconst out = [];\nlet skippedNoDate = 0, skippedNotCreated = 0;\n\nfor (const r of rows) {\n  const leadId = String(r.lead_id ?? '').trim();\n  if (!leadId) continue;\n\n  const status = findStatus(r);\n  if (status && status !== 'ACCOUNT_CREATED') { skippedNotCreated++; continue; }\n\n  const created = toMySqlDate(findDate(r));\n  if (!created) skippedNoDate++;\n\n  out.push({ json: {\n    lead_id      : leadId.slice(0, 64),\n    country      : detectCountry(r),\n    full_name    : String(r.full_name ?? '').trim().slice(0, 160) || null,\n    phone        : String(r.phone ?? '').replace(/[^0-9+]/g, '').slice(0, 32) || null,\n    atlantis_user: String(r.atlantis_user ?? r.username ?? '').trim().slice(0, 80) || null,\n    account_id   : String(r.account_id ?? r.account ?? '').trim().slice(0, 80) || null,\n    created_at   : created,\n    synced_at    : now\n  }});\n}\n\nconsole.log(`📥 Cuentas: ${out.length} | sin fecha: ${skippedNoDate} | excluidas (no ACCOUNT_CREATED): ${skippedNotCreated}`);\nreturn out;"
+      },
+      "id": "715f973e-746a-4aad-9ea1-776e44dc2679",
+      "name": "⚙️ Normalizar cuentas3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3824,
+        4160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction escNum(v) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : 0;\n}\n\n// Mismo criterio para conversions — hoy son pocas filas, pero crece\n// con el tiempo y sin esto se rompe apenas pase de unos cientos.\nconst BATCH = 500;\nconst rows = $input.all().map(i => i.json);\nconst cols = ['lead_id','full_name','phone','country','atlantis_user','account_id','created_at','synced_at'];\n\nconst out = [];\nfor (let i = 0; i < rows.length; i += BATCH) {\n  const chunk = rows.slice(i, i + BATCH);\n  const values = chunk.map(r => '(' + [\n    esc(r.lead_id), esc(r.full_name), esc(r.phone), esc(r.country), esc(r.atlantis_user),\n    esc(r.account_id), esc(r.created_at), esc(r.synced_at)\n  ].join(',') + ')').join(',\\n');\n\n  const updates = cols.filter(c => c !== 'lead_id').map(c => `${c}=VALUES(${c})`).join(',');\n  const sql = `INSERT INTO panel_conversions (${cols.join(',')}) VALUES\\n${values}\\n`\n            + `ON DUPLICATE KEY UPDATE ${updates};`;\n\n  out.push({ json: { sql, batch_size: chunk.length, batch_num: Math.floor(i / BATCH) + 1 } });\n}\n\nconsole.log(`🧱 ${rows.length} cuentas agrupadas en ${out.length} lotes de hasta ${BATCH}`);\nreturn out;"
+      },
+      "id": "1b1cec5b-74d8-4add-9373-2140d8720ca3",
+      "name": "🧱 Lotes de 500 (cuentas)3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4016,
+        4160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "id": "54319f87-ca58-4798-8cb7-735199db7cac",
+      "name": "💾 Guardar cuentas3",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4208,
+        4160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deja constancia de la sincronización. Si el panel muestra un\n// \"última sincronización\" viejo, es señal de que WF14 dejó de correr.\nconst n = $input.all().length;\nconst now = new Date().toISOString().slice(0, 19).replace('T', ' ');\nreturn [{ json: { rows_in: n, synced_at: now } }];"
+      },
+      "id": "4ffbcbfa-6bc7-43c4-bf82-dcc3307b41d7",
+      "name": "📝 Contar filas3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4528,
+        3968
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO panel_sync_log (source, rows_in, status, synced_at) VALUES ('sheets', {{ $json.rows_in }}, 'ok', '{{ $json.synced_at }}');",
+        "options": {}
+      },
+      "id": "c90096f4-a4d5-4808-8b32-93f04efaf722",
+      "name": "🗒 Registrar sincronización3",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4720,
+        3968
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "a5ee0651-14b7-40af-80ab-654e16fd47b8",
+      "name": "⏰ Cada 5 minutos3",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        3344,
+        4192
+      ]
+    }
+  ],
+  "connections": {
+    "📋 Leer hoja leads nepal": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalizar leads nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalizar leads nepal": {
+      "main": [
+        [
+          {
+            "node": "🧱 Lotes de 500 (leads nepal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧱 Lotes de 500 (leads nepal)": {
+      "main": [
+        [
+          {
+            "node": "💾 Guardar leads nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Guardar leads nepal": {
+      "main": [
+        [
+          {
+            "node": "📝 Contar filas3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Leer leads_venezuela1": {
+      "main": [
+        [
+          {
+            "node": "📋 Leer leads_mexico1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Leer leads_mexico1": {
+      "main": [
+        [
+          {
+            "node": "📋 Leer leads_colombia1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Leer leads_colombia1": {
+      "main": [
+        [
+          {
+            "node": "🔀 Unir leads LatAm1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Unir leads LatAm1": {
+      "main": [
+        [
+          {
+            "node": "🧱 Lotes de 500 (leads LatAm)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Leer conversions LatAm1": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalizar cuentas LatAm1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalizar cuentas LatAm1": {
+      "main": [
+        [
+          {
+            "node": "🧱 Lotes de 500 (cuentas LatAm)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧱 Lotes de 500 (leads LatAm)1": {
+      "main": [
+        [
+          {
+            "node": "💾 Guardar leads LatAm1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧱 Lotes de 500 (cuentas LatAm)1": {
+      "main": [
+        [
+          {
+            "node": "💾 Guardar cuentas LatAm1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Leer hoja leads3": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalizar leads3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalizar leads3": {
+      "main": [
+        [
+          {
+            "node": "🧱 Lotes de 500 (leads)3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧱 Lotes de 500 (leads)3": {
+      "main": [
+        [
+          {
+            "node": "💾 Guardar leads3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Guardar leads3": {
+      "main": [
+        [
+          {
+            "node": "📝 Contar filas3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Leer hoja conversions3": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalizar cuentas3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalizar cuentas3": {
+      "main": [
+        [
+          {
+            "node": "🧱 Lotes de 500 (cuentas)3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧱 Lotes de 500 (cuentas)3": {
+      "main": [
+        [
+          {
+            "node": "💾 Guardar cuentas3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Contar filas3": {
+      "main": [
+        [
+          {
+            "node": "🗒 Registrar sincronización3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Cada 5 minutos3": {
+      "main": [
+        [
+          {
+            "node": "📋 Leer hoja leads3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Leer hoja conversions3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Leer leads_venezuela1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Leer conversions LatAm1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Leer hoja leads nepal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:⏰ Cada 15 minutos": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    },
+    "node:⏰ Cada 5 minutos": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    },
+    "node:⏰ Cada 5 minutos1": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    },
+    "node:⏰ Cada 5 minutos3": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "id": "Zoc3CdkM2ARZV0wn",
+      "name": "panel",
+      "createdAt": "2026-08-06T13:31:25.151Z",
+      "updatedAt": "2026-08-06T13:31:25.151Z"
+    },
+    {
+      "id": "fpicBnP1fhYrOdqB",
+      "name": "reporting",
+      "createdAt": "2026-08-06T13:31:25.151Z",
+      "updatedAt": "2026-08-06T13:31:25.151Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "2xjFB1FVTKYBvszp",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-08-06T13:31:27.129Z",
+      "updatedAt": "2026-08-06T13:31:27.129Z"
+    }
+  ],
+  "activeVersion": null
+}

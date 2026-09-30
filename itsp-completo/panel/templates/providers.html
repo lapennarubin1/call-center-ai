@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% set active='providers' %}
+{% block heading %}Proveedores{% endblock %}
+{% block content %}
+<div class="panel">
+  <div class="panel-h"><h2>Proveedores de terminación (LCR por prioridad)</h2>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('provider_form') }}">Nuevo proveedor</a></div>
+  <div class="panel-b flush">
+    {% if providers %}
+    <table>
+      <thead><tr><th class="num">Prio</th><th>Nombre</th><th>Host</th><th>Auth</th>
+        <th>Transporte</th><th>Códecs</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+      {% for p in providers %}
+        <tr>
+          <td class="num">{{ p.priority }}</td>
+          <td class="mono">{{ p.name }}</td>
+          <td class="mono">{{ p.host }}:{{ p.port }}</td>
+          <td><span class="pill pill-muted">{{ p.auth_type }}</span></td>
+          <td>{{ p.transport }}</td>
+          <td class="mono">{{ p.codecs }}</td>
+          <td>{% if p.active %}<span class="pill pill-ok">activo</span>{% else %}<span class="pill pill-off">inactivo</span>{% endif %}</td>
+          <td style="text-align:right"><a class="btn btn-sm" href="{{ url_for('provider_form', pid=p.id) }}">Editar</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">Sin proveedores. Añade Telnyx u otro mayorista para empezar.</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

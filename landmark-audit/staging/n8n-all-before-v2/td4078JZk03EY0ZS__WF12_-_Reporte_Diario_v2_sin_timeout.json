@@ -1,0 +1,654 @@
+{
+  "id": "td4078JZk03EY0ZS",
+  "name": "WF12 - Reporte Diario v2 (sin timeout)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-07-29T08:17:08.893Z",
+  "updatedAt": "2026-08-18T11:35:08.458Z",
+  "isArchived": true,
+  "versionId": "a3d0e48a-4a01-4012-857c-ebae5bc10dca",
+  "versionCounter": 16,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/values/conversaciones_detalle!A1:R1?valueInputOption=RAW",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"values\": [[\"fecha\", \"hora_ist\", \"branch\", \"title\", \"duration_secs\", \"duration_mmss\", \"messages\", \"status\", \"call_successful\", \"receiver_number\", \"lead_id\", \"idioma\", \"termination\", \"interesado\", \"callback\", \"cuenta_pedida\", \"resumen\", \"conversation_id\"]]}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "8cab24af-473d-4c80-91b6-41a6d9ef78db",
+      "name": "Fijar Encabezados (conversaciones_detalle)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -896,
+        112
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/values/report_daily!A1:P1?valueInputOption=RAW",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"values\": [[\"date\", \"total_calls\", \"interested\", \"not_interested\", \"no_answer\", \"voicemail\", \"technical_failures\", \"callbacks_requested\", \"accounts_requested\", \"contacted\", \"average_duration_sec\", \"total_duration_min\", \"average_messages\", \"contact_rate_pct\", \"interest_rate_pct\", \"generated_at\"]]}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "1c1f2623-41d3-4a42-944c-18d9ee47ae4e",
+      "name": "Fijar Encabezados (report_daily)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -896,
+        336
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "conversaciones_detalle",
+          "mode": "name"
+        },
+        "keepFirstRow": true
+      },
+      "id": "b70dda43-1f2d-4b77-bdb7-2fd01e78b0be",
+      "name": "Limpiar Datos (conversaciones_detalle)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -720,
+        112
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "report_daily",
+          "mode": "name"
+        },
+        "keepFirstRow": true
+      },
+      "id": "5887ce4a-f22c-41f8-bc4d-1e60e7512232",
+      "name": "Limpiar Datos (report_daily)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -720,
+        336
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 30 21 * * *"
+            }
+          ]
+        }
+      },
+      "id": "6b569e56-7873-4892-a576-179594c02ee6",
+      "name": "Diario 03:00 IST1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1376,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "dias_atras",
+              "value": 7,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "df545846-b8ab-412b-9d5e-af774f866472",
+      "name": "Config (días atrás)1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1072,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Solo LISTA — rápido, sin detalle por conversación. Nunca se acerca al límite de 300s.\nconst KEY='86811e58db57a9cd5a1bdf87608bb2905d48b873e9b17e9b31742423c05aa968', AGENT='agent_5701kramx550e3qs2tm11661b48p';\nconst DIAS = Number($json.dias_atras || 7);\nconst after = Math.floor(Date.now()/1000) - (DIAS*86400);\nconst H={'xi-api-key':KEY};\nconst base='https://api.elevenlabs.io/v1/convai/conversations';\n\nlet cursor='', todas=[], p=0;\ndo{\n  let u=`${base}?page_size=100&summary_mode=include&call_start_after_unix=${after}&agent_id=${encodeURIComponent(AGENT)}`;\n  if(cursor) u+=`&cursor=${encodeURIComponent(cursor)}`;\n  const r=await this.helpers.httpRequest({method:'GET',url:u,headers:H,json:true,timeout:30000});\n  todas=todas.concat(r.conversations||[]);\n  cursor=r.has_more?(r.next_cursor||''):''; p++;\n  console.log(`📄 Página ${p}: total ${todas.length}`);\n}while(cursor && p<30);\n\nconsole.log(`✅ ${todas.length} conversaciones listadas | el detalle se trae 1x1 en el loop`);\nreturn todas.map(c => ({ json: c }));\n"
+      },
+      "id": "4d8ad3b4-96e5-495b-bfc0-e9436c5d0d63",
+      "name": "Listar Conversaciones (solo lista)1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "e9f92a49-dc5e-4ff9-9983-2544200672ed",
+      "name": "Loop Conversaciones (1x1)1",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -288,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Corre UNA vez por cada item que entrega el loop — rápido, nunca se acerca a 300s.\nconst KEY='86811e58db57a9cd5a1bdf87608bb2905d48b873e9b17e9b31742423c05aa968';\nconst H={'xi-api-key':KEY};\nconst c = $json;\ntry {\n  const det = await this.helpers.httpRequest({\n    method:'GET', url:`https://api.elevenlabs.io/v1/convai/conversations/${c.conversation_id}`,\n    headers:H, json:true, timeout:20000\n  });\n  return [{ json: { ...c, detail: det } }];\n} catch(e) {\n  console.warn('⚠️ Detalle falló: ' + c.conversation_id);\n  return [{ json: { ...c, detail: null } }];\n}\n"
+      },
+      "id": "1c2a2ec9-deb3-4529-a43f-ef72bcb50c12",
+      "name": "Traer Detalle1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══ Formatea un lote de conversaciones ya con detalle adjunto ═══\nconst IST = 19800;\nconst mmss = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;\n\nconst items = $input.all().map(i => i.json);\nconst rows = [];\n\nfor (const d of items) {\n  const det = d.detail || {};\n  const dyn = det.conversation_initiation_client_data?.dynamic_variables || {};\n  const raw = det.analysis?.data_collection_results || {};\n  const dc = {};\n  for (const k of Object.keys(raw)) dc[k] = raw[k]?.value ?? '';\n\n  const ts  = Number(d.start_time_unix_secs || 0);\n  const iso = ts ? new Date((ts + IST) * 1000).toISOString() : '';\n  const dur = Number(d.call_duration_secs || 0);\n\n  rows.push({\n    fecha: iso.slice(0, 10),\n    hora_ist: iso.slice(11, 16),\n    branch: d.agent_name || d.branch_id || '',\n    title: d.call_summary_title || '',\n    duration_secs: dur,\n    duration_mmss: mmss(dur),\n    messages: d.message_count || 0,\n    status: d.status || '',\n    call_successful: d.call_successful || '',\n    receiver_number: det.metadata?.phone_call?.external_number || dyn.phone || '',\n    lead_id: dyn.lead_id || '',\n    idioma: d.main_language || '',\n    termination: d.termination_reason || '',\n    interesado: String(dc.user_interest || ''),\n    callback: String(dc.callback_requested || ''),\n    cuenta_pedida: String(dc.account_requested || ''),\n    resumen: String(d.transcript_summary || '').slice(0, 400),\n    conversation_id: d.conversation_id\n  });\n}\n\n// Acumular para el agregado diario final (se lee cuando el loop termina)\nconst st = $getWorkflowStaticData('global');\nst.acumulado = (st.acumulado || []).concat(rows);\nconsole.log(`📦 Lote formateado: ${rows.length} filas | acumulado total: ${st.acumulado.length}`);\nreturn rows.map(j => ({ json: j }));\n"
+      },
+      "id": "333bec50-8774-409d-aac5-dfbca17d6998",
+      "name": "Formatear + Acumular1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "conversaciones_detalle",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fecha": "={{ $json.fecha }}",
+            "hora_ist": "={{ $json.hora_ist }}",
+            "branch": "={{ $json.branch }}",
+            "title": "={{ $json.title }}",
+            "duration_secs": "={{ $json.duration_secs }}",
+            "duration_mmss": "={{ $json.duration_mmss }}",
+            "messages": "={{ $json.messages }}",
+            "status": "={{ $json.status }}",
+            "call_successful": "={{ $json.call_successful }}",
+            "receiver_number": "={{ $json.receiver_number }}",
+            "lead_id": "={{ $json.lead_id }}",
+            "idioma": "={{ $json.idioma }}",
+            "termination": "={{ $json.termination }}",
+            "interesado": "={{ $json.interesado }}",
+            "callback": "={{ $json.callback }}",
+            "cuenta_pedida": "={{ $json.cuenta_pedida }}",
+            "resumen": "={{ $json.resumen }}",
+            "conversation_id": "={{ $json.conversation_id }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "6a4b232d-3607-4931-9c49-03a28659a56d",
+      "name": "Escribir Detalle1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        192
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "id": "071989ff-d752-4ff0-8437-080ba72b67cb",
+      "name": "Esperar 1s (cuota)1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        704,
+        192
+      ],
+      "webhookId": "96a75119-91f3-448f-bf08-5c4beeab55be"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══ Agregado diario final: lee el acumulado del static data ═══\n// Escribe directamente con los nombres de columna reales del tab 'report_daily'\nconst st = $getWorkflowStaticData('global');\nconst rows = st.acumulado || [];\nconsole.log(`📊 Agregando ${rows.length} conversaciones acumuladas`);\n\nconst byDay = new Map();\nfor (const r of rows) {\n  const day = r.fecha;\n  if (!day) continue;\n  if (!byDay.has(day)) byDay.set(day, {\n    date: day, total: 0, interested: 0, not_interested: 0, no_answer: 0, voicemail: 0,\n    technical_failures: 0, callbacks: 0, accounts: 0, dur_total: 0, con_dur: 0, msgs: 0\n  });\n  const d = byDay.get(day);\n  d.total++;\n  d.msgs += Number(r.messages || 0);\n  if (r.duration_secs > 0) { d.dur_total += r.duration_secs; d.con_dur++; }\n\n  const interest = String(r.interesado || '').toLowerCase();\n  const cb        = String(r.callback || '').toLowerCase();\n  const acct      = String(r.cuenta_pedida || '').toLowerCase();\n  const succ      = String(r.call_successful || '').toLowerCase();\n  const term      = String(r.termination || '').toLowerCase();\n  const isVoicemail = term.includes('voicemail') ||\n    (r.duration_secs > 0 && r.duration_secs < 8 && succ !== 'success');\n\n  if (r.duration_secs === 0)                            d.no_answer++;\n  else if (succ === 'failure')                           d.technical_failures++;\n  else if (isVoicemail)                                { d.voicemail++; d.no_answer++; }\n  else if (['interested','true','yes'].includes(interest)) d.interested++;\n  else if (['true','yes'].includes(cb))                  d.callbacks++;\n  else                                                    d.not_interested++;\n\n  if (['yes','true'].includes(acct)) d.accounts++;\n}\n\nconst out = [...byDay.values()].sort((a,b)=>a.date.localeCompare(b.date)).map(r => ({ json: {\n  date: r.date,\n  total_calls: r.total,\n  interested: r.interested,\n  not_interested: r.not_interested,\n  no_answer: r.no_answer,\n  voicemail: r.voicemail,\n  technical_failures: r.technical_failures,\n  callbacks_requested: r.callbacks,\n  accounts_requested: r.accounts,\n  contacted: r.interested + r.not_interested + r.callbacks,\n  average_duration_sec: r.con_dur ? Math.round(r.dur_total / r.con_dur) : 0,\n  total_duration_min: Math.round(r.dur_total / 60),\n  average_messages: r.total ? Math.round(r.msgs / r.total) : 0,\n  contact_rate_pct: r.total ? Number(((r.interested+r.not_interested+r.callbacks)/r.total*100).toFixed(1)) : 0,\n  interest_rate_pct: (r.interested+r.not_interested+r.callbacks)\n    ? Number((r.interested/(r.interested+r.not_interested+r.callbacks)*100).toFixed(1)) : 0,\n  generated_at: new Date().toISOString()\n}}));\n\nst.acumulado = []; // limpiar para la próxima corrida\nreturn out;\n"
+      },
+      "id": "68da5392-965a-4d44-bbb4-193696417d4a",
+      "name": "Agregar por Día (al terminar)1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "report_daily",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $json.date }}",
+            "total_calls": "={{ $json.total_calls }}",
+            "interested": "={{ $json.interested }}",
+            "not_interested": "={{ $json.not_interested }}",
+            "no_answer": "={{ $json.no_answer }}",
+            "voicemail": "={{ $json.voicemail }}",
+            "technical_failures": "={{ $json.technical_failures }}",
+            "callbacks_requested": "={{ $json.callbacks_requested }}",
+            "accounts_requested": "={{ $json.accounts_requested }}",
+            "contacted": "={{ $json.contacted }}",
+            "average_duration_sec": "={{ $json.average_duration_sec }}",
+            "total_duration_min": "={{ $json.total_duration_min }}",
+            "average_messages": "={{ $json.average_messages }}",
+            "contact_rate_pct": "={{ $json.contact_rate_pct }}",
+            "interest_rate_pct": "={{ $json.interest_rate_pct }}",
+            "generated_at": "={{ $json.generated_at }}"
+          },
+          "matchingColumns": [
+            "date"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "137249c5-7574-4c00-9671-009702a092bc",
+      "name": "Escribir Reporte Diario1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "WF12",
+            "timestamp": "={{ $now.toISO() }}",
+            "node": "={{ $json.execution?.lastNodeExecuted || 'unknown' }}",
+            "message": "={{ JSON.stringify($json).slice(0,5000) }}"
+          },
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "d88bb419-3988-4c8f-9bac-ef2115e8bab9",
+      "name": "Log Error1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1184,
+        640
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "16f19d49-35a6-4569-9899-0d063e41ae37",
+      "name": "Ejecutar Manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1376,
+        144
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "91f91536-e7f1-46dd-951a-0bb6ba2a80e6",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1344,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Fijar Encabezados (conversaciones_detalle)": {
+      "main": [
+        [
+          {
+            "node": "Limpiar Datos (conversaciones_detalle)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpiar Datos (conversaciones_detalle)": {
+      "main": [
+        [
+          {
+            "node": "Listar Conversaciones (solo lista)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fijar Encabezados (report_daily)": {
+      "main": [
+        [
+          {
+            "node": "Limpiar Datos (report_daily)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpiar Datos (report_daily)": {
+      "main": [
+        [
+          {
+            "node": "Listar Conversaciones (solo lista)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diario 03:00 IST1": {
+      "main": [
+        [
+          {
+            "node": "Config (días atrás)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config (días atrás)1": {
+      "main": [
+        [
+          {
+            "node": "Fijar Encabezados (conversaciones_detalle)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fijar Encabezados (report_daily)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listar Conversaciones (solo lista)1": {
+      "main": [
+        [
+          {
+            "node": "Loop Conversaciones (1x1)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Conversaciones (1x1)1": {
+      "main": [
+        [
+          {
+            "node": "Agregar por Día (al terminar)1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Traer Detalle1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer Detalle1": {
+      "main": [
+        [
+          {
+            "node": "Formatear + Acumular1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear + Acumular1": {
+      "main": [
+        [
+          {
+            "node": "Escribir Detalle1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escribir Detalle1": {
+      "main": [
+        [
+          {
+            "node": "Esperar 1s (cuota)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar 1s (cuota)1": {
+      "main": [
+        [
+          {
+            "node": "Loop Conversaciones (1x1)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agregar por Día (al terminar)1": {
+      "main": [
+        [
+          {
+            "node": "Escribir Reporte Diario1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Manualmente": {
+      "main": [
+        [
+          {
+            "node": "Config (días atrás)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Diario 03:00 IST1": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "td4078JZk03EY0ZS",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-07-29T08:17:08.893Z",
+      "updatedAt": "2026-07-29T08:17:08.893Z"
+    }
+  ],
+  "activeVersion": null
+}

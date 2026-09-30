@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% set active='plans' %}
+{% block heading %}{{ 'Editar plan' if p else 'Nuevo plan' }}{% endblock %}
+{% block content %}
+<div class="panel">
+  <div class="panel-h"><h2>Datos del plan</h2></div>
+  <div class="panel-b">
+    <form method="post">
+      <div class="form-grid">
+        <div class="field"><label>Nombre</label>
+          <input name="name" value="{{ p.name if p }}" required></div>
+        <div class="field"><label>Moneda</label>
+          <input name="currency" value="{{ p.currency if p else 'USD' }}" maxlength="3"></div>
+        <div class="field full"><label>Descripción</label>
+          <input name="description" value="{{ p.description or '' if p }}"></div>
+        <div class="field"><label>Estado</label>
+          <select name="active">
+            <option value="1" {{ 'selected' if not p or p.active }}>Activo</option>
+            <option value="" {{ 'selected' if p and not p.active }}>Inactivo</option>
+          </select></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Guardar plan</button>
+        <a class="btn" href="{{ url_for('plans') }}">Volver</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

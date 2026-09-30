@@ -1,0 +1,883 @@
+{
+  "id": "WsVT2r13JrGBZrN8",
+  "name": "recuperar historico",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-08-04T11:20:09.598Z",
+  "updatedAt": "2026-08-10T06:53:19.805Z",
+  "isArchived": true,
+  "versionId": "d13bbc92-4540-4897-a6f9-3cb3a49c5617",
+  "versionCounter": 109,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "86a4aef6-8fe5-4ece-9041-56d2180f33fb",
+      "name": "🚨 Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        608,
+        -272
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "elevenlabs-postcall-webhook",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "18315413-c3b8-4fe2-8a5e-234da8ed8e90",
+      "name": "📥 ElevenLabs Post-Call Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        592,
+        -576
+      ],
+      "webhookId": "elevenlabs-call-webhook"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "id": "4c8bcb02-b6b9-4a69-8e92-fd332d907da0",
+      "name": "✅ Respond OK1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        -736
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst raw = item.json;\n\n// ── 1. Recuperar el body CRUDO si el webhook tiene \"Raw Body\" activado ──────\n// (necesario para verificar la firma HMAC de forma fiable)\nlet rawStr = '';\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    rawStr = Buffer.from(item.binary.data.data, 'base64').toString('utf8');\n  }\n} catch (e) { /* sin rawBody, seguimos con el body parseado */ }\n\nlet body = raw.body || raw;\nif (rawStr) { try { body = JSON.parse(rawStr); } catch (e) {} }\n\n// ── 2. Verificación HMAC (formato ElevenLabs: t=timestamp,v0=firma) ─────────\nconst crypto = require('crypto');\nconst secret = 'wsec_98c0a66b3f1df7af8eaf22503381cb78ce648dc63da8eead8ce3dafc7a95b630';\nconst headers = raw.headers || {};\nconst sigHeader = String(headers['elevenlabs-signature'] || headers['ElevenLabs-Signature'] || '');\nif (sigHeader) {\n  const parts = Object.fromEntries(sigHeader.split(',').map(p => p.split('=')));\n  const timestamp = parts['t'] || '';\n  const receivedSig = parts['v0'] || parts['v1'] || '';\n  // Anti-replay: rechazar webhooks con más de 30 min de antigüedad\n  if (timestamp && Math.abs(Date.now() / 1000 - Number(timestamp)) > 1800) {\n    throw new Error('Webhook timestamp demasiado viejo (>30min) — posible replay');\n  }\n  if (rawStr && receivedSig) {\n    // Verificación REAL: firma sobre el body crudo, byte a byte\n    const expected = crypto.createHmac('sha256', secret).update(timestamp + '.' + rawStr).digest('hex');\n    if (receivedSig !== expected) {\n      throw new Error('HMAC inválido — request rechazado');\n    }\n  } else if (receivedSig) {\n    // Sin rawBody no se puede reconstruir la firma (n8n re-serializa el JSON).\n    // Se registra pero NO se bloquea para no congelar leads en CALL_IN_PROGRESS.\n    console.warn('⚠️ HMAC no verificable sin Raw Body — procesando igual. Activa \"Raw Body\" en el nodo Webhook.');\n  }\n}\n\n// ── 3. Desanidar el payload real de ElevenLabs ──────────────────────────────\n// post_call_transcription llega como { type, event_timestamp, data: {...} }\n// Todo el contenido de la llamada vive en body.data — ESTE era el bug original.\nconst d = body.data || body;\n\nconst conversationId = String(d.conversation_id || d.conversationId || '');\nconst callSuccessful = String(d.analysis?.call_successful || d.call_successful || '').toLowerCase();\nconst summary        = d.analysis?.transcript_summary || d.summary || d.conversation_summary || '';\nconst durationSecs   = Number(d.metadata?.call_duration_secs || d.duration_secs || 0);\nconst callEndedBy    = String(d.metadata?.termination_reason || d.call_ended_by || '').toLowerCase();\n\n// transcript: array de turnos [{role, message}] → texto plano legible\nlet transcript = '';\nif (Array.isArray(d.transcript)) {\n  transcript = d.transcript.map(t => `${t.role === 'agent' ? '🤖' : '👤'} ${t.message || ''}`).join(' | ');\n} else {\n  transcript = typeof d.transcript === 'string' ? d.transcript : JSON.stringify(d.transcript || '');\n}\n\nconst dc = d.analysis?.data_collection_results\n        || d.analysis?.data_collection\n        || d.data_collection_results\n        || d.data_collection\n        || {};\n\nconst interested    = String(dc.user_interest?.value      || '').toLowerCase();\nconst fullName      = String(dc.full_name?.value           || '').replace(/^=/, '').trim();\nconst callbackReq   = String(dc.callback_requested?.value  || '').toLowerCase();\nconst callbackDate  = String(dc.callback_date?.value       || '');\nconst accountOpened = String(dc.account_requested?.value   || '').toLowerCase();\n\nconst dynVars = d.conversation_initiation_client_data?.dynamic_variables\n             || d.metadata?.dynamic_variables\n             || body.conversation_initiation_client_data?.dynamic_variables\n             || {};\nconst leadId = String(dynVars.lead_id || d.lead_id || body.lead_id || '');\nconst phone  = String(dynVars.phone   || d.phone   || '').replace(/[^0-9+]/g, '');\n\n// WF2/WF4 son los dueños del contador de intentos — aquí NO se incrementa ni se pisa\nconst callAttempts = dynVars.call_attempts !== undefined ? Number(dynVars.call_attempts) : undefined;\n\n// ── 4. Clasificación: CALL_IN_PROGRESS SIEMPRE resuelve a un estado final ───\nconst isVoicemail =\n  callEndedBy.includes('voicemail') ||\n  String(summary).toLowerCase().includes('voicemail') ||\n  (durationSecs > 0 && durationSecs < 8 && callSuccessful !== 'success');\n\nlet status, last_call_status, notes;\n\nif (!conversationId) {\n  status = 'FAILED'; last_call_status = 'NO_CONV_ID';\n  notes = 'Webhook sin conversation_id';\n} else if (durationSecs === 0) {\n  status = 'NO_ANSWER'; last_call_status = 'NO_ANSWER';\n  notes = 'No contestó (duración 0s) | fin: ' + callEndedBy;\n} else if (callSuccessful === 'failure' || callSuccessful === 'failed') {\n  status = 'FAILED'; last_call_status = 'FAILED';\n  notes = 'Llamada fallida: ' + (callEndedBy || 'sin razón');\n} else if (isVoicemail) {\n  status = 'VOICEMAIL'; last_call_status = 'VOICEMAIL';\n  notes = '📵 Buzón de voz | duración: ' + durationSecs + 's';\n} else if (callbackReq === 'true' || callbackReq === 'yes') {\n  status = 'SCHEDULED'; last_call_status = 'CALLBACK_REQUESTED';\n  notes = '📅 Pidió callback | ' + String(summary).slice(0, 200);\n} else {\n  status = 'SUCCESSFUL'; last_call_status = 'COMPLETED';\n  notes = 'Contestó, conversación completa | ' + String(summary).slice(0, 200);\n  // Nota: INTERESTED ya NO se calcula acá. Lo pone otro proceso aparte\n  // cuando el cliente realmente abre una cuenta (evento externo real).\n}\n\nconsole.log('📞 Post-call | lead:', leadId, '| status:', status, '| dur:', durationSecs + 's', '| conv:', conversationId);\n\nconst out = {\n  lead_id:              leadId,\n  phone,\n  status,\n  last_call_status,\n  notes,\n  elevenlabs_call_id:   conversationId,\n  conversation_summary: String(summary).slice(0, 500),\n  full_name:            fullName || null,\n  interested:           (interested === 'interested' || interested === 'true' || interested === 'yes') ? 'TRUE' : '',\n  callback_requested:   (callbackReq === 'true' || callbackReq === 'yes') ? 'TRUE' : '',\n  callback_date:        callbackDate,\n  account_opened:       (accountOpened === 'yes' || accountOpened === 'true') ? 'PENDING' : '',\n  duration_secs:        durationSecs,\n  transcript:           transcript.slice(0, 1000),\n  last_call_time:       new Date().toISOString()\n};\nif (callAttempts !== undefined && !Number.isNaN(callAttempts)) out.call_attempts = callAttempts;\nif (!out.full_name) delete out.full_name;\nif (!out.callback_date) delete out.callback_date;\n\nreturn [{ json: out }];\n"
+      },
+      "id": "ef9cabf0-7259-461c-b4a4-9cecd90304ce",
+      "name": "⚙️ Parse Post-Call Data1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -576
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "lead-check",
+              "leftValue": "={{ $json.lead_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b47cf147-f987-49c2-83fc-cd20b61b1db2",
+      "name": "🔍 Has lead_id?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1008,
+        -576
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconsole.log('⚠️ No lead_id in post-call webhook | conv_id:', d.elevenlabs_call_id);\nreturn [{ json: { skipped: true, reason: 'no lead_id', conv_id: d.elevenlabs_call_id } }];"
+      },
+      "id": "43a29459-f864-4dfb-b617-d815205cf8cf",
+      "name": "📝 Log No Lead ID1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconsole.log('✅ Post-call processed | lead_id:', d.lead_id, '| status:', d.status);\nreturn [{ json: { processed: true, lead_id: d.lead_id, status: d.status } }];"
+      },
+      "id": "9dc93e29-6a77-4bab-b767-68b04cef5be4",
+      "name": "📝 Log Success1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        -320
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "b7df72cf-d23a-416e-9d93-444e54728523",
+      "name": "Ejecutar Fallback Manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        528,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "e0baf438-9a96-4254-9906-e14faa07896b",
+      "name": "Polling Cada 5min (última hora)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        512,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const KEY   = '86811e58db57a9cd5a1bdf87608bb2905d48b873e9b17e9b31742423c05aa968';\nconst AGENT = 'agent_5701kramx550e3qs2tm11661b48p';\nconst AFTER_HOURS_AGO  = 143;  // <<< CAMBIAR esto en cada corrida\nconst BEFORE_HOURS_AGO = 140;  // <<< CAMBIAR esto en cada corrida\nconst after  = Math.floor(Date.now()/1000) - (AFTER_HOURS_AGO  * 3600);\nconst before = Math.floor(Date.now()/1000) - (BEFORE_HOURS_AGO * 3600);\nconst H = { 'xi-api-key': KEY };\nconst base = 'https://api.elevenlabs.io/v1/convai/conversations';\n\n// 1) Paginar la lista completa\nlet cursor = '', todas = [], page = 0;\ndo {\n  let url = `${base}?page_size=100&summary_mode=include&call_start_after_unix=${after}&call_start_before_unix=${before}&agent_id=${encodeURIComponent(AGENT)}`;\n  if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;\n  const res = await this.helpers.httpRequest({ method:'GET', url, headers:H, json:true, timeout:30000 });\n  const convos = res.conversations || [];\n  todas = todas.concat(convos);\n  cursor = res.has_more ? (res.next_cursor || '') : '';\n  page++;\n  console.log(`📄 Página ${page}: +${convos.length} | total ${todas.length}`);\n} while (cursor && page < 30);\n\nif (!todas.length) { console.log('⚠️ Sin conversaciones en esta ventana'); return []; }\n\n// 2) Traer detalle en paralelo por lotes de 10\nconst CONCURRENCY = 25;\nconst out = [];\nlet processed = 0;\n\nfor (let i = 0; i < todas.length; i += CONCURRENCY) {\n  const chunk = todas.slice(i, i + CONCURRENCY);\n  const results = await Promise.allSettled(\n    chunk.map(c =>\n      this.helpers.httpRequest({\n        method: 'GET',\n        url: `${base}/${c.conversation_id}`,\n        headers: H, json: true, timeout: 20000\n      }).then(det => ({ json: { ...det, _lista: c } }))\n    )\n  );\n\n  for (let j = 0; j < results.length; j++) {\n    if (results[j].status === 'fulfilled') {\n      out.push(results[j].value);\n    } else {\n      console.warn('⚠️ Falló detalle de ' + chunk[j].conversation_id + ': ' + results[j].reason?.message);\n    }\n  }\n\n  processed += chunk.length;\n  console.log(`✅ Lote ${Math.ceil(processed/CONCURRENCY)}: ${processed}/${todas.length} procesados`);\n}\n\nconsole.log(`✅ ${out.length}/${todas.length} detalles obtenidos`);\nreturn out;"
+      },
+      "id": "34c5e1c0-db72-41c8-a01d-bb57883c35ef",
+      "name": "Traer Histórico ElevenLabs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit?gid=1676895816#gid=1676895816",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1676895816,
+          "mode": "list",
+          "cachedResultName": "errors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk/edit#gid=1676895816"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "workflow": "WF9",
+            "message": "={{ $json.message }}",
+            "node": "={{ $execution.node.name }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "2ac80380-0e11-473a-ae2d-188871f9149a",
+      "name": "📋 Log Error1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        800,
+        -272
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "call_trigger",
+              "displayName": "call_trigger",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "assigned_agent",
+              "displayName": "assigned_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_call_status",
+              "displayName": "last_call_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_call_time",
+              "displayName": "last_call_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "call_attempts",
+              "displayName": "call_attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "elevenlabs_call_id",
+              "displayName": "elevenlabs_call_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "interested",
+              "displayName": "interested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "callback_requested",
+              "displayName": "callback_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "callback_date",
+              "displayName": "callback_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "execution",
+              "displayName": "execution",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_row_number",
+              "displayName": "_row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_valid",
+              "displayName": "_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_errors",
+              "displayName": "_errors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_raw",
+              "displayName": "status_raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "duration_secs",
+              "displayName": "duration_secs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "classification",
+              "displayName": "classification",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "from",
+              "displayName": "from",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "isFromMe",
+              "displayName": "isFromMe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "raw",
+              "displayName": "raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pushName",
+              "displayName": "pushName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "headers",
+              "displayName": "headers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "statusCode",
+              "displayName": "statusCode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "statusMessage",
+              "displayName": "statusMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a159fd9b-1cd1-449f-9db1-8fd82d4cb3d4",
+      "name": "📊 Update Lead in Sheet1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1792,
+        -320
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convierte cada conversacion de ElevenLabs directamente en un objeto\n// listo para actualizar el sheet por lead_id — sin leer el sheet entero.\nconst convos = $input.all().map(i => i.json);\nconst out = [];\n\nfor (const c of convos) {\n  const d = c.data || c;\n\n  const convId   = String(d.conversation_id || '');\n  const duration = Number(d.metadata?.call_duration_secs || 0);\n  const success  = String(d.analysis?.call_successful || '').toLowerCase();\n  const endedBy  = String(d.metadata?.termination_reason || '').toLowerCase();\n  const summary  = d.analysis?.transcript_summary || '';\n  const startTs  = Number(d.metadata?.start_time_unix_secs || 0);\n\n  const dyn     = d.conversation_initiation_client_data?.dynamic_variables || {};\n  const leadId  = String(dyn.lead_id || '').trim();\n  if (!leadId || leadId === 'TEST-MANUAL-001') continue; // skip sin lead_id o pruebas\n\n  const dc = d.analysis?.data_collection_results || {};\n  const callbackReq = String(dc.callback_requested?.value || '').toLowerCase();\n  const fullName    = String(dc.full_name?.value || '').replace(/^=/,'').trim();\n  const callbackDt  = String(dc.callback_date?.value || '');\n\n  const isVoicemail =\n    endedBy.includes('voicemail') ||\n    String(summary).toLowerCase().includes('voicemail') ||\n    (duration > 0 && duration < 8 && success !== 'success');\n\n  let status, lastCall, notes;\n  if (!convId)                                    { status='FAILED';    lastCall='NO_CONV_ID';         notes='Sin conversation_id'; }\n  else if (duration === 0)                        { status='NO_ANSWER'; lastCall='NO_ANSWER';          notes='No contestó | '+endedBy; }\n  else if (success==='failure'||success==='failed'){ status='FAILED';   lastCall='FAILED';             notes='Falló: '+endedBy; }\n  else if (isVoicemail)                           { status='VOICEMAIL'; lastCall='VOICEMAIL';          notes='📵 Buzón | '+duration+'s'; }\n  else if (['true','yes'].includes(callbackReq))  { status='SCHEDULED'; lastCall='CALLBACK_REQUESTED'; notes='📅 Callback | '+String(summary).slice(0,200); }\n  else                                            { status='SUCCESSFUL';lastCall='COMPLETED';          notes='Contestó | '+String(summary).slice(0,200); }\n\n  const row = {\n    lead_id:              leadId,\n    status,\n    last_call_status:     lastCall,\n    notes:                notes.slice(0, 500),\n    elevenlabs_call_id:   convId,\n    conversation_summary: String(summary).slice(0, 500),\n    duration_secs:        duration,\n    last_call_time:       startTs ? new Date(startTs*1000).toISOString() : new Date().toISOString()\n  };\n  if (fullName)    row.full_name    = fullName;\n  if (callbackDt)  row.callback_date = callbackDt;\n\n  out.push({ json: row });\n}\n\nconsole.log(`🔀 Mapeados para actualizar: ${out.length} leads`);\nreturn out;"
+      },
+      "id": "727cb3f4-d966-4098-b94c-c141bfe21289",
+      "name": "🔀 Mapear para Sheet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        240
+      ],
+      "retryOnFail": false
+    }
+  ],
+  "connections": {
+    "🚨 Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "📋 Log Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 ElevenLabs Post-Call Webhook1": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond OK1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⚙️ Parse Post-Call Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Parse Post-Call Data1": {
+      "main": [
+        [
+          {
+            "node": "🔍 Has lead_id?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Has lead_id?1": {
+      "main": [
+        [
+          {
+            "node": "📊 Update Lead in Sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📝 Log No Lead ID1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Fallback Manualmente": {
+      "main": [
+        [
+          {
+            "node": "Traer Histórico ElevenLabs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer Histórico ElevenLabs": {
+      "main": [
+        [
+          {
+            "node": "🔀 Mapear para Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Update Lead in Sheet1": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Success1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Polling Cada 5min (última hora)": {
+      "main": [
+        [
+          {
+            "node": "Traer Histórico ElevenLabs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Mapear para Sheet": {
+      "main": [
+        [
+          {
+            "node": "📊 Update Lead in Sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [
+    {
+      "id": "xB4OHablgmSqykSu",
+      "name": "postcall",
+      "createdAt": "2026-07-27T13:17:27.803Z",
+      "updatedAt": "2026-07-27T13:17:27.803Z"
+    },
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "jfrGvBVsoM0zpvxj",
+      "name": "wf6",
+      "createdAt": "2026-07-27T13:17:27.804Z",
+      "updatedAt": "2026-07-27T13:17:27.804Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "WsVT2r13JrGBZrN8",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-08-04T11:20:09.598Z",
+      "updatedAt": "2026-08-04T11:20:09.598Z"
+    }
+  ],
+  "activeVersion": null
+}

@@ -1,0 +1,16 @@
+# Secreto de sesión que el panel genera al arrancar si falta LM_SECRET.
+# Ver docs/INSTALL_STAGING.md § 3. Nunca debe versionarse ni empaquetarse.
+panel/app/.session_key
+
+# Credenciales de despliegue
+.env
+.env.*
+!.env.example
+
+# Artefactos de ejecución
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Empaquetado
+*.zip

@@ -1,0 +1,143 @@
+{% extends "base_app.html" %}
+{% import "_icons.html" as ic %}
+{% block title %}{{ 'Nuevo agente' if mode == 'create' else 'Editar agente' }} — AI Business Platform{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Nuevo agente' if mode == 'create' else 'Editar agente' }}</h1>
+  <p>{{ 'Se crea en estado borrador (draft) — todavía sin llamadas reales.' if mode == 'create' else 'Los cambios no activan llamadas ni consumen créditos de ElevenLabs.' }}</p>
+</div>
+
+<div class="panel" style="max-width:640px">
+  <div class="panel-header"><h2>Datos del agente</h2></div>
+  <div style="padding:20px">
+
+    <div id="form-alert" class="alert alert-error"></div>
+    <div id="form-success" class="alert alert-success"></div>
+
+    <form id="agent-form" data-mode="{{ mode }}" data-agent-id="{{ agent.id if agent else '' }}">
+      <div class="field">
+        <label for="name">Nombre del agente</label>
+        <input type="text" id="name" name="name" required maxlength="120"
+               value="{{ agent.name if agent else '' }}" placeholder="Ej. Agente Ventas MX">
+      </div>
+
+      <div class="field">
+        <label for="description">Descripción (opcional)</label>
+        <textarea id="description" name="description" rows="2" maxlength="500"
+                  placeholder="Notas internas sobre este agente">{{ agent.description if agent and agent.description else '' }}</textarea>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="field">
+          <label for="locale">País / locale</label>
+          <select id="locale" name="locale" required>
+            <option value="" disabled {{ 'selected' if not agent }}>Seleccionar…</option>
+            {% for code, label in locale_choices %}
+            <option value="{{ code }}" {{ 'selected' if agent and agent.locale == code }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="language_display">Idioma (según locale)</label>
+          <input type="text" id="language_display" disabled
+                 style="background:var(--neutral-soft);color:var(--text-muted)"
+                 value="{{ agent.language if agent else '' }}">
+        </div>
+      </div>
+
+      {% if mode == 'create' %}
+      <div class="field">
+        <label for="template">Template de prompt (opcional)</label>
+        <select id="template">
+          <option value="">Empezar en blanco…</option>
+          {% for key, label in template_choices %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="field">
+        <label for="system_prompt">System Prompt</label>
+        <textarea id="system_prompt" name="system_prompt" rows="10" maxlength="6000"
+                  placeholder="Instrucciones que va a seguir el agente en la conversación…">{{ agent.system_prompt if agent and agent.system_prompt else '' }}</textarea>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="field">
+          <label for="voice_provider">Voice provider</label>
+          <select id="voice_provider" name="voice_provider" required>
+            <option value="elevenlabs" selected>ElevenLabs</option>
+          </select>
+          {% if elevenlabs_mode %}
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+            Modo configurado: <strong>{{ 'Platform Managed' if elevenlabs_mode == 'managed' else 'Bring Your Own Key' }}</strong> ·
+            <a href="{{ url_for('web.voice_elevenlabs_settings') }}">cambiar</a>
+          </div>
+          {% else %}
+          <div style="font-size:12px;color:var(--warning);margin-top:4px">
+            Sin configurar — <a href="{{ url_for('web.voice_elevenlabs_settings') }}">configurar ElevenLabs</a>
+          </div>
+          {% endif %}
+        </div>
+        <div class="field">
+          <label for="voice_id">Voice ID (opcional)</label>
+          <input type="text" id="voice_id" name="voice_id" maxlength="100"
+                 value="{{ agent.voice_id if agent and agent.voice_id else '' }}"
+                 placeholder="Pendiente de configurar">
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+            Manual por ahora — la sincronización de voces reales de ElevenLabs llega en una fase futura.
+          </div>
+        </div>
+      </div>
+
+      <div class="field" id="external-agent-id-field">
+        <label for="external_agent_id">ElevenLabs Agent ID (opcional)</label>
+        <input type="text" id="external_agent_id" name="external_agent_id" maxlength="120"
+               value="{{ agent.external_agent_id if agent and agent.external_agent_id else '' }}"
+               placeholder="ID del conversational agent ya creado en ElevenLabs">
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+          Referencia al agente conversacional que ya existe en tu cuenta de ElevenLabs — no se valida
+          ni se consulta contra ElevenLabs en esta etapa. Dejalo vacío para desvincularlo.
+        </div>
+      </div>
+
+      {% if mode == 'create' %}
+      <div class="field">
+        <label>Estado inicial</label>
+        <input type="text" value="draft (borrador)" disabled
+               style="background:var(--neutral-soft);color:var(--text-muted)">
+      </div>
+      {% else %}
+      <div class="field">
+        <label for="status">Estado</label>
+        <select id="status" name="status" required>
+          {% for s in ['draft','disabled'] %}
+          <option value="{{ s }}" {{ 'selected' if agent and agent.status == s }}>{{ s }}</option>
+          {% endfor %}
+        </select>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+          'active' todavía no está disponible en esta etapa del producto.
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="form-actions">
+        <a class="btn btn-ghost" href="{{ url_for('web.voice_agents') }}">Cancelar</a>
+        <button type="submit" id="form-submit" class="btn btn-primary btn-auto">
+          {{ 'Crear agente' if mode == 'create' else 'Guardar cambios' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if mode == 'create' %}
+<script>
+  window.__PROMPT_TEMPLATES__ = {{ prompt_templates | tojson }};
+</script>
+{% endif %}
+<script>
+  window.__LOCALE_LANGUAGE_MAP__ = {{ locale_language_map | tojson }};
+</script>
+{% endblock %}

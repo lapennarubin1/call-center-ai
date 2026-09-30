@@ -1,0 +1,1602 @@
+{
+  "id": "ZS6FrUbdzcNS0QfA",
+  "name": "VZLA WF3 - Lead Account Creation LANDMARKET",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-08-18T08:11:47.732Z",
+  "updatedAt": "2026-08-19T14:21:12.056Z",
+  "isArchived": false,
+  "versionId": "5f84bfb4-5d9d-4861-8972-b08423351cc2",
+  "versionCounter": 3,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }",
+        "options": {}
+      },
+      "id": "127762a3-b45e-40ba-a8ea-b18baf95e3e8",
+      "name": "✅ Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -2160,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phone"
+            },
+            {
+              "name": "full_name"
+            },
+            {
+              "name": "country"
+            },
+            {
+              "name": "lead_id"
+            }
+          ]
+        }
+      },
+      "id": "c80a6e63-cf02-46fd-a823-98a2f27f1306",
+      "name": "🔁 When Called by WhatsApp Bot",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2368,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Universal normalizer ===\nconst raw = $input.first().json || {};\n\n// CASO 0: Tool call de ElevenLabs durante la llamada\nconst isToolCall = (raw.body?.event === 'account_requested' || raw.body?.intent === 'OPEN_FREE_ACCOUNT' ||\n                    raw.event === 'account_requested' || raw.intent === 'OPEN_FREE_ACCOUNT');\nif (isToolCall) {\n  const b = raw.body || raw;\n  const cleanPhone = String(b.phone || '').replace(/[^0-9]/g, '');\n  const waNumber = String(b.whatsapp_number || b.phone || '').replace(/[^0-9]/g, '') || cleanPhone;\n  console.log('🟡 Tool call ElevenLabs | phone:', cleanPhone, '| whatsapp:', waNumber, '| name:', b.full_name);\n  return [{ json: {\n    source: 'elevenlabs_tool',\n    lead_id: String(b.lead_id || `CALL-${cleanPhone}`).trim(),\n    full_name: String(b.full_name || '').trim(),\n    phone: cleanPhone,\n    whatsapp_number: waNumber,\n    email: cleanPhone + '@leads.landmarkmarkets.io',\n    country: String(b.country || 'Mexico').trim(),\n    elevenlabs_call_id: b.conversation_id || '',\n    status_raw: '',\n    duration_secs: 0,\n    transcript: '',\n    sentiment: '',\n    intent: '',\n    classification: 'INTERESTED',\n    callback_requested: false,\n    callback_date: '',\n    interested: true,\n    account_opened: 'PENDING',\n    conversation_summary: 'Account requested during call'\n  }}];\n}\n\n// CASO 1: Sub-workflow desde WhatsApp bot\nconst isSubworkflow = !!(raw.phone && raw.full_name && !raw.body && !raw.data && !raw.transcript);\nif (isSubworkflow) {\n  console.log('🟦 Sub-workflow path (WhatsApp bot)', JSON.stringify(raw));\n  const cleanPhone = String(raw.phone || '').replace(/[^0-9]/g, '');\n  return [{ json: {\n    source: 'subworkflow',\n    lead_id: String(raw.lead_id || `WA-${cleanPhone}`).trim(),\n    full_name: String(raw.full_name || '').trim(),\n    phone: cleanPhone,\n    country: String(raw.country || 'Mexico').trim(),\n    elevenlabs_call_id: '',\n    status_raw: '',\n    duration_secs: 0,\n    transcript: '',\n    sentiment: '',\n    intent: '',\n    classification: 'INTERESTED',\n    callback_requested: false,\n    callback_date: '',\n    interested: true,\n    account_opened: 'PENDING',\n    conversation_summary: 'Account creation from WhatsApp bot'\n  }}];\n}\n\n// CASO 2: ElevenLabs post-call webhook (código original sin cambios)\nconsole.log('🟪 ElevenLabs webhook path');\nconst body = raw.body || raw;\nconst data = body.data || body;\nconst lead = (data.conversation_initiation_client_data && data.conversation_initiation_client_data.dynamic_variables) || data.dynamic_variables || {};\nconst transcriptArr = data.transcript || data.transcripts || [];\nconst transcriptText = Array.isArray(transcriptArr)\n  ? transcriptArr.map(t => `${t.role || t.speaker || 'agent'}: ${t.message || t.text || ''}`).join('\\n')\n  : (typeof transcriptArr === 'string' ? transcriptArr : '');\nconst analysis = data.analysis || {};\nconst duration = data.metadata?.call_duration_secs || data.call_duration_secs || data.duration || 0;\nconst statusRaw = data.status || data.call_status || analysis.call_successful || '';\nconst callId = data.conversation_id || data.call_sid || data.conversationId || '';\nlet classification = 'NO_ANSWER';\nif (statusRaw && /failed|no.?answer|busy|noanswer|no_answer/i.test(statusRaw)) {\n  classification = 'NO_ANSWER';\n} else if (/wrong number|galat number|गलत नंबर/i.test(transcriptText)) {\n  classification = 'WRONG_NUMBER';\n} else if (/do not call|dnc|mat karo|call mat/i.test(transcriptText)) {\n  classification = 'DO_NOT_CALL';\n} else if (/callback|baad mein|बाद में|kal call/i.test(transcriptText)) {\n  classification = 'CALLBACK_REQUESTED';\n} else if (/not interested|nahin chahiye|interest nahi/i.test(transcriptText)) {\n  classification = 'NOT_INTERESTED';\n} else if (/yes|haan|हाँ|interested|account khol|deposit|ready/i.test(transcriptText)) {\n  classification = 'INTERESTED';\n} else if (analysis.intent === 'interested' || analysis.outcome === 'interested') {\n  classification = 'INTERESTED';\n}\nlet fullName = lead.full_name || '';\nconst m = transcriptText.match(/(?:naam|name|नाम)[^a-zA-Z\\u0900-\\u097F]{0,8}([a-zA-Z\\u0900-\\u097F][a-zA-Z\\u0900-\\u097F .]{1,60})/i);\nif (m && m[1] && !fullName) fullName = m[1].trim();\nconst callbackDate = classification === 'CALLBACK_REQUESTED'\n  ? new Date(Date.now() + 24*60*60*1000).toISOString()\n  : '';\nconst cleanPhone = String(lead.phone || data.to_number || '').replace(/[^0-9]/g, '');\nreturn [{ json: {\n  source: 'webhook',\n  lead_id: String(lead.lead_id || data.lead_id || `EL-${callId}`).trim(),\n  full_name: fullName,\n  phone: cleanPhone,\n  country: lead.country || 'Mexico',\n  elevenlabs_call_id: callId,\n  status_raw: statusRaw,\n  duration_secs: duration,\n  transcript: transcriptText,\n  sentiment: analysis.sentiment || '',\n  intent: analysis.intent || analysis.user_intent || '',\n  classification,\n  callback_requested: classification === 'CALLBACK_REQUESTED',\n  callback_date: callbackDate,\n  interested: classification === 'INTERESTED',\n  account_opened: classification === 'INTERESTED' ? 'PENDING' : '',\n  conversation_summary: (analysis.transcript_summary || analysis.summary || transcriptText.slice(0, 800))\n}}];"
+      },
+      "id": "cd9b9ef1-84d7-4c11-b0e4-d37b5d0b0bc3",
+      "name": "⚙️ Normalize Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2160,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-interested",
+              "leftValue": "={{ $json.classification }}",
+              "rightValue": "INTERESTED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0a6d3eb2-106a-450f-a1b2-8dde492068c7",
+      "name": "❓ Is INTERESTED?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1936,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "console.log('⏩ Not INTERESTED — skipping Atlantis. classification:', $json.classification);\nreturn $input.all();"
+      },
+      "id": "f62f4b22-87db-45ff-9fd3-f83141f750eb",
+      "name": "⏩ Skip (not interested)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1712,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "elevenlabs-call-webhook-vzla",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2416,
+        496
+      ],
+      "id": "8c48d60f-fa9b-4d43-993e-4b024d08df52",
+      "name": "Webhook",
+      "webhookId": "b916bd4a-4b93-469e-bcdb-82a75892aab0"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit#gid=1999552215"
+        },
+        "options": {}
+      },
+      "id": "228313b7-b89d-4798-9776-8eb938d88d85",
+      "name": "🔎 Lookup Existing Account",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1456,
+        560
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evalúa el resultado del Lookup. Maneja 0 filas, fila vacía y match por phone.\nconst preflight = $('🛂 Pre-flight Check1').first().json;\nconst wantedPhone = String(preflight.phone || '').replace(/[^0-9]/g, '');\nconst rows = $input.all().map(i => i.json).filter(r => r && Object.keys(r).length > 0);\n\nlet match = null;\nfor (const r of rows) {\n  const rowPhone = String(r.phone || '').replace(/[^0-9]/g, '');\n  const rowWa    = String(r.whatsapp_phone || '').replace(/[^0-9]/g, '');\n  const hasUser  = String(r.atlantis_username || '').trim().length > 0;\n  const opened   = String(r.account_opened || '').toLowerCase() === 'true';\n  if ((rowPhone === wantedPhone || rowWa === wantedPhone) && hasUser && opened) {\n    match = r;\n    break;\n  }\n}\n\nif (match) {\n  console.log('♻️ Existing account found | phone:', wantedPhone, '| user:', match.atlantis_username);\n  return [{ json: {\n    exists: true,\n    username: match.atlantis_username,\n    password: match.atlantis_password,\n    full_name: match.full_name || preflight.full_name,\n    lead_id: match.lead_id || preflight.lead_id,\n    phone: wantedPhone,\n    whatsapp_number: preflight.whatsapp_number || wantedPhone,\n    country: preflight.country || 'Mexico'\n  }}];\n}\n\nconsole.log('🆕 No existing account | phone:', wantedPhone, '— proceeding to create');\nreturn [{ json: {\n  exists: false,\n  lead_id: preflight.lead_id,\n  full_name: preflight.full_name,\n  phone: wantedPhone,\n  whatsapp_number: preflight.whatsapp_number || wantedPhone,\n  country: preflight.country || 'Mexico',\n  email: preflight.email || ''\n}}];"
+      },
+      "id": "2198feca-b5f8-47f1-94c3-2fcbb97095d8",
+      "name": "🆕 Check Existing Account",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "exists-check",
+              "leftValue": "={{ $json.exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "785f0381-6d1f-4c07-ac8f-dd1a0bf0c5bf",
+      "name": "❓ Account Already Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1040,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sheet = $input.first().json;\nconsole.log('♻️ Existing account → resending credentials | user:', sheet.username);\nreturn [{ json: {\n  success: true,\n  duplicate: true,\n  is_existing: true,\n  username: sheet.username,\n  password: sheet.password,\n  account_id: sheet.lead_id || '',\n  full_name: sheet.full_name,\n  lead_id: sheet.lead_id,\n  phone: sheet.phone,\n  whatsapp_number: sheet.whatsapp_number || sheet.phone,\n  country: sheet.country || 'Mexico'\n}}];"
+      },
+      "id": "cd0d8b67-23cc-4d75-a39d-e521bad543e3",
+      "name": "♻️ Build Existing Credentials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconsole.log('🆕 New account credentials ready | user:', d.username);\nreturn [{ json: {\n  success: true,\n  duplicate: false,\n  is_existing: false,\n  username: d.username,\n  password: d.password,\n  account_id: d.account_id || '',\n  full_name: d.full_name,\n  lead_id: d.lead_id,\n  phone: d.phone,\n  whatsapp_number: d.whatsapp_number || d.phone,\n  country: d.country || 'Mexico',\n  http_status: d.http_status\n}}];"
+      },
+      "id": "ed03bb77-a40c-482f-8e1c-c64453b51b02",
+      "name": "✨ Build New Credentials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst missing = [];\nif (!d.full_name || d.full_name.length < 2) missing.push('full_name');\nif (!d.phone || d.phone.length < 6) missing.push('phone');\nif (missing.length > 0) {\n  console.error('❌ Missing required fields:', missing.join(', '));\n  throw new Error('Missing required fields for Atlantis: ' + missing.join(', '));\n}\nconst cleanPhone = String(d.phone || '').replace(/[^0-9]/g, '');\nconst waPhone = String(d.whatsapp_number || d.phone || '').replace(/[^0-9]/g, '') || cleanPhone;\nconsole.log('✅ Pre-flight OK — Phone:', cleanPhone, '| WA:', waPhone, '| Name:', d.full_name);\nreturn [{ json: {\n  lead_id: String(d.lead_id || `WA-${cleanPhone}`).trim(),\n  full_name: String(d.full_name || '').trim(),\n  phone: cleanPhone,\n  whatsapp_number: waPhone,\n  country: String(d.country || 'Mexico').trim(),\n  email: String(d.email || '').trim()\n}}];"
+      },
+      "id": "28373731-e239-46d0-a361-0642235d1f41",
+      "name": "🛂 Pre-flight Check1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1680,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lead fields now arrive directly on the input (❓ Account Already Exists? → here),\n// since 🔐 Atlantis Login1 no longer exists.\n// If they don't (e.g. this node is ever re-wired upstream again), restore the old reference:\n// $('🆕 Check Existing Account').first().json\nconst lead = $input.first().json;\n\nconsole.log('🧱 Building lead-account payload | lead_id:', lead.lead_id, '| phone:', lead.phone);\n\nreturn [{\n  json: {\n    lead_id: String(lead.lead_id ?? ''),\n    full_name: String(lead.full_name ?? ''),\n    phone: String(lead.phone ?? ''),\n    whatsapp_number: String(lead.whatsapp_number ?? lead.phone ?? ''),\n    country: String(lead.country || 'Mexico'),\n    payload: {\n      lead_id: String(lead.lead_id ?? ''),\n      full_name: String(lead.full_name ?? ''),\n      phone: String(lead.phone ?? ''),\n      whatsapp_number: String(lead.whatsapp_number ?? lead.phone ?? ''),\n      country: String(lead.country || 'Mexico'),\n      market: 'SA', // <- the one place that decides which brand these leads land in\n    },\n  },\n}];"
+      },
+      "id": "bb44dfb8-4937-4d72-b1c6-9e0ecb5789a0",
+      "name": "🧱 Build Atlantis Payload1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -784,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cashstudiohub.com/client-internal/lead-account",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "7898dd9c-7a25-499e-bf84-905955cd73cc",
+      "name": "👤 Atlantis Create User1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -592,
+        944
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "q2tGAPlSRu97VFsn",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json || {};\nconst status = resp.statusCode || resp.status || 0;\nconst body = resp.body || resp;\nconst ctx = $('🧱 Build Atlantis Payload1').first().json;\n\nconsole.log('👤 Lead-account create — HTTP:', status);\nconsole.log('👤 Response preview:', JSON.stringify(body).slice(0, 600));\n\nconst apiSuccess = body?.success;\nconst apiErrorCode = body?.errorCode || '';\nconst apiMessage = body?.message || '';\n\n// Narrowed duplicate detection — the API returns a stable error code, no more string-matching.\nconst isDuplicate = apiErrorCode === 'ACCOUNT_ALREADY_EXISTS';\n\nif (status >= 400 || apiSuccess === false) {\n  const errorMsg = apiMessage ||\n                   body?.error?.message ||\n                   body?.errors?.[0]?.message ||\n                   body?.errors?.[0] ||\n                   (Array.isArray(body?.errors) ? body.errors.join('; ') : null) ||\n                   JSON.stringify(body).slice(0, 300);\n  console.error('🔴 Lead-account create FAILED. HTTP', status, 'errorCode:', apiErrorCode, '—', errorMsg);\n  return [{ json: {\n    success: false,\n    duplicate: isDuplicate,\n    http_status: status,\n    atlantis_error_code: apiErrorCode,\n    error_message: errorMsg,\n    username: '',\n    password: '',\n    phone: ctx.phone,\n    whatsapp_number: ctx.whatsapp_number || ctx.phone,\n    full_name: ctx.full_name,\n    lead_id: ctx.lead_id,\n    country: ctx.country,\n    raw_response: body\n  }}];\n}\n\n// Username/password are now minted by the API — read them from the response, not from ctx.\nconst created = body?.data || {};\nconst username = created.username || '';\nconst password = created.password || '';\nconst accountId = created.accountID || created.accountId || created.id || '';\nconst userId = created.userId || created.id || '';\n\nconsole.log('✅ Lead-account created. accountId (portal trader id, not ARK account):', accountId, 'userId:', userId);\n\nreturn [{ json: {\n  success: true,\n  duplicate: false,\n  http_status: status,\n  account_id: accountId,\n  user_id: userId,\n  username,\n  password,\n  phone: ctx.phone,\n  whatsapp_number: ctx.whatsapp_number || ctx.phone,\n  full_name: ctx.full_name,\n  lead_id: ctx.lead_id,\n  country: ctx.country,\n  raw_response: body\n}}];"
+      },
+      "id": "8fdd5b4f-6ea0-4164-ac0e-3f893e454bfb",
+      "name": "🔍 Validate Atlantis Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "success",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "338110ab-0c48-4e5d-998f-0df696a47ddb",
+      "name": "❓ Account Created OK?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://n8n-evolution-api.qkaauu.easypanel.host/message/sendText/Call Center AI - Whatssap Client",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "apikey",
+              "value": "1DE174FFD35F-4CFC-9699-E1BCAEEB9C34"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $json.whatsapp_number || $json.phone }}"
+            },
+            {
+              "name": "=text",
+              "value": "={{ $json.whatsapp_message }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "631c788d-43b4-4835-b274-f45eccc1aa9a",
+      "name": "📲 Send WhatsApp Credentials1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        0
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw",
+          "mode": "list",
+          "cachedResultName": "VZLA Landmark_Markets_Call_Center",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1999552215,
+          "mode": "list",
+          "cachedResultName": "conversions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw/edit#gid=1999552215"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $('✨ Build New Credentials').item.json.lead_id }}",
+            "full_name": "={{ $('✨ Build New Credentials').item.json.full_name }}",
+            "phone": "={{ $('✨ Build New Credentials').item.json.phone }}",
+            "whatsapp_phone": "={{ $('✨ Build New Credentials').item.json.whatsapp_number }}",
+            "conversion_date": "={{ $now.toISO() }}",
+            "account_opened": "true",
+            "deposit_status": "={{ $json.is_existing ? 'CREDENTIALS_RESENT' : 'ACCOUNT_CREATED' }}",
+            "notes": "={{ $json.is_existing ? 'Resent existing credentials | user: ' + $json.username : 'Landmark Markets user: ' + $json.username + ' | acct: ' + $json.account_id }}",
+            "atlantis_username": "={{ $('✨ Build New Credentials').item.json.username }}",
+            "atlantis_password": "={{ $('✨ Build New Credentials').item.json.password }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "whatsapp_phone",
+              "displayName": "whatsapp_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "atlantis_username",
+              "displayName": "atlantis_username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "atlantis_password",
+              "displayName": "atlantis_password",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversion_date",
+              "displayName": "conversion_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "deposit_status",
+              "displayName": "deposit_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "paid",
+              "displayName": "paid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "out_trade_no",
+              "displayName": "out_trade_no",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        464,
+        544
+      ],
+      "id": "717a9628-ac83-4f24-a9d6-f1be0b5e99eb",
+      "name": "📊 Upsert Lead to Conversions1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nlet waStatus = 0;\ntry { waStatus = $('📲 Send WhatsApp Credentials1').first().json?.statusCode || 0; } catch(e) {}\nconsole.log('🎉 SUCCESS — user:', d.username, '| existing:', d.is_existing, '| account_id:', d.account_id);\nreturn [{ json: {\n  status: 'SUCCESS',\n  is_existing: d.is_existing || false,\n  username: d.username,\n  password: d.password,\n  account_id: d.account_id,\n  phone: d.phone,\n  full_name: d.full_name,\n  lead_id: d.lead_id,\n  whatsapp_status: waStatus\n}}];"
+      },
+      "id": "1bdf12b6-de5e-4af4-b006-26b2bd5fa431",
+      "name": "📝 Log SUCCESS1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconsole.error('🔴 FAILURE — lead_id:', d.lead_id, '| http:', d.http_status, '| error:', d.error_message);\nreturn [{ json: {\n  status: 'FAILURE',\n  error_message: d.error_message || 'unknown',\n  http_status: d.http_status,\n  atlantis_error_code: d.atlantis_error_code || '',\n  phone: d.phone,\n  full_name: d.full_name,\n  lead_id: d.lead_id,\n  duplicate: d.duplicate || false\n}}];"
+      },
+      "id": "c74971af-9516-45c9-8ee0-af7a0ca50196",
+      "name": "📝 Log FAILURE1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        1056
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Buscamos el contexto del cliente (viene de la rama que se haya ejecutado)\nlet ctxSrc = null;\ntry { ctxSrc = $('♻️ Build Existing Credentials').first().json; } catch(e) {}\nif (!ctxSrc) { try { ctxSrc = $('✨ Build New Credentials').first().json; } catch(e) {} }\nconst ctx = ctxSrc || {};\n\nconst resp = $input.first().json || {};\n\nlet text = '';\ntry {\n  text = resp?.message?.content\n      || resp?.content\n      || resp?.text\n      || resp?.choices?.[0]?.message?.content\n      || '';\n  text = String(text || '').trim();\n  if (!text) console.error('🔴 AI message empty. Raw:', JSON.stringify(resp).slice(0,400));\n} catch (e) {\n  console.error('🔴 AI parse error:', e.message);\n}\n\nif (!text) {\n  text = ctx.is_existing\n    ? `नमस्ते *${ctx.full_name}* जी 🙏\\n\\nजैसा आपने अनुरोध किया, आपके Landmark Markets अकाउंट के Login Credentials:\\n\\nUsername: ${ctx.username}\\nPassword: ${ctx.password}\\n\\n🌐 Login: https://www.landmarkmarkets.in/sign-in`\n    : `नमस्ते *${ctx.full_name}* जी 🙏\\n\\nLandmark Markets में आपका स्वागत है। आपका ट्रेडिंग अकाउंट तैयार है ✅\\n\\nUsername: ${ctx.username}\\nPassword: ${ctx.password}\\n\\n🌐 Login: https://www.landmarkmarkets.in/sign-in`;\n}\n\nreturn [{ json: {\n  whatsapp_message: text,\n  full_name: ctx.full_name,\n  username: ctx.username,\n  password: ctx.password,\n  phone: ctx.phone,\n  whatsapp_number: ctx.whatsapp_number || ctx.phone,\n  lead_id: ctx.lead_id,\n  country: ctx.country,\n  is_existing: ctx.is_existing || false,\n  account_id: ctx.account_id || '',\n  success: true\n}}];"
+      },
+      "id": "d59ffbbb-9ee2-488a-b505-fb4666d7a4a6",
+      "name": "📝 Parse AI Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        0
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a WhatsApp messaging assistant for Landmark Markets, a trading platform targeting Hindi-speaking leads in India. Write messages in Hinglish (Hindi + English mix, using Devanagari script for Hindi words).\n\nALWAYS follow this exact visual structure with line breaks:\n\n1. A greeting line with the client's name (vary the greeting phrase each time, e.g. \"नमस्ते\", \"Namaste\", \"Hi\", mix it up)\n2. A short welcome/status line (vary the wording each time — for NEW clients welcome them, for RETURNING clients acknowledge you're resending their details)\n3. A blank line\n4. \"Login Credentials:\" followed by Username on its own line and Password on its own line\n5. A blank line\n6. \"Login Portal:\" followed by the login link\n7. A closing line encouraging them to log in (vary this line each time — different phrasing, different angle, e.g. mention first deposit bonus, mention support availability, mention starting their trading journey)\n\nUse 1-2 emojis maximum, placed naturally (e.g. next to the greeting or closing line) — never more.\n\nKeep the credentials section (Username/Password lines) word-for-word consistent in format every time — never change how that block looks. Only vary the surrounding sentences (greeting, status line, closing line).\n\nNever include literal curly braces {{ }} or template syntax in your output. Always write the actual values directly as plain text.\n\nOutput ONLY the message text with proper line breaks, nothing else — no quotation marks, no explanations, no markdown formatting like ** or #.",
+              "role": "system"
+            },
+            {
+              "content": "=Client name: {{ $json.full_name }}\nUsername: {{ $json.username }}\nPassword: {{ $json.password }}\nLogin portal: https://www.landmarkmarkets.in/sign-in\nClient status: {{ $json.is_existing ? 'RETURNING - resending existing credentials' : 'NEW - account just created' }}\n\nWrite the WhatsApp message now. {{ $json.full_name }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 300,
+          "temperature": 0.9
+        }
+      },
+      "id": "40db3200-9074-4cd9-a80e-12b99458db9b",
+      "name": "🤖 AI Generate WA Message",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "dIMqycc6fOOI82LR",
+          "name": "OpenAI account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "chatId": "-1003616406932",
+        "text": "=✅ *MEXICO New Account Landmark Markets Created*\n\n👤 *Client:* {{ $json.full_name }}\n📱 *Phone:* {{ $json.phone }}\n🆔 *Lead ID:* {{ $json.lead_id }}\n🔐 *Username:* `{{ $json.atlantis_username }}`\n🔑 *Password:* `{{ $json.atlantis_password }}`\n💼 *Account ID:* {{ $json.account_id || 'N/A' }}\n♻️ *Type:* {{ $json.is_existing ? 'Reenvío de credenciales' : 'New Account' }}\n📲 *WA Status:* 📲 *SMS Status:* {{ $json.mtstat || 'Sent' }}\n🕐 {{ $now.setZone('America/Mexico_City').toFormat('dd/MM/yyyy HH:mm') }} CDMX",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "669dd093-46aa-4d5d-bbe2-e12164dfb52e",
+      "name": "📢 Telegram Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        720,
+        352
+      ],
+      "webhookId": "0f4a0b75-9d55-4089-a894-b23ea4542f54",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $json.whatsapp_number || $json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "=Landmark Markets User: {{ $json.username }} Pass: {{ $json.password }} Web: https://crm.lmtrader.net/"
+            }
+          ]
+        },
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "17cb585b-20bb-4bcb-90ad-88ad62e8f999",
+      "name": "📲 Send SMS Credentials1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⚠️ STAGING URL — SWAP BEFORE GO-LIVE\n\nThis node currently points at:\n`https://stage.cashstudiohub.com/client-internal/lead-account`\n\nWhen production is ready, this is the **only field** that needs to change:\n- Open **👤 Atlantis Create User1** → field `URL`\n- Replace the host with the production `cashstudio-api-host`\n\nAlso confirm/create the **`x-internal-key` (Header Auth)** n8n Credential on this instance before enabling — it is not embedded in this file.\n\nThis workflow was imported as **inactive** on purpose. Activate only after the URL swap + credential + the \"Before go-live\" checklist in `wf3-n8n-lead-account.md` are done.",
+        "height": 320,
+        "width": 420,
+        "color": 5
+      },
+      "id": "7e861feb-ba3e-494e-baba-200495009656",
+      "name": "📌 READ BEFORE GO-LIVE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -784,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yKHJ0YnWWw4cj1An7wZO7RPpjPZzitSqu0bsiplmXbw",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ 'leads_' + ($('🆕 Check Existing Account').item.json.country || 'mexico').toLowerCase() }}",
+          "mode": "expression"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $('🆕 Check Existing Account').item.json.lead_id }}",
+            "status": "INTERESTED",
+            "notes": "=Cuenta abierta (Atlantis) | user: {{ $json.username }} | {{ $now.toISO() }}",
+            "row_number": 0
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "call_trigger",
+              "displayName": "call_trigger",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "assigned_agent",
+              "displayName": "assigned_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_call_status",
+              "displayName": "last_call_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_call_time",
+              "displayName": "last_call_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "call_attempts",
+              "displayName": "call_attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "elevenlabs_call_id",
+              "displayName": "elevenlabs_call_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversation_summary",
+              "displayName": "conversation_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "interested",
+              "displayName": "interested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "callback_requested",
+              "displayName": "callback_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "callback_date",
+              "displayName": "callback_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "account_opened",
+              "displayName": "account_opened",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution",
+              "displayName": "execution",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_row_number",
+              "displayName": "_row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_valid",
+              "displayName": "_valid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_errors",
+              "displayName": "_errors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status_raw",
+              "displayName": "status_raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "duration_secs",
+              "displayName": "duration_secs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "classification",
+              "displayName": "classification",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "from",
+              "displayName": "from",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "isFromMe",
+              "displayName": "isFromMe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "raw",
+              "displayName": "raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pushName",
+              "displayName": "pushName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body",
+              "displayName": "body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "headers",
+              "displayName": "headers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "statusCode",
+              "displayName": "statusCode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "statusMessage",
+              "displayName": "statusMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ef249840-8126-4af1-8a5c-13f83b1b69bd",
+      "name": "📈 Marcar INTERESTED en Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        720,
+        720
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $json.whatsapp_number || $json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "=Capital Atlantis User: {{ $json.username }} Pass: {{ $json.password }} Web: crm.capitalatlantis.net "
+            }
+          ]
+        },
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "d1803c96-f333-42fd-bffa-02b12c8db685",
+      "name": "log error SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        32,
+        1056
+      ],
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "🔁 When Called by WhatsApp Bot": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalize Payload": {
+      "main": [
+        [
+          {
+            "node": "❓ Is INTERESTED?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Is INTERESTED?": {
+      "main": [
+        [
+          {
+            "node": "🛂 Pre-flight Check1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⏩ Skip (not interested)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond 200",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⚙️ Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Lookup Existing Account": {
+      "main": [
+        [
+          {
+            "node": "🆕 Check Existing Account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🆕 Check Existing Account": {
+      "main": [
+        [
+          {
+            "node": "❓ Account Already Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Account Already Exists?": {
+      "main": [
+        [
+          {
+            "node": "♻️ Build Existing Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🧱 Build Atlantis Payload1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Build Existing Credentials": {
+      "main": [
+        [
+          {
+            "node": "📲 Send SMS Credentials1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✨ Build New Credentials": {
+      "main": [
+        [
+          {
+            "node": "📲 Send SMS Credentials1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🛂 Pre-flight Check1": {
+      "main": [
+        [
+          {
+            "node": "🔎 Lookup Existing Account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧱 Build Atlantis Payload1": {
+      "main": [
+        [
+          {
+            "node": "👤 Atlantis Create User1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "👤 Atlantis Create User1": {
+      "main": [
+        [
+          {
+            "node": "🔍 Validate Atlantis Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Validate Atlantis Response1": {
+      "main": [
+        [
+          {
+            "node": "❓ Account Created OK?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Account Created OK?1": {
+      "main": [
+        [
+          {
+            "node": "✨ Build New Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "log error SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Upsert Lead to Conversions1": {
+      "main": [
+        [
+          {
+            "node": "📝 Log SUCCESS1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📢 Telegram Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📈 Marcar INTERESTED en Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 AI Generate WA Message": {
+      "main": [
+        [
+          {
+            "node": "📝 Parse AI Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📲 Send SMS Credentials1": {
+      "main": [
+        [
+          {
+            "node": "📊 Upsert Lead to Conversions1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "log error SMS": {
+      "main": [
+        [
+          {
+            "node": "📝 Log FAILURE1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {
+    "📝 Parse AI Message": [
+      {
+        "json": {
+          "whatsapp_message": "नमस्ते Kamlesh Kumari!  \nआपका स्वागत है Landmark Markets में, हम आपकी ट्रेडिंग यात्रा का इंतजार कर रहे हैं।\n\nLogin Credentials:  \nUsername: kamlesh7225  \nPassword: kamlesh7@Kx1  \n\nLogin Portal:  \nhttps://www.landmarkmarkets.in/sign-in\n\nआप अपनी पहली डिपॉजिट बोनस का फायदा उठाने के लिए अभी लॉग इन करें! 🎉",
+          "full_name": "Kamlesh Kumari",
+          "username": "kamlesh7225",
+          "password": "kamlesh7@Kx1",
+          "phone": "919650037726",
+          "whatsapp_number": "919650037726",
+          "lead_id": "6348",
+          "country": "India",
+          "is_existing": false,
+          "account_id": 512818,
+          "success": true
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "log error SMS": [
+      {
+        "json": {
+          "data": "command=MT_RESPONSE&cpid=zUg8Dhgb&cppwd=000&mtmsgid=1657d370a33fd0&mtstat=ACCEPTD&mterrcode=000",
+          "headers": {
+            "date": "Thu, 30 Jul 2026 12:44:59 GMT",
+            "content-type": "application/json;charset=UTF-8",
+            "content-length": "95",
+            "connection": "close"
+          },
+          "statusCode": 200,
+          "statusMessage": ""
+        }
+      }
+    ],
+    "✨ Build New Credentials": [
+      {
+        "json": {
+          "success": true,
+          "duplicate": false,
+          "is_existing": false,
+          "username": "test3652",
+          "password": "test3652@Tx1",
+          "account_id": "6a8415130f0630521515c00f",
+          "full_name": "test",
+          "lead_id": "001",
+          "phone": "522295603505",
+          "whatsapp_number": "522295603505",
+          "country": "mexico",
+          "http_status": 201
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "📊 Upsert Lead to Conversions1": [
+      {
+        "json": {
+          "lead_id": "001",
+          "full_name": "test",
+          "phone": "522295603505",
+          "whatsapp_phone": "522295603505",
+          "conversion_date": "2026-08-18T04:17:27.239-04:00",
+          "account_opened": "true",
+          "deposit_status": "ACCOUNT_CREATED",
+          "notes": "Landmark Markets user: undefined | acct: undefined",
+          "atlantis_username": "test3652",
+          "atlantis_password": "test3652@Tx1"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "meta": null,
+  "tags": [
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "O5XbU2xsNsK3wWYo",
+      "name": "wf3-atlantis",
+      "createdAt": "2026-07-27T11:58:53.683Z",
+      "updatedAt": "2026-07-27T11:58:53.683Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "ZS6FrUbdzcNS0QfA",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-08-18T08:11:47.732Z",
+      "updatedAt": "2026-08-18T08:11:47.732Z"
+    }
+  ],
+  "activeVersion": null
+}

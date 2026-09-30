@@ -1,0 +1,660 @@
+PREFLIGHT WF10 (solo lectura) — 2026-09-29T13:56:36+00:00 — host srv1859167 — ventana 180 min
+
+================================================================
+== 0. n8n (versión: WF10 se probó en n8n 1.123.82)
+================================================================
+contenedor landmarket_n8n.1.pl1onttvx804xyd9hcthcijn0: imagen n8nio/n8n:latest | n8n 2.40.7 | TZ=
+contenedor landmarket_n8n-db.1.z84wks4dk29klvuhgdrahwtfv: imagen postgres:17 | n8n OCI runtime exec failed: exec failed: unable to start container process: exec: "n8n": executable file not found in $PATH | TZ=
+contenedor landmarket_n8n-landmarket.1.eqvaf6bjek1vo2ejbwh3tztid: imagen postgres:17 | n8n OCI runtime exec failed: exec failed: unable to start container process: exec: "n8n": executable file not found in $PATH | TZ=
+
+================================================================
+== 1. ASTERISK
+================================================================
+Asterisk 20.6.0~dfsg+~cs6.13.40431414-2build5 built by nobody @ buildd.debian.org on a unknown running Linux on 2024-04-15 00:13:12 UTC
+System uptime: 3 days, 7 hours, 36 minutes, 8 seconds
+Last reload: 3 days, 7 hours, 36 minutes, 8 seconds
+16 active channels
+8 active calls
+10655 calls processed
+usuario del proceso: asterisk
+systemname: (no definido; UNIQUEID = <epoch>.<n>)
+PrivateTmp=no
+FreePBX: no
+--- MixMonitor: el 3.er argumento (command) se ejecuta al terminar la grabación:
+MixMonitor(filename.extension[,options[,command]])
+--- contextos que llaman a wf10-enqueue (dialplan cargado, con archivo:línea):
+[from-client-elevenlabs]
+   3. Set(RECORDING=/tmp/test-${UNIQUEID}.wav)   [extensions.conf:7]
+   4. MixMonitor(${RECORDING},b)                 [extensions.conf:8]
+   5. Dial(PJSIP/${EXTEN}@proveedor-mx,60)       [extensions.conf:9]
+   6. StopMixMonitor()                           [extensions.conf:10]
+   7. System(/usr/local/bin/wf10-enqueue.py "${EXTEN}" "${RECORDING}" "${UNIQUEID}" "${DIALSTATUS}") [extensions.conf:11]
+   8. Hangup()                                   [extensions.conf:12]
+   3. Set(RECORDING=/tmp/test-${UNIQUEID}.wav)   [extensions.conf:26]
+   4. MixMonitor(${RECORDING},b)                 [extensions.conf:27]
+   5. Dial(PJSIP/${EXTEN}@proveedor1,60)         [extensions.conf:28]
+   6. StopMixMonitor()                           [extensions.conf:29]
+   7. System(/usr/local/bin/wf10-enqueue.py "${EXTEN}" "${RECORDING}" "${UNIQUEID}" "${DIALSTATUS}") [extensions.conf:30]
+   8. Hangup()                                   [extensions.conf:31]
+   3. Set(RECORDING=/tmp/test-${UNIQUEID}.wav)   [extensions.conf:16]
+   4. MixMonitor(${RECORDING},b)                 [extensions.conf:17]
+   6. Dial(PJSIP/${NEPAL_NUMBER}@proveedor1,60)  [extensions.conf:19]
+   7. StopMixMonitor()                           [extensions.conf:20]
+   8. System(/usr/local/bin/wf10-enqueue.py "${EXTEN}" "${RECORDING}" "${UNIQUEID}" "${DIALSTATUS}") [extensions.conf:21]
+   9. Hangup()                                   [extensions.conf:22]
+   2. Hangup()                                   [extensions.conf:34]
+   -> opciones de Dial: ''  (sin 'g': si contestan, System() después de Dial NO se ejecuta)
+   -> opciones de Dial: ''  (sin 'g': si contestan, System() después de Dial NO se ejecuta)
+   -> opciones de Dial: ''  (sin 'g': si contestan, System() después de Dial NO se ejecuta)
+
+================================================================
+== 2. SCRIPTS WF10 (contenido con secretos enmascarados)
+================================================================
+---- /usr/local/bin/wf10-enqueue.py  (root:root 755 2026-09-25 08:33:33.276403214 +0000)  sha256=f3520814eb1f62f9
+#!/usr/bin/env python3
+
+import sys
+import os
+import json
+import time
+from datetime import datetime, timezone
+
+QUEUE = "/var/spool/wf10/queue"
+DONE = "/var/spool/wf10/done"
+LOG = "/var/log/asterisk/wf10-enqueue.log"
+
+def log(s):
+    try:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        with open(LOG, "a") as f:
+            f.write(f"{ts} | {s}\n")
+    except Exception:
+        pass
+
+if len(sys.argv) < 5:
+    sys.exit(1)
+
+phone = sys.argv[1]
+wav = sys.argv[2]
+uniqueid = sys.argv[3]
+dialstatus = sys.argv[4].upper().strip()
+
+# Solo llamadas realmente ANSWERED.
+if dialstatus != "ANSWER":
+    sys.exit(0)
+
+# StopMixMonitor ya se ejecuto, pero permitimos un instante para flush final.
+for _ in range(10):
+    if os.path.isfile(wav) and os.path.getsize(wav) > 44:
+        break
+    time.sleep(0.2)
+
+if not os.path.isfile(wav):
+    log(f"{uniqueid} | {phone} | ERROR WAV NO EXISTE | {wav}")
+    sys.exit(1)
+
+size = os.path.getsize(wav)
+
+if size <= 44:
+    log(f"{uniqueid} | {phone} | SKIP WAV VACIO | {size} bytes")
+    sys.exit(0)
+
+job = {
+    "phone": phone,
+    "wav": wav,
+    "filename": os.path.basename(wav),
+    "uniqueid": uniqueid,
+    "queued_at": time.time(),
+    "attempts": 0,
+    "next_attempt": 0,
+    "followup_id": None
+}
+
+path = os.path.join(QUEUE, uniqueid + ".json")
+
+# Idempotencia: no duplicar el mismo UNIQUEID.
+if os.path.exists(path) or os.path.exists(os.path.join(DONE, uniqueid + ".json")):
+    sys.exit(0)
+
+tmp = path + ".tmp"
+
+with open(tmp, "w") as f:
+    json.dump(job, f)
+
+os.replace(tmp, path)
+
+log(f"{uniqueid} | {phone} | ENCOLADO | {size} bytes")
+---- /usr/local/bin/wf10-worker.py  (root:root 700 2026-09-25 09:39:26.508686944 +0000)  sha256=4f43f63815242678
+#!/usr/bin/env python3
+
+import os
+import re
+import json
+import time
+import base64
+import shutil
+import subprocess
+import threading
+import urllib.request
+import urllib.error
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+
+QUEUE = "/var/spool/wf10/queue"
+DONE = "/var/spool/wf10/done"
+LOG = "/var/log/asterisk/wf10-worker.log"
+
+WEBHOOK = "https://landmarket-n8n.dhsoig.easypanel.host/webhook/send-recording"
+
+MAX_WORKERS = 10
+
+# Límite interno conservador.
+# Permite ráfagas de 50 sin problema, pero evita que un backfill enorme
+# martillee LeadStudio indefinidamente.
+RATE_MAX = 150
+RATE_WINDOW = 15 * 60
+
+pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+
+inflight = set()
+inflight_lock = threading.Lock()
+
+rate_times = deque()
+rate_lock = threading.Lock()
+
+def log(msg):
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    with open(LOG, "a") as f:
+        f.write(f"{ts} | {msg}\n")
+        f.flush()
+
+def sql_scalar(sql):
+    p = subprocess.run(
+        ["mariadb", "asterisk", "-N", "-B", "-e", sql],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=15
+    )
+
+    if p.returncode != 0:
+        raise RuntimeError("MariaDB: " + p.stderr.strip())
+
+    rows = [x.strip() for x in p.stdout.splitlines() if x.strip()]
+    return rows[0] if rows else ""
+
+def esc_sql(v):
+    return str(v).replace("\\", "\\\\").replace("'", "''")
+
+def get_followup(job):
+    # Backfill futuro puede proporcionar ID exacto.
+    if job.get("followup_id"):
+        return job["followup_id"]
+
+    digits = re.sub(r"\D", "", str(job["phone"]))
+    last10 = digits[-10:]
+
+    q = f"""
+SELECT followup_id
+FROM wf_call_followups
+WHERE RIGHT(phone,10)='{last10}'
+  AND provider='asterisk'
+  AND call_status='ANSWERED'
+  AND (recording_synced IS NULL OR recording_synced=0)
+  AND created_at >= UTC_TIMESTAMP() - INTERVAL 12 HOUR
+ORDER BY created_at DESC
+LIMIT 1;
+"""
+
+    return sql_scalar(q)
+
+def is_synced(fid):
+    fid = esc_sql(fid)
+
+    v = sql_scalar(f"""
+SELECT COALESCE(recording_synced,0)
+FROM wf_call_followups
+WHERE followup_id='{fid}'
+LIMIT 1;
+""")
+
+    return v == "1"
+
+def save_job(path, job):
+    tmp = path + ".tmp." + str(os.getpid())
+
+    with open(tmp, "w") as f:
+        json.dump(job, f)
+
+    os.replace(tmp, path)
+
+def reschedule(path, job, reason):
+    job["attempts"] = int(job.get("attempts", 0)) + 1
+
+    delays = [10, 20, 30, 60, 120, 300, 600, 900]
+    delay = delays[min(job["attempts"] - 1, len(delays) - 1)]
+
+    job["next_attempt"] = time.time() + delay
+    job["last_error"] = reason[:1000]
+
+    save_job(path, job)
+
+    log(
+        f"{job['uniqueid']} | {job['phone']} | RETRY "
+        f"{job['attempts']} en {delay}s | {reason}"
+    )
+
+def finish(path, job):
+    job["completed_at"] = time.time()
+    job["next_attempt"] = 0
+
+    save_job(path, job)
+
+    dest = os.path.join(DONE, os.path.basename(path))
+
+    if os.path.exists(dest):
+        os.remove(dest)
+
+    shutil.move(path, dest)
+
+    log(
+        f"{job['uniqueid']} | {job['phone']} | OK "
+        f"followup={job.get('followup_id')}"
+    )
+
+def rate_acquire():
+    while True:
+        now = time.time()
+
+        with rate_lock:
+            while rate_times and now - rate_times[0] >= RATE_WINDOW:
+                rate_times.popleft()
+
+            if len(rate_times) < RATE_MAX:
+                rate_times.append(now)
+                return
+
+            wait_for = RATE_WINDOW - (now - rate_times[0]) + 0.25
+
+        time.sleep(min(max(wait_for, 0.25), 5))
+
+def post_webhook(job):
+    wav = job["wav"]
+
+    if not os.path.isfile(wav):
+        raise RuntimeError("WAV desaparecio: " + wav)
+
+    size = os.path.getsize(wav)
+
+    if size <= 44:
+        raise RuntimeError(f"WAV vacio: {size} bytes")
+
+    with open(wav, "rb") as f:
+        audio = base64.b64encode(f.read()).decode("ascii")
+
+    dt = datetime.fromtimestamp(
+        os.path.getmtime(wav),
+        tz=timezone.utc
+    ).strftime("%Y-%m-%d")
+
+    payload = {
+        "phone": job["phone"],
+        "date": dt,
+        "filename": os.path.basename(wav),
+        "audio_base64": audio,
+        "followup_id": job.get("followup_id"),
+        "uniqueid": job.get("uniqueid"),
+        "suppress_telegram": bool(job.get("suppress_telegram", False))
+    }
+
+    data = json.dumps(payload).encode()
+
+    rate_acquire()
+
+    req = urllib.request.Request(
+        WEBHOOK,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
+    with urllib.request.urlopen(req, timeout=45) as r:
+        body = r.read().decode(errors="replace")
+
+        if r.status < 200 or r.status >= 300:
+            raise RuntimeError(
+                f"Webhook HTTP {r.status}: {body[:300]}"
+            )
+
+def process(path):
+    try:
+        with open(path) as f:
+            job = json.load(f)
+
+        # Si otro intento ya termino, no volver a subir.
+        if job.get("followup_id") and is_synced(job["followup_id"]):
+            finish(path, job)
+            return
+
+        fid = get_followup(job)
+
+        if not fid:
+            reschedule(
+                path,
+                job,
+                "followup ANSWERED aun no disponible"
+            )
+            return
+
+        job["followup_id"] = fid
+        save_job(path, job)
+
+        if is_synced(fid):
+            finish(path, job)
+            return
+
+        post_webhook(job)
+
+        # El webhook responde al arrancar el WF.
+        # Esperar que LeadStudio PUT + UPDATE terminen.
+        for _ in range(30):
+            time.sleep(2)
+
+            if is_synced(fid):
+                finish(path, job)
+                return
+
+        reschedule(
+            path,
+            job,
+            "WF10 ejecuto pero recording_synced sigue en 0"
+        )
+
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode(errors="replace")[:300]
+        except Exception:
+            body = ""
+
+        try:
+            with open(path) as f:
+                job = json.load(f)
+
+            reschedule(
+                path,
+                job,
+                f"HTTP {e.code} webhook: {body}"
+            )
+        except Exception as ee:
+            log(f"{path} | ERROR doble: {e} / {ee}")
+
+    except Exception as e:
+        try:
+            with open(path) as f:
+                job = json.load(f)
+
+            reschedule(path, job, str(e))
+
+        except Exception as ee:
+            log(f"{path} | ERROR doble: {e} / {ee}")
+
+    finally:
+        with inflight_lock:
+            inflight.discard(path)
+
+def main():
+    log(
+        f"WORKER START | workers={MAX_WORKERS} "
+        f"rate={RATE_MAX}/{RATE_WINDOW}s"
+    )
+
+    while True:
+        try:
+            files = sorted(
+                os.path.join(QUEUE, x)
+                for x in os.listdir(QUEUE)
+                if x.endswith(".json")
+            )
+
+            now = time.time()
+
+            for path in files:
+                try:
+                    with open(path) as f:
+                        job = json.load(f)
+
+                    if float(job.get("next_attempt", 0)) > now:
+                        continue
+
+                except Exception as e:
+                    log(f"{path} | JSON ERROR | {e}")
+                    continue
+
+                with inflight_lock:
+                    if path in inflight:
+                        continue
+
+                    inflight.add(path)
+
+                pool.submit(process, path)
+
+            time.sleep(0.5)
+
+        except Exception as e:
+            log("MAIN ERROR | " + str(e))
+            time.sleep(2)
+
+if __name__ == "__main__":
+    main()
+---- /usr/local/bin/wf10-mixmon-post.sh: no existe
+---- /root/scripts/send_recordings.sh  (root:root 755 2026-07-31 10:38:17.914866895 +0000)  sha256=64d8a88cfafc5d19
+#!/bin/bash
+
+WEBHOOK_URL="https://landmarket-n8n.dhsoig.easypanel.host/webhook/send-recording"
+SENT_LOG="/root/sent_recordings.txt"
+
+mysql -N asterisk -e "SELECT uniqueid, dst, DATE(calldate) FROM cdr WHERE billsec > 60 AND disposition='ANSWERED' AND calldate >= NOW() - INTERVAL 1 DAY;" | while read uid dst calldate; do
+
+  if grep -q "^${uid}$" "$SENT_LOG" 2>/dev/null; then
+    continue
+  fi
+
+  FILE="/tmp/test-${uid}.wav"
+
+  if [ -f "$FILE" ]; then
+    PHONE=$(echo "$dst" | sed 's/^+//')
+    base64 -w 0 "$FILE" > /tmp/audio_b64_tmp.txt
+
+    jq -n --arg phone "$PHONE" \
+          --arg date "$calldate" \
+          --arg filename "${PHONE}_${calldate}.wav" \
+          --rawfile audio /tmp/audio_b64_tmp.txt \
+          '{phone: $phone, date: $date, filename: $filename, audio_base64: $audio}' \
+          > /tmp/payload_tmp.json
+
+    curl -s -X POST "$WEBHOOK_URL" \
+      -H "Content-Type: application/json" \
+      --data-binary @/tmp/payload_tmp.json \
+      -o /dev/null
+
+    echo "$uid" >> "$SENT_LOG"
+    echo "Sent: ${PHONE}_${calldate}.wav"
+  fi
+done
+
+rm -f /tmp/audio_b64_tmp.txt /tmp/payload_tmp.json
+--- ¿cómo trata el worker la respuesta del webhook? (líneas relevantes)
+17:QUEUE = "/var/spool/wf10/queue"
+18:DONE = "/var/spool/wf10/done"
+21:WEBHOOK = "https://landmarket-n8n.dhsoig.easypanel.host/webhook/send-recording"
+51:        timeout=15
+153:        time.sleep(min(max(wait_for, 0.25), 5))
+155:def post_webhook(job):
+195:    with urllib.request.urlopen(req, timeout=45) as r:
+198:        if r.status < 200 or r.status >= 300:
+200:                f"Webhook HTTP {r.status}: {body[:300]}"
+230:        post_webhook(job)
+232:        # El webhook responde al arrancar el WF.
+235:            time.sleep(2)
+260:                f"HTTP {e.code} webhook: {body}"
+315:            time.sleep(0.5)
+319:            time.sleep(2)
+--- ¿qué manda el worker en el POST? (WF10 necesita el UNIQUEID o el nombre test-<UNIQUEID>.wav para el match exacto)
+68:    digits = re.sub(r"\D", "", str(job["phone"]))
+117:        f"{job['uniqueid']} | {job['phone']} | RETRY "
+135:        f"{job['uniqueid']} | {job['phone']} | OK "
+175:        "phone": job["phone"],
+177:        "filename": os.path.basename(wav),
+178:        "audio_base64": audio,
+180:        "uniqueid": job.get("uniqueid"),
+190:        data=data,
+
+================================================================
+== 3. WORKER systemd
+================================================================
+active
+ExecStart={ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /usr/local/bin/wf10-worker.py ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+User=
+ActiveEnterTimestamp=Sat 2026-09-26 06:20:18 UTC
+Sep 25 08:33:33 srv1859167 systemd[1]: Started wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 09:23:45 srv1859167 systemd[1]: Stopping wf10-recording-worker.service - WF10 Persistent Recording Queue...
+Sep 25 09:23:45 srv1859167 systemd[1]: wf10-recording-worker.service: Deactivated successfully.
+Sep 25 09:23:45 srv1859167 systemd[1]: Stopped wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 09:23:45 srv1859167 systemd[1]: wf10-recording-worker.service: Consumed 2min 11.680s CPU time, 10.4M memory peak, 0B memory swap peak.
+Sep 25 09:23:45 srv1859167 systemd[1]: Started wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 09:30:44 srv1859167 systemd[1]: Stopping wf10-recording-worker.service - WF10 Persistent Recording Queue...
+Sep 25 09:30:44 srv1859167 systemd[1]: wf10-recording-worker.service: Deactivated successfully.
+Sep 25 09:30:44 srv1859167 systemd[1]: Stopped wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 09:30:44 srv1859167 systemd[1]: wf10-recording-worker.service: Consumed 30.676s CPU time, 28.0M memory peak, 0B memory swap peak.
+Sep 25 09:30:44 srv1859167 systemd[1]: Started wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 09:36:25 srv1859167 systemd[1]: Stopping wf10-recording-worker.service - WF10 Persistent Recording Queue...
+Sep 25 09:36:25 srv1859167 systemd[1]: wf10-recording-worker.service: Deactivated successfully.
+Sep 25 09:36:25 srv1859167 systemd[1]: Stopped wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 09:36:25 srv1859167 systemd[1]: wf10-recording-worker.service: Consumed 25.553s CPU time, 27.0M memory peak, 0B memory swap peak.
+Sep 25 10:06:02 srv1859167 systemd[1]: Started wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 10:07:59 srv1859167 systemd[1]: Stopping wf10-recording-worker.service - WF10 Persistent Recording Queue...
+Sep 25 10:07:59 srv1859167 systemd[1]: wf10-recording-worker.service: Deactivated successfully.
+Sep 25 10:07:59 srv1859167 systemd[1]: Stopped wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 10:07:59 srv1859167 systemd[1]: wf10-recording-worker.service: Consumed 7.197s CPU time.
+Sep 25 10:08:29 srv1859167 systemd[1]: Started wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 10:37:01 srv1859167 systemd[1]: Stopping wf10-recording-worker.service - WF10 Persistent Recording Queue...
+Sep 25 10:37:01 srv1859167 systemd[1]: wf10-recording-worker.service: Deactivated successfully.
+Sep 25 10:37:01 srv1859167 systemd[1]: Stopped wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 25 10:37:01 srv1859167 systemd[1]: wf10-recording-worker.service: Consumed 1min 51.542s CPU time.
+Sep 25 13:44:03 srv1859167 systemd[1]: Started wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 26 06:20:18 srv1859167 systemd[1]: Stopping wf10-recording-worker.service - WF10 Persistent Recording Queue...
+Sep 26 06:20:18 srv1859167 systemd[1]: wf10-recording-worker.service: Deactivated successfully.
+Sep 26 06:20:18 srv1859167 systemd[1]: Stopped wf10-recording-worker.service - WF10 Persistent Recording Queue.
+Sep 26 06:20:18 srv1859167 systemd[1]: wf10-recording-worker.service: Consumed 41.618s CPU time, 69.5M memory peak, 0B memory swap peak.
+Sep 26 06:20:18 srv1859167 systemd[1]: Started wf10-recording-worker.service - WF10 Persistent Recording Queue.
+
+================================================================
+== 4. COLA /var/spool/wf10 y log del enqueue
+================================================================
+/var/spool/wf10/done/: 307 archivos | más nuevo: 1790342711.37289.json 2026-09-25 14:14:08.457594948 +0000
+/var/spool/wf10/queue/: 0 archivos | más nuevo:  2026-09-25 14:14:08.457594948 +0000
+total 52
+drwxrwx--- 4 asterisk asterisk  4096 Sep 25 08:33 .
+drwxr-xr-x 6 root     root      4096 Sep 25 08:33 ..
+drwxr-x--- 2 root     root     20480 Sep 25 14:14 done
+drwxrwx--- 2 asterisk asterisk 20480 Sep 25 14:14 queue
+--- ejemplo de JSON en done (enmascarado):
+{"phone": "+919916294745", "followup_id": "c4c25244-5199-4fa6-974b-0c57e8401cfe", "uniqueid": "1790342711.37289", "wav": "/tmp/test-1790342711.37289.wav", "filename": "+919916294745_2026-09-25_31s.wav", "duration_seconds": 31, "suppress_telegram": false, "backfill": true, "completed_at": 1790345648.4582653, "next_attempt": 0}
+--- /var/log/asterisk/wf10-enqueue.log: 0 bytes, modificado 2026-09-25 08:33:33.267403284 +0000
+asterisk puede escribir la cola
+asterisk puede ejecutar wf10-enqueue.py
+
+================================================================
+== 5. WAV de Asterisk en /tmp (últimos 180 min)
+================================================================
+total=1810 | con audio (>44 B)=254 | vacíos (44 B)=1556
+últimos con audio:
+2026-09-29 13:53    142764  test-1790689937.31817.wav
+2026-09-29 13:53    374124  test-1790689937.31831.wav
+2026-09-29 13:54    115884  test-1790689998.31855.wav
+2026-09-29 13:54    129004  test-1790690057.31887.wav
+2026-09-29 13:54    523244  test-1790690057.31877.wav
+2026-09-29 13:55    114604  test-1790690057.31885.wav
+2026-09-29 13:55    370604  test-1790690117.31914.wav
+2026-09-29 13:56    450604  test-1790690117.31919.wav
+
+================================================================
+== 6. CRON (productor viejo)
+================================================================
+1:*/5 * * * * /root/scripts/send_recordings.sh >> /root/scripts/send_recordings.log 2>&1
+/root/sent_recordings.txt: 1366 líneas
+
+================================================================
+== 7. CDR (Asterisk) — contestadas vs encoladas
+================================================================
+tabla CDR: asterisk.cdr
+ANSWERED	252	12
+BUSY	117	0
+NO ANSWER	1425	0
+
+================================================================
+== 8. wf_call_followups (últimos 180 min)
+================================================================
+asterisk	ANSWERED	0	220
+asterisk	ANSWERED	1	32
+asterisk	FAILED	1	125
+asterisk	NO_ANSWER	1	1408
+stringee	ANSWERED	0	39
+stringee	ANSWERED	1	37
+stringee	FAILED	1	37
+stringee	NO_ANSWER	0	38
+stringee	NO_ANSWER	1	387
+--- pendientes de grabación (recording_synced=0) con más de 15 min:
+asterisk	ANSWERED	194
+stringee	ANSWERED	34
+stringee	NO_ANSWER	33
+--- filas históricas 'undefined' (NO se reparan): 891
+
+================================================================
+== 9. STRINGEE: grabaciones del worker vs ledger vs followups
+================================================================
+grabaciones en el worker: 539 | en la ventana: 113 | de la ventana en ledger: 34
+fuera del ledger con audio (10 días): 154
+   <=24h: followup PENDIENTE=142 | followup ya sincronizado (se omiten)=3 | sin followup todavía=2
+   1-10d: followup PENDIENTE=7
+   -> al publicar, WF10 NO sube estas pendientes anteriores (sin backfill): sólo grabaciones desde 30 min antes de su primer ciclo.
+   -> para subir el backlog (con tu aprobación): BACKLOG_FROM = '<fecha ISO>' en '🔄 Fetch & Convert Stringee Recordings' (máx. 10 días).
+ledger (10 días) con dueño todavía synced=0 = registradas por el WF10 viejo SIN PUT confirmado (NO se reprocesan sin aprobación): 11
+--- ledger por ciclo (últimas 6 h):
+   2026-09-29 13:55 1
+   2026-09-29 13:50 1
+   2026-09-29 13:45 1
+   2026-09-29 13:40 1
+   2026-09-29 13:35 1
+   2026-09-29 13:30 1
+   2026-09-29 13:25 1
+   2026-09-29 13:20 1
+   2026-09-29 13:15 1
+   2026-09-29 13:10 1
+   2026-09-29 13:05 1
+   2026-09-29 13:00 1
+   2026-09-29 12:55 1
+   2026-09-29 12:50 1
+   2026-09-29 12:45 1
+   2026-09-29 12:40 1
+   2026-09-29 12:35 1
+   2026-09-29 12:30 1
+   2026-09-29 12:25 1
+   2026-09-29 12:20 1
+
+================================================================
+== 10. wf_call_events (diagnóstico, sólo lectura): huecos Asterisk registrados por WF9 (7 días)
+================================================================
+ASTERISK_GAP_ACTIVITY_CREATED	275
+ASTERISK_GAP_ACTIVITY_CREATED_EXHAUSTED	2
+ASTERISK_GAP_HISTORICAL_ACTIVITY_CREATED	628
+
+================================================================
+== 11. TIEMPOS: inicio de la llamada vs fila en wf_call_followups (valida las ventanas de WF10)
+================================================================
+ASTERISK (asterisk.cdr: UNIQUEID vs fila de WF2): n=200 | Δ(fila - inicio) min=49s mediana=65s max=1260s | dentro de [-120,1800] = 200/200 | sin fila en ±1 h: 0
+STRINGEE (timestamp del archivo vs fila de WF9): n=80 | Δ(fila - inicio) min=37s mediana=54s max=226s | dentro de [-120,5400] = 80/80 | sin fila en ±1 h: 0
+Si algún Δ cae fuera de la ventana, avisame ANTES de publicar WF10: la ventana se ajusta en 2 constantes.
+
+Informe guardado en /root/wf10_preflight_20260929_135636.txt (no contiene contraseñas: se enmascaran).

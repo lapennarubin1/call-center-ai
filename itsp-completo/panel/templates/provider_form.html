@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% set active='providers' %}
+{% block heading %}{{ 'Editar proveedor' if p else 'Nuevo proveedor' }}{% endblock %}
+{% block content %}
+<div class="panel">
+  <div class="panel-h"><h2>Datos del proveedor</h2></div>
+  <div class="panel-b">
+    <form method="post">
+      <div class="form-grid">
+        <div class="field"><label>Nombre <span class="hint">(ej. telnyx)</span></label>
+          <input name="name" value="{{ p.name if p }}" {{ 'readonly' if p }} required></div>
+        <div class="field"><label>Host / SIP server</label>
+          <input name="host" value="{{ p.host if p }}" placeholder="sip.telnyx.com" required></div>
+        <div class="field"><label>Puerto</label>
+          <input name="port" type="number" value="{{ p.port if p else 5060 }}"></div>
+        <div class="field"><label>Tipo de autenticación</label>
+          <select name="auth_type">
+            <option value="userpass" {{ 'selected' if p and p.auth_type=='userpass' }}>Usuario/contraseña</option>
+            <option value="ip" {{ 'selected' if p and p.auth_type=='ip' }}>Por IP</option>
+          </select></div>
+        <div class="field"><label>Usuario</label>
+          <input name="username" value="{{ p.username or '' if p }}"></div>
+        <div class="field"><label>Contraseña</label>
+          <input name="password" value="{{ p.password or '' if p }}"></div>
+        <div class="field"><label>Transporte</label>
+          <select name="transport">
+            <option value="udp" {{ 'selected' if p and p.transport=='udp' }}>UDP</option>
+            <option value="tcp" {{ 'selected' if p and p.transport=='tcp' }}>TCP</option>
+            <option value="tls" {{ 'selected' if p and p.transport=='tls' }}>TLS</option>
+          </select></div>
+        <div class="field"><label>From domain</label>
+          <input name="from_domain" value="{{ p.from_domain or '' if p }}"></div>
+        <div class="field"><label>Códecs</label>
+          <input name="codecs" value="{{ p.codecs if p else 'ulaw,alaw' }}"></div>
+        <div class="field"><label>Prioridad LCR <span class="hint">(menor = primero)</span></label>
+          <input name="priority" type="number" value="{{ p.priority if p else 100 }}"></div>
+        <div class="field full"><label>IPs/CIDR del proveedor <span class="hint">(coma; para identify y firewall)</span></label>
+          <input name="ip_cidrs" value="{{ p.ip_cidrs or '' if p }}" placeholder="192.76.120.0/24, 64.16.250.0/24"></div>
+        <div class="field"><label>Estado</label>
+          <select name="active">
+            <option value="1" {{ 'selected' if not p or p.active }}>Activo</option>
+            <option value="" {{ 'selected' if p and not p.active }}>Inactivo</option>
+          </select></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Guardar proveedor</button>
+        <a class="btn" href="{{ url_for('providers') }}">Volver</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}Panel · Countries & Routes{% endblock %}
+
+{#  Solo rol master (lo protege @auth_master en server.py). #}
+
+{% block content %}
+
+<nav class="countries" aria-label="Call Center">
+  <a class="chip" href="/callcenter">Switches</a>
+  <a class="chip on" href="/callcenter/routes">Countries &amp; Routes</a>
+  <a class="chip" href="/sip">SIP Balance</a>
+  <a class="chip" href="/sip/extensions">Extensions</a>
+</nav>
+
+{% if error %}<p class="notice stale-warn">{{ error }}</p>{% endif %}
+{% if applied and not error %}
+<p class="notice" style="border-left-color: var(--ok); background:#12392C; color: var(--ink-2)">Saved.</p>
+{% endif %}
+{% if not token_configured %}
+<p class="notice stale-warn">
+  <b>LM_ROUTES_API_TOKEN no está configurado.</b> <code>/api/routes/active</code> responde 503 y
+  n8n no puede leer la configuración (fail-closed, intencional).
+</p>
+{% endif %}
+
+<p class="cap" style="margin: 0 0 12px">
+  Un país puede tener <b>varias rutas activas a la vez</b> (p. ej. IN_PROVEEDOR1 + IN_STRINGEE);
+  cada una tiene su propia capacidad. Los proveedores solo llaman: la política de follow-up se
+  asigna aparte y es la misma para cualquier proveedor.
+  <a href="/callcenter/routes/preview.json?all=1">JSON que consume n8n →</a>
+</p>
+
+<!-- ══ PAÍSES ═══════════════════════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div><span class="eyebrow">General</span><h2>Countries</h2></div>
+  </header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>ISO</th><th>Country</th><th>Switch</th><th>Config</th><th>Prefix</th><th>Timezone</th><th>Routes ready</th><th></th></tr></thead>
+      <tbody>
+      {% for c in countries %}
+        <tr>
+          <td class="mono">{{ c.iso }}</td>
+          <td>{{ c.country_name }} {% if c.archived_at %}<span class="pill">archived</span>{% endif %}</td>
+          <td>
+            {% if c.enabled %}<span class="pill good">ON</span>{% else %}<span class="pill">OFF</span>{% endif %}
+            {% if not c.archived_at %}
+            <form method="post" action="/callcenter/countries/{{ c.iso }}/{{ 'disable' if c.enabled else 'enable' }}" style="display:inline">
+              <button class="btn ghost">{{ 'Turn off' if c.enabled else 'Turn on' }}</button></form>
+            {% endif %}
+          </td>
+          <td>
+            {% if c.report.ready %}<span class="pill good">COUNTRY READY</span>
+            {% else %}<span class="pill mid" title="{{ c.report.issues|map(attribute='message')|join(' · ') }}">NOT READY</span>{% endif %}
+            {% if not c.report.tools_ready %}<span class="pill mid">TOOLS</span>{% endif %}
+          </td>
+          <td class="mono">{{ c.dial_prefix }}</td>
+          <td class="cap">{{ c.timezone }}</td>
+          <td class="cap">{{ c.report.routes_ready }}/{{ c.report.routes_total }}
+            {% if c.enabled and c.report.routes_ready == 0 %}<span class="pill mid">ON sin rutas READY</span>{% endif %}</td>
+          <td class="r"><a class="btn ghost" href="/callcenter/countries/{{ c.iso }}">Open</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="cap">Sin países. Agregá uno abajo.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <form method="post" action="/callcenter/countries/save" class="pricing-row" style="margin-top:10px">
+    <input name="iso" placeholder="MX" style="max-width:60px" required>
+    <input name="country_name" placeholder="México" style="max-width:140px" required>
+    <input name="dial_prefix" placeholder="+52" style="max-width:70px" required>
+    <input name="timezone" list="tzlist" placeholder="America/Mexico_City" style="max-width:200px" required>
+    <input name="language" placeholder="es" style="max-width:60px" required>
+    <input name="national_number_len" placeholder="10" style="max-width:60px">
+    <button type="submit" class="btn">Add country</button>
+  </form>
+  <p class="cap" style="margin-top:6px">El huso horario es del país: todas sus rutas interpretan sus franjas en esa zona.</p>
+</section>
+
+<!-- ══ RUTAS ════════════════════════════════════════════════════════ -->
+<section class="panel" style="margin-top:16px">
+  <header class="panel-head">
+    <div><span class="eyebrow">Calling routes</span><h2>Routes</h2></div>
+    <div>
+      {% for s in statuses %}
+        <a class="chip {{ 'on' if s == status }}" href="/callcenter/routes?status={{ s }}">{{ s|capitalize }}</a>
+      {% endfor %}
+    </div>
+  </header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Route</th><th>Provider</th><th>Status</th><th>Config</th><th>Now</th><th class="r">Capacity</th><th></th></tr></thead>
+      <tbody>
+      {% for r in routes %}
+        <tr>
+          <td class="mono">{{ r.route_key }}</td>
+          <td>{{ r.provider_code }} <span class="cap">({{ r.adapter_key }})</span></td>
+          <td>
+            {% if r.status == 'ACTIVE' %}<span class="pill good">ACTIVE</span>
+            {% elif r.status == 'ARCHIVED' %}<span class="pill">ARCHIVED</span>
+            {% else %}<span class="pill mid">DISABLED</span>{% endif %}
+          </td>
+          <td>
+            {% if r.status == 'ARCHIVED' %}<span class="cap">—</span>
+            {% elif r.ready %}<span class="pill good">READY</span>
+            {% else %}<span class="pill mid" title="{{ r.config_issues|map(attribute='message')|join(' · ') }}">NOT READY ({{ r.config_issues|length }})</span>{% endif %}
+          </td>
+          <td>
+            {% if r.calling_now %}<span class="pill good">CALLING NOW</span>
+            {% elif r.status != 'ARCHIVED' %}<span class="cap" title="condición efectiva: país ∧ proveedor ∧ ruta ∧ READY ∧ horario">
+              {{ r.blocked_by|join(' · ') }}</span>
+            {% else %}<span class="cap">—</span>{% endif %}
+            <span class="cap">{{ r.capacity_source.local_time or '' }}</span>
+          </td>
+          <td class="r mono">{{ r.capacity_now }}</td>
+          <td class="r"><a class="btn ghost" href="/callcenter/countries/{{ r.iso }}#route-{{ r.id }}">Open</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="cap">Sin rutas en este filtro.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══ POLÍTICAS ════════════════════════════════════════════════════ -->
+<section class="panel" style="margin-top:16px">
+  <header class="panel-head">
+    <div><span class="eyebrow">Follow-up</span><h2>Policies</h2></div>
+  </header>
+  <p class="cap">Reutilizables: varias rutas comparten una. Reglas explícitas (resultado, intento) → acción.
+     Una sola llamada por intento; si no contesta se programa el siguiente.</p>
+  {% for p in policies %}
+  <details style="margin:8px 0">
+    <summary class="mono">{{ p.policy_key }} — {{ p.name }} {% if p.archived_at %}<span class="pill">archived</span>{% endif %}</summary>
+    <div class="tbl-wrap" style="margin-top:6px">
+      <table class="tbl">
+        <thead><tr><th>Result</th><th>Attempt</th><th>Action</th><th>Delay</th></tr></thead>
+        <tbody>
+        {% for rule in p.policy.rules %}
+          <tr><td>{{ rule.result }}</td><td class="mono">{{ rule.attempt }}</td><td>{{ rule.action }}</td><td class="mono">{{ rule.delay or '—' }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="cap">SIP no-answer: {{ (p.policy.no_answer_sip_codes or [])|join(', ') }} · aliases: {{ p.policy.result_aliases or {} }} ·
+       callback default {{ p.policy.callback_default }} · unmatched → {{ p.policy.unmatched_action or 'NONE' }}</p>
+    {% if not p.archived_at %}
+    <form method="post" action="/callcenter/policies/save">
+      <input type="hidden" name="policy_key" value="{{ p.policy_key }}">
+      <input name="name" value="{{ p.name }}" style="max-width:320px">
+      <textarea name="policy_json" rows="10" style="width:100%; font-family:'IBM Plex Mono',monospace; font-size:12px">{{ p.policy_json }}</textarea>
+      <button type="submit" class="btn ghost">Save policy</button>
+    </form>
+    <form method="post" action="/callcenter/policies/{{ p.id }}/archive" style="margin-top:6px">
+      <button type="submit" class="btn ghost">Archive</button>
+    </form>
+    {% else %}
+    <form method="post" action="/callcenter/policies/{{ p.id }}/unarchive"><button class="btn ghost">Unarchive</button></form>
+    {% endif %}
+  </details>
+  {% endfor %}
+  <form method="post" action="/callcenter/policies/save" style="margin-top:10px">
+    <div class="pricing-row">
+      <input name="policy_key" placeholder="NEW_POLICY_KEY" style="max-width:220px" required>
+      <input name="name" placeholder="Nombre" style="max-width:260px" required>
+    </div>
+    <textarea name="policy_json" rows="5" placeholder='{"rules":[{"result":"NO_ANSWER","attempt":1,"action":"RETRY","delay":"+2h"}],"callback_default":"+24h"}' style="width:100%; font-family:'IBM Plex Mono',monospace; font-size:12px"></textarea>
+    <button type="submit" class="btn">Create policy</button>
+  </form>
+</section>
+
+<!-- ══ PROVEEDORES ══════════════════════════════════════════════════ -->
+<section class="panel" style="margin-top:16px">
+  <header class="panel-head"><div><span class="eyebrow">Voice providers</span><h2>Providers</h2></div></header>
+  <p class="cap">Un proveedor solo llama. Proveedor = contrato comercial; adapter = cómo se le habla.
+     PROVEEDOR1 es UNO, con una ruta por país. Apagar un proveedor apaga todas sus rutas en todos los países.
+     Asterisk no va acá: es gateway. Sin secretos: las credenciales viven en n8n.</p>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Code</th><th>Name</th><th>Adapter</th><th>Endpoint</th><th class="r">Switch</th></tr></thead>
+      <tbody>
+      {% for p in providers %}
+        <tr><td class="mono">{{ p.code }}</td><td>{{ p.display_name }}</td>
+            <td class="mono">{{ p.adapter_key }}{% if p.adapter_key not in adapters %} <span class="pill mid">no soportado</span>{% endif %}</td>
+            <td class="mono cap">{{ p.endpoint or '—' }}</td>
+            <td class="r">{% if p.enabled %}<span class="pill good">ON</span>{% else %}<span class="pill">OFF</span>{% endif %}
+              <form method="post" action="/callcenter/providers/{{ p.id }}/{{ 'disable' if p.enabled else 'enable' }}" style="display:inline">
+                <button class="btn ghost">{{ 'Turn off' if p.enabled else 'Turn on' }}</button></form></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form method="post" action="/callcenter/providers/save" class="pricing-row" style="margin-top:8px">
+    <input name="code" placeholder="twilio" style="max-width:120px" required>
+    <input name="display_name" placeholder="Twilio" style="max-width:150px" required>
+    <input name="adapter_key" list="adapterlist" placeholder="ELEVENLABS_SIP" style="max-width:170px" required>
+    <input name="endpoint" placeholder="http://... (adapter)" style="max-width:220px">
+    <input name="account_ref" placeholder="cuenta" style="max-width:100px">
+    <select name="enabled"><option value="1">enabled</option><option value="0">disabled</option></select>
+    <button type="submit" class="btn ghost">Save provider</button>
+  </form>
+</section>
+
+<!-- ══ AUDITORÍA ════════════════════════════════════════════════════ -->
+<section class="panel" style="margin-top:16px">
+  <header class="panel-head"><div><span class="eyebrow">route_audit</span><h2>Recent changes</h2></div></header>
+  <div class="tbl-wrap" style="max-height:300px; overflow-y:auto">
+    <table class="tbl">
+      <thead><tr><th>When</th><th>Actor</th><th>Key</th><th>Action</th><th>Field</th><th>From</th><th>To</th></tr></thead>
+      <tbody>
+      {% for a in audit_rows %}
+        <tr><td class="mono cap">{{ a.changed_at }}</td><td>{{ a.actor }}</td><td class="mono">{{ a.route_key or '—' }}</td>
+            <td>{{ a.action }}</td><td class="cap">{{ a.field or '' }}</td>
+            <td class="cap">{{ a.old_value or '' }}</td><td class="cap">{{ a.new_value or '' }}</td></tr>
+      {% else %}
+        <tr><td colspan="7" class="cap">Sin cambios.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<datalist id="adapterlist">{% for a in adapters %}<option value="{{ a }}">{% endfor %}</datalist>
+<datalist id="tzlist">{% for tz in common_timezones %}<option value="{{ tz }}">{% endfor %}</datalist>
+{% endblock %}

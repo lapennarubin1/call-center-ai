@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% set active='plans' %}
+{% block heading %}Tarifas · {{ p.name }}{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <div class="panel-h"><h2>Tarifas por prefijo ({{ rates|length }})</h2>
+    <a class="btn btn-sm" href="{{ url_for('plans') }}">Volver a planes</a></div>
+  <div class="panel-b flush">
+    {% if rates %}
+    <table>
+      <thead><tr><th>Prefijo</th><th>Destino</th><th class="num">€/min</th>
+        <th class="num">Conexión</th><th class="num">Mín (s)</th><th class="num">Incremento (s)</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rates %}
+        <tr>
+          <td class="mono">{{ r.prefix }}</td>
+          <td>{{ r.description or '—' }}</td>
+          <td class="num">{{ '%.5f'|format(r.rate_per_min|float) }}</td>
+          <td class="num">{{ '%.5f'|format(r.connect_fee|float) }}</td>
+          <td class="num">{{ r.min_seconds }}</td>
+          <td class="num">{{ r.increment_seconds }}</td>
+          <td style="text-align:right">
+            <form method="post" action="{{ url_for('rate_delete', rid=r.id) }}" style="margin:0">
+              <button class="btn btn-sm btn-danger">Eliminar</button></form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">Sin tarifas. Añade una o pega un CSV abajo.</div>{% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-h"><h2>Añadir tarifa</h2></div>
+  <div class="panel-b">
+    <form method="post" action="{{ url_for('rate_add', pid=p.id) }}">
+      <div class="form-grid">
+        <div class="field"><label>Prefijo <span class="hint">(ej. 1, 34, 521)</span></label><input name="prefix"></div>
+        <div class="field"><label>Destino</label><input name="description" placeholder="USA, Spain Mobile..."></div>
+        <div class="field"><label>Precio por minuto</label><input name="rate_per_min" type="number" step="0.00001"></div>
+        <div class="field"><label>Cargo por conexión</label><input name="connect_fee" type="number" step="0.00001" value="0"></div>
+        <div class="field"><label>Duración mínima (s)</label><input name="min_seconds" type="number" value="0"></div>
+        <div class="field"><label>Incremento (s) <span class="hint">(60 = por minuto, 1 = por segundo)</span></label><input name="increment_seconds" type="number" value="60"></div>
+      </div>
+      <div class="actions"><button class="btn btn-primary" type="submit">Añadir tarifa</button></div>
+    </form>
+
+    <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border)">
+      <form method="post" action="{{ url_for('rate_add', pid=p.id) }}">
+        <div class="field full">
+          <label>Importar CSV masivo <span class="hint">— formato: prefijo,destino,precio,conexión,mín,incremento (una línea por tarifa)</span></label>
+          <textarea name="bulk" placeholder="1,USA,0.0090,0,0,60&#10;44,UK,0.0120,0,0,60&#10;521,Mexico Mobile,0.0250,0,30,6"></textarea>
+        </div>
+        <div class="actions"><button class="btn btn-primary" type="submit">Importar CSV</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,102 @@
+{
+  "id": "DJ0IKlzohwndvRba",
+  "name": "INDIA MULTI-PAIS WF2 - ElevenLabs Outbound (India+Nepal+2 Slots)",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-04T13:05:38.817Z",
+  "updatedAt": "2026-09-07T09:14:43.699Z",
+  "isArchived": true,
+  "versionId": "b340523d-601c-4b4b-8acf-4592041245c8",
+  "versionCounter": 3,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
+  "nodes": [],
+  "connections": {},
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [
+    {
+      "id": "rKu7qx9O5J9ALAno",
+      "name": "DIAL-NOW-v5",
+      "createdAt": "2026-07-27T09:29:13.382Z",
+      "updatedAt": "2026-07-27T09:29:13.382Z"
+    },
+    {
+      "id": "EWlF9l3b9w6Vq3NA",
+      "name": "landmark",
+      "createdAt": "2026-07-27T09:29:13.383Z",
+      "updatedAt": "2026-07-27T09:29:13.383Z"
+    },
+    {
+      "id": "5GUmAfGXqXwIrp4B",
+      "name": "wf2-v4",
+      "createdAt": "2026-07-27T09:29:13.398Z",
+      "updatedAt": "2026-07-27T09:29:13.398Z"
+    },
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "LismWLdOzwMudnEo",
+      "name": "compliant-v1",
+      "createdAt": "2026-07-27T09:29:13.400Z",
+      "updatedAt": "2026-07-27T09:29:13.400Z"
+    },
+    {
+      "id": "fGm4Tvwzo6z0Ib5m",
+      "name": "wf2",
+      "createdAt": "2026-07-27T09:29:13.402Z",
+      "updatedAt": "2026-07-27T09:29:13.402Z"
+    },
+    {
+      "id": "ZF3ImiIOdnoSG1Py",
+      "name": "hindi",
+      "createdAt": "2026-07-27T09:29:13.407Z",
+      "updatedAt": "2026-07-27T09:29:13.407Z"
+    },
+    {
+      "id": "qUJhZR5LIvkWhihl",
+      "name": "wf2-call",
+      "createdAt": "2026-07-27T09:29:13.407Z",
+      "updatedAt": "2026-07-27T09:29:13.407Z"
+    },
+    {
+      "id": "490Xx6d6PlrgEZWV",
+      "name": "wf2-v3",
+      "createdAt": "2026-07-27T09:29:13.408Z",
+      "updatedAt": "2026-07-27T09:29:13.408Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "DJ0IKlzohwndvRba",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-04T13:05:38.817Z",
+      "updatedAt": "2026-09-04T13:05:38.817Z"
+    }
+  ],
+  "activeVersion": null
+}

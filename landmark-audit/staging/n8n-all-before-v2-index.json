@@ -1,0 +1,302 @@
+[
+  {
+    "id": "1beExdhF284MuVYL",
+    "name": "VZLA WF3 - Atlantis Login + Account Creation (FINAL)",
+    "active": false,
+    "file": "1beExdhF284MuVYL__VZLA_WF3_-_Atlantis_Login_Account_Creation_FINAL.json"
+  },
+  {
+    "id": "2xjFB1FVTKYBvszp",
+    "name": "WF14 - Sync Panel (Sheets → MySQL)",
+    "active": false,
+    "file": "2xjFB1FVTKYBvszp__WF14_-_Sync_Panel_Sheets_MySQL.json"
+  },
+  {
+    "id": "442FDm64j2YTx9mW",
+    "name": "WF7+WF8 MULTI-PAIS — Payment Link + Callback (100% LeadStudio API)",
+    "active": true,
+    "file": "442FDm64j2YTx9mW__WF7_WF8_MULTI-PAIS_Payment_Link_Callback_100_LeadStudio_API.json"
+  },
+  {
+    "id": "6ods2vlMKHhuhpQS",
+    "name": "INDIA + NEPAL WF3 — Account Creation (API LeadStudio + CashStudio)",
+    "active": true,
+    "file": "6ods2vlMKHhuhpQS__INDIA_NEPAL_WF3_Account_Creation_API_LeadStudio_CashStudio.json"
+  },
+  {
+    "id": "94klx8IHXnwpP6pP",
+    "name": "WF5 - Sales Handoff & CRM v2 (VERIFIED)",
+    "active": false,
+    "file": "94klx8IHXnwpP6pP__WF5_-_Sales_Handoff_CRM_v2_VERIFIED.json"
+  },
+  {
+    "id": "AfB2HFXoRbKL2PBh",
+    "name": "WF3 - Atlantis Login + Account Creation (FINAL)",
+    "active": false,
+    "file": "AfB2HFXoRbKL2PBh__WF3_-_Atlantis_Login_Account_Creation_FINAL.json"
+  },
+  {
+    "id": "AHC6N5SdcyC5m9oG",
+    "name": "WF1 - Lead Intake & Validation v2 (VERIFIED)",
+    "active": false,
+    "file": "AHC6N5SdcyC5m9oG__WF1_-_Lead_Intake_Validation_v2_VERIFIED.json"
+  },
+  {
+    "id": "ap50YtvxxjErCPtq",
+    "name": "WF14 - CRM Sync (LeadStudio API → MySQL) + Stringee Call Log",
+    "active": true,
+    "file": "ap50YtvxxjErCPtq__WF14_-_CRM_Sync_LeadStudio_API_MySQL_Stringee_Call_Log.json"
+  },
+  {
+    "id": "BAUWo4DFV9qqyUMG",
+    "name": "WF8 - OkPay Payment Callback (SMS)",
+    "active": false,
+    "file": "BAUWo4DFV9qqyUMG__WF8_-_OkPay_Payment_Callback_SMS.json"
+  },
+  {
+    "id": "Bem8pAJ4gxZWrhDU",
+    "name": "WF2 UNIFICADO — Asterisk + Stringee (API LeadStudio, follow-up automático)",
+    "active": true,
+    "file": "Bem8pAJ4gxZWrhDU__WF2_UNIFICADO_Asterisk_Stringee_API_LeadStudio_follow-up_autom_tico.json"
+  },
+  {
+    "id": "CRbhC95Dkg1Mbs66",
+    "name": "WF3 - Atlantis Login + Account Creation DEALER",
+    "active": false,
+    "file": "CRbhC95Dkg1Mbs66__WF3_-_Atlantis_Login_Account_Creation_DEALER.json"
+  },
+  {
+    "id": "CxlzF4bGb95nEqXJ",
+    "name": "WF2 ElevenLabs Outbound v2 (VERIFIED)",
+    "active": false,
+    "file": "CxlzF4bGb95nEqXJ__WF2_ElevenLabs_Outbound_v2_VERIFIED.json"
+  },
+  {
+    "id": "DJ0IKlzohwndvRba",
+    "name": "INDIA MULTI-PAIS WF2 - ElevenLabs Outbound (India+Nepal+2 Slots)",
+    "active": false,
+    "file": "DJ0IKlzohwndvRba__INDIA_MULTI-PAIS_WF2_-_ElevenLabs_Outbound_India_Nepal_2_Slots.json"
+  },
+  {
+    "id": "E0ZBuDnTFwX9PeXt",
+    "name": "WF4 - Callback & Follow-up v2 (VERIFIED)",
+    "active": false,
+    "file": "E0ZBuDnTFwX9PeXt__WF4_-_Callback_Follow-up_v2_VERIFIED.json"
+  },
+  {
+    "id": "EILViUUYiG2ZL0Pf",
+    "name": "VZLA WF1 Lead Intake MULTI-PAIS",
+    "active": false,
+    "file": "EILViUUYiG2ZL0Pf__VZLA_WF1_Lead_Intake_MULTI-PAIS.json"
+  },
+  {
+    "id": "eki1DZQggUdLze2A",
+    "name": "WF7 - OkPay Payment Link (SMS)",
+    "active": false,
+    "file": "eki1DZQggUdLze2A__WF7_-_OkPay_Payment_Link_SMS.json"
+  },
+  {
+    "id": "fMvrAtoRxNylF6YV",
+    "name": "INDIA MULTI-PAIS WF5 — Sales Handoff & CRM (India + Nepal)",
+    "active": false,
+    "file": "fMvrAtoRxNylF6YV__INDIA_MULTI-PAIS_WF5_Sales_Handoff_CRM_India_Nepal.json"
+  },
+  {
+    "id": "fWDMTbgJR5Txillp",
+    "name": "WF11 - Audios Diarios a Google Drive (Multipais)",
+    "active": false,
+    "file": "fWDMTbgJR5Txillp__WF11_-_Audios_Diarios_a_Google_Drive_Multipais.json"
+  },
+  {
+    "id": "FZ5aGDTS19ud8F2z",
+    "name": "INDIA + NEPAL WF3 — Account Creation (Fixed)",
+    "active": false,
+    "file": "FZ5aGDTS19ud8F2z__INDIA_NEPAL_WF3_Account_Creation_Fixed.json"
+  },
+  {
+    "id": "gC0O8GN8pR0SoJyi",
+    "name": "INDIA MULTI-PAIS WF9 — Post-Call Handler (India + Nepal)",
+    "active": false,
+    "file": "gC0O8GN8pR0SoJyi__INDIA_MULTI-PAIS_WF9_Post-Call_Handler_India_Nepal.json"
+  },
+  {
+    "id": "HLusaKMqF2t4MhE3",
+    "name": "VZLA WF9 - Post-Call Handler  (Multipais)",
+    "active": false,
+    "file": "HLusaKMqF2t4MhE3__VZLA_WF9_-_Post-Call_Handler_Multipais.json"
+  },
+  {
+    "id": "HweSXF3SbhNaCAE5",
+    "name": "INDIA MULTI-PAIS WF4 — Callback & Follow-up (India + Nepal)",
+    "active": false,
+    "file": "HweSXF3SbhNaCAE5__INDIA_MULTI-PAIS_WF4_Callback_Follow-up_India_Nepal.json"
+  },
+  {
+    "id": "I4oWIsO3njQLNm6f",
+    "name": "WF13 - Successful Calls Report (Drive + Telegram)",
+    "active": false,
+    "file": "I4oWIsO3njQLNm6f__WF13_-_Successful_Calls_Report_Drive_Telegram.json"
+  },
+  {
+    "id": "L25mrGgMDPpKpgAn",
+    "name": "VZLA WF2 ElevenLabs Outbound MULTI-PAIS (switch-write)",
+    "active": false,
+    "file": "L25mrGgMDPpKpgAn__VZLA_WF2_ElevenLabs_Outbound_MULTI-PAIS_switch-write.json"
+  },
+  {
+    "id": "Mvkt0b6hVqoNRjNT",
+    "name": "WF2-Stringee-Outbound",
+    "active": false,
+    "file": "Mvkt0b6hVqoNRjNT__WF2-Stringee-Outbound.json"
+  },
+  {
+    "id": "NWqT1VUJxYHPQ2bl",
+    "name": "INDIA MULTI-PAIS WF8 — Payment Callback (shared conversions)",
+    "active": false,
+    "file": "NWqT1VUJxYHPQ2bl__INDIA_MULTI-PAIS_WF8_Payment_Callback_shared_conversions.json"
+  },
+  {
+    "id": "P5ubGyb2etR46ftj",
+    "name": "VZLA WF4 Callback MULTI-PAIS (dual-sheet)",
+    "active": false,
+    "file": "P5ubGyb2etR46ftj__VZLA_WF4_Callback_MULTI-PAIS_dual-sheet.json"
+  },
+  {
+    "id": "PlaDi1wsR1lWoZO8",
+    "name": "INDIA MULTI-PAIS WF2 — ElevenLabs Outbound (India + Nepal)",
+    "active": false,
+    "file": "PlaDi1wsR1lWoZO8__INDIA_MULTI-PAIS_WF2_ElevenLabs_Outbound_India_Nepal.json"
+  },
+  {
+    "id": "q1RdPcH27n7dJlPU",
+    "name": "WF9 - Post-Call Handler (Tiempo Real + Fallback Histórico)",
+    "active": false,
+    "file": "q1RdPcH27n7dJlPU__WF9_-_Post-Call_Handler_Tiempo_Real_Fallback_Hist_rico.json"
+  },
+  {
+    "id": "qIKciGSzjJzwPERV",
+    "name": "INDIA MULTI-PAIS WF1 - Lead Intake (India+Nepal+2 Slots)",
+    "active": false,
+    "file": "qIKciGSzjJzwPERV__INDIA_MULTI-PAIS_WF1_-_Lead_Intake_India_Nepal_2_Slots.json"
+  },
+  {
+    "id": "qq9EwmpOZYrGalw9",
+    "name": "WF_Stringee_Answer",
+    "active": false,
+    "file": "qq9EwmpOZYrGalw9__WF_Stringee_Answer.json"
+  },
+  {
+    "id": "rSNw7GSCVipSXZl0",
+    "name": "WF1 — Lead Intake (API LeadStudio) — PRODUCCIÓN",
+    "active": false,
+    "file": "rSNw7GSCVipSXZl0__WF1_Lead_Intake_API_LeadStudio_PRODUCCI_N.json"
+  },
+  {
+    "id": "sINJ2Godpz8a64FM",
+    "name": "INDIA MULTI-PAIS WF1 — Lead Intake (India + Nepal)",
+    "active": false,
+    "file": "sINJ2Godpz8a64FM__INDIA_MULTI-PAIS_WF1_Lead_Intake_India_Nepal.json"
+  },
+  {
+    "id": "so0zWwX8da3s5jV9",
+    "name": "VZLA WF7 - Payment Link (Binance + Bybit)",
+    "active": false,
+    "file": "so0zWwX8da3s5jV9__VZLA_WF7_-_Payment_Link_Binance_Bybit.json"
+  },
+  {
+    "id": "SX0fzwNCJu2a5izK",
+    "name": "WF3 - Lead Account Creation Landmark Markets",
+    "active": false,
+    "file": "SX0fzwNCJu2a5izK__WF3_-_Lead_Account_Creation_Landmark_Markets.json"
+  },
+  {
+    "id": "td4078JZk03EY0ZS",
+    "name": "WF12 - Reporte Diario v2 (sin timeout)",
+    "active": false,
+    "file": "td4078JZk03EY0ZS__WF12_-_Reporte_Diario_v2_sin_timeout.json"
+  },
+  {
+    "id": "Th2Y8pLeBfNX00BC",
+    "name": "WF7 MULTI-PAIS — Payment Link (India OkPay + Nepal Monetix Structure)",
+    "active": false,
+    "file": "Th2Y8pLeBfNX00BC__WF7_MULTI-PAIS_Payment_Link_India_OkPay_Nepal_Monetix_Structure.json"
+  },
+  {
+    "id": "TIDpFuTeThAQOsBw",
+    "name": "VZLA WF8 - Payment Callback",
+    "active": false,
+    "file": "TIDpFuTeThAQOsBw__VZLA_WF8_-_Payment_Callback.json"
+  },
+  {
+    "id": "tPPUIs72OniUrtzk",
+    "name": "WF2 Stringee Outbound v5 (COMPLETE - NO LOOP)",
+    "active": true,
+    "file": "tPPUIs72OniUrtzk__WF2_Stringee_Outbound_v5_COMPLETE_-_NO_LOOP.json"
+  },
+  {
+    "id": "TW1CHksqyf66MjQz",
+    "name": "WF10 — Recordings to LeadStudio API + Telegram (Multipais, sin Drive)",
+    "active": true,
+    "file": "TW1CHksqyf66MjQz__WF10_Recordings_to_LeadStudio_API_Telegram_Multipais_sin_Drive.json"
+  },
+  {
+    "id": "Vr2aeOmW9k6UK2vF",
+    "name": "VZLA WF5 Sales Handoff MULTI-PAIS (dual-sheet)",
+    "active": false,
+    "file": "Vr2aeOmW9k6UK2vF__VZLA_WF5_Sales_Handoff_MULTI-PAIS_dual-sheet.json"
+  },
+  {
+    "id": "VZPJtmdeiujrJFLj",
+    "name": "WF10 - Recordings to Drive + Telegram (Multipais)",
+    "active": false,
+    "file": "VZPJtmdeiujrJFLj__WF10_-_Recordings_to_Drive_Telegram_Multipais.json"
+  },
+  {
+    "id": "wNUh5ugIlHCyShyI",
+    "name": "INDIA MULTI-PAIS WF9 — Post-Call Handler (100% LeadStudio API, sin Sheets)",
+    "active": true,
+    "file": "wNUh5ugIlHCyShyI__INDIA_MULTI-PAIS_WF9_Post-Call_Handler_100_LeadStudio_API_sin_Sheets.json"
+  },
+  {
+    "id": "WsVT2r13JrGBZrN8",
+    "name": "recuperar historico",
+    "active": false,
+    "file": "WsVT2r13JrGBZrN8__recuperar_historico.json"
+  },
+  {
+    "id": "X1TsAjnftzvHOJr2",
+    "name": "WF_Stringee_Event",
+    "active": false,
+    "file": "X1TsAjnftzvHOJr2__WF_Stringee_Event.json"
+  },
+  {
+    "id": "YflhNxs5dQ7MnD2f",
+    "name": "WF3 - Lead Account Creation ATLANTIS",
+    "active": false,
+    "file": "YflhNxs5dQ7MnD2f__WF3_-_Lead_Account_Creation_ATLANTIS.json"
+  },
+  {
+    "id": "YWPBWi2k3IRRBtXh",
+    "name": "WF6 WhatsApp UNIFICADO (India + LATAM Router)",
+    "active": false,
+    "file": "YWPBWi2k3IRRBtXh__WF6_WhatsApp_UNIFICADO_India_LATAM_Router.json"
+  },
+  {
+    "id": "z8XLSppsK8VN7wNP",
+    "name": "VZLA WF1 Lead Intake MULTI-PAIS",
+    "active": false,
+    "file": "z8XLSppsK8VN7wNP__VZLA_WF1_Lead_Intake_MULTI-PAIS.json"
+  },
+  {
+    "id": "ZAduHUfEFXVylR6B",
+    "name": "WF15 - Sync Stringee Call Log (MySQL)",
+    "active": false,
+    "file": "ZAduHUfEFXVylR6B__WF15_-_Sync_Stringee_Call_Log_MySQL.json"
+  },
+  {
+    "id": "ZS6FrUbdzcNS0QfA",
+    "name": "VZLA WF3 - Lead Account Creation LANDMARKET",
+    "active": false,
+    "file": "ZS6FrUbdzcNS0QfA__VZLA_WF3_-_Lead_Account_Creation_LANDMARKET.json"
+  }
+]

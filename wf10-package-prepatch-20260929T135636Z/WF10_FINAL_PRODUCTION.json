@@ -1,0 +1,1110 @@
+{
+  "name": "WF10 — CRM todas contestadas + Telegram >=60s (Asterisk + Stringee)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-recording",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "5857db6a-c306-44fe-8e59-ef4d40a7250b",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        20192,
+        2160
+      ],
+      "webhookId": "send-recording"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Literal SQL seguro para el nodo MySQL de n8n (sin saltos de línea, sin \"$\", sin \"{{\").\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\").replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// \"followup_id|lead_id|synced|created_epoch|call_status|outcome\" -> objeto\nfunction parseOwner(s) {\n  if (!s) return null;\n  const p = String(s).split('|');\n  if (p.length < 4 || !p[0]) return null;\n  return { followup_id: p[0], lead_id: p[1] || null, synced: Number(p[2]) === 1 ? 1 : 0, created_epoch: Number(p[3]) || null, call_status: p[4] || null, outcome: p[5] || null };\n}\n// Duración desde el header WAV (sólo informativo: CRM no filtra por duración)\nfunction wavSecs(buf) {\n  try {\n    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = buf.readUInt32LE(28);\n    if (!byteRate) return null;\n    return Math.round(Math.max(0, buf.length - 44) / byteRate);\n  } catch (e) { return null; }\n}\nfunction countryOf(digits) {\n  if (digits.startsWith('977')) return 'nepal';\n  if (digits.startsWith('91')) return 'india';\n  if (digits.startsWith('58')) return 'venezuela';\n  if (digits.startsWith('52')) return 'mexico';\n  if (digits.startsWith('57')) return 'colombia';\n  return 'unknown';\n}\n// Condición común: filas válidas de wf_call_followups (excluye las históricas 'undefined')\n// (sin el carácter dólar: dentro del nodo MySQL, n8n arma la query con String.replace y un dólar seguido de\n// comilla se interpreta como patrón de reemplazo, corrompiendo el SQL)\nconst FCF_OK = \"CHAR_LENGTH(f.followup_id) = 36 AND f.followup_id REGEXP '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' AND f.phone <> 'undefined' AND f.lead_id <> 'undefined'\";\n// Si el nodo MySQL anterior devolvió un error como item, se corta la ejecución (nunca se sigue \"a ciegas\")\nfunction assertNoDbError(items, where) {\n  const bad = items.filter(i => i && i.json && (i.json.error || (i.json.message && i.json.filename === undefined && i.json.owner === undefined)));\n  if (bad.length) throw new Error('Error de MySQL en ' + where + ': ' + String(bad[0].json.message || JSON.stringify(bad[0].json.error)).slice(0, 300));\n}\n\n// ============================================================================\n// Convert Base64 to Binary (Asterisk) — 1 request = 1 grabación (wf10-worker.py)\n// Valida el audio, calcula duración (sólo para Telegram) y arma la búsqueda del\n// DUEÑO de la grabación en wf_call_followups:\n//   dueño = la PRIMERA fila provider='asterisk' del mismo teléfono creada desde\n//   el inicio de la llamada (UNIQUEID = epoch de inicio del canal) y hasta 15 min\n//   después. WF2 escribe esa fila apenas termina el dial de ESA llamada; la\n//   siguiente llamada al mismo lead ocurre horas después (ciclo 3x3).\n// ============================================================================\nconst item = $input.first().json;\nconst body = item.body || item;\n\nconst base64 = String(body.audio_base64 || '');\nconst buffer = Buffer.from(base64, 'base64');\nconst phoneDigits = String(body.phone || '').replace(/[^0-9]/g, '');\nconst country = countryOf(phoneDigits);\nconst secs = wavSecs(buffer);\nconst validAudio = buffer.length > 44 && buffer.toString('ascii', 0, 4) === 'RIFF';\n\n// UNIQUEID de Asterisk: \"<epoch>.<secuencia>\" (o \"<systemname>-<epoch>.<secuencia>\")\nconst uidSrc = [body.uniqueid, body.unique_id, body.uid, body.filename, body.wav].filter(Boolean).map(String).join(' ');\nconst m = uidSrc.match(/(\\d{9,11})\\.(\\d+)/);\nconst callEpoch = m ? Number(m[1]) : null;\nconst uniqueid = m ? m[1] + '.' + m[2] : null;\nconst p10 = phoneDigits.slice(-10);\n\nlet lookup_sql;\nlet match_mode;\nif (callEpoch) {\n  match_mode = 'owner_by_call_start';\n  lookup_sql = \"SELECT r.p10, (SELECT CONCAT_WS('|', f.followup_id, f.lead_id, COALESCE(f.recording_synced,0), UNIX_TIMESTAMP(f.created_at), COALESCE(f.call_status,''), COALESCE(f.outcome,'')) \" +\n    \"FROM wf_call_followups f WHERE f.provider = 'asterisk' AND \" + FCF_OK + \" AND RIGHT(f.phone,10) = r.p10 \" +\n    \"AND f.created_at >= FROM_UNIXTIME(r.t_s - 120) AND f.created_at <= FROM_UNIXTIME(r.t_s + 900) \" +\n    \"ORDER BY f.created_at ASC, f.id ASC LIMIT 1) AS owner FROM (SELECT \" + q(p10) + \" AS p10, \" + q(callEpoch) + \" AS t_s) r\";\n} else {\n  // Sin UNIQUEID en el payload (p. ej. el cron viejo manda \"<tel>_<fecha>.wav\"): no se conoce la hora\n  // exacta de la llamada. Se acota a filas del mismo teléfono creadas desde (ahora - duración - 30 min):\n  // con el ciclo 3x3 (>= 2 h entre intentos al mismo número) ahí hay una sola llamada. Se prefiere la\n  // pendiente; si sólo hay una ya sincronizada (reenvío de algo ya subido) -> not_pending, sin PUT.\n  // Una grabación que llega más tarde que eso no se asigna (503): mejor esperar que adjuntar mal.\n  match_mode = 'fallback_time_bracket';\n  const bracket = Math.max(0, Math.round(secs || 0)) + 1800;\n  lookup_sql = \"SELECT r.p10, (SELECT CONCAT_WS('|', f.followup_id, f.lead_id, COALESCE(f.recording_synced,0), UNIX_TIMESTAMP(f.created_at), COALESCE(f.call_status,''), COALESCE(f.outcome,'')) \" +\n    \"FROM wf_call_followups f WHERE f.provider = 'asterisk' AND \" + FCF_OK + \" AND RIGHT(f.phone,10) = r.p10 \" +\n    \"AND f.created_at >= NOW() - INTERVAL \" + q(bracket) + \" SECOND AND f.created_at <= NOW() + INTERVAL 60 SECOND \" +\n    \"AND (COALESCE(f.recording_synced,0) = 0 OR UPPER(COALESCE(f.outcome,'')) = 'CONNECTED') \" +\n    \"ORDER BY COALESCE(f.recording_synced,0) ASC, f.created_at ASC, f.id ASC LIMIT 1) AS owner FROM (SELECT \" + q(p10) + \" AS p10) r\";\n}\n\nconsole.log(`📥 WF10 Asterisk | phone=${phoneDigits} uid=${uniqueid} bytes=${buffer.length} secs=${secs} valid=${validAudio} match=${match_mode}`);\nreturn [{\n  json: {\n    provider: 'asterisk',\n    phone: body.phone,\n    phone_digits: phoneDigits,\n    date: body.date || new Date().toISOString().slice(0, 10),\n    filename: body.filename || (uniqueid ? 'test-' + uniqueid + '.wav' : null),\n    uniqueid,\n    call_epoch: callEpoch,\n    country,\n    audio_bytes: buffer.length,\n    valid_audio: validAudio && phoneDigits.length >= 8,\n    duration_secs: secs === null ? 0 : secs,\n    duration_unknown: secs === null,\n    match_mode,\n    lookup_sql\n  },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'audio/wav',\n      fileName: body.filename || 'recording.wav'\n    }\n  }\n}];\n"
+      },
+      "id": "728271df-86f3-494d-bcba-e9d8737a7a9d",
+      "name": "Convert Base64 to Binary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20416,
+        2160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ ({india: '-1004454561082', nepal: '-1004454561082', mexico: '-1003616406932'})[$json.country] || '-1003984044945' }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📞 {{ $json.phone }} — {{ ($json.country || 'unknown').toUpperCase() }} — {{ $json.date }} — {{ $json.duration_secs }}s"
+        }
+      },
+      "id": "c07d6111-1771-4e8c-9df4-2d0290cef557",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        23328,
+        2032
+      ],
+      "webhookId": "telegram-send",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================================\n// Telegram recibe SOLO grabaciones ya subidas al CRM (PUT confirmado) y de >= 60 s,\n// y sólo si ESTA ejecución fue la que marcó recording_synced 0->1 (así una subida\n// duplicada por dos ejecuciones simultáneas no manda el audio dos veces).\n// El CRM recibe todas las contestadas, sin importar la duración.\n// ============================================================================\nlet items = [];\ntry { items = $('🧾 Evaluar PUT (Asterisk)').all(); } catch (e) { items = []; }\nlet flipped = new Set();\ntry { flipped = new Set($('💾 Mark Recording Synced (Asterisk)').all().map(i => i.json && i.json.followup_id).filter(Boolean)); } catch (e) { flipped = new Set(); }\nreturn items\n  .filter(it => it.json && it.json.uploaded === true && it.binary && it.binary.data && flipped.has(it.json.followup_id))\n  .filter(it => it.json.suppress_telegram !== true && it.json.duration_unknown !== true && Number(it.json.duration_secs || 0) >= 60)\n  .map(it => {\n    const phone = String(it.json.phone_digits || it.json.phone || '').replace(/[^0-9]/g, '');\n    const secs = Number(it.json.duration_secs || 0);\n    const date = String(it.json.date || new Date().toISOString().slice(0, 10));\n    return {\n      json: Object.assign({}, it.json, { phone, country: it.json.country || 'unknown', date, duration_secs: secs }),\n      // se clona el binary sólo para cambiar el nombre visible en Telegram\n      binary: { data: Object.assign({}, it.binary.data, { fileName: `${phone}_${date}_${secs}s.wav` }) }\n    };\n  });\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        23104,
+        1920
+      ],
+      "id": "723334f5-9de1-440d-9a97-99720df345ef",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ ({india: '-1003984044945', nepal: '-1003984044945', mexico: '-1003616406932'})[$json.country] || '-1003984044945' }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📞 {{ $json.phone }} — {{ ($json.country || 'unknown').toUpperCase() }} — {{ $json.date }} — {{ $json.duration_secs }}s"
+        }
+      },
+      "id": "660cd707-3560-4824-a0a6-a9e3be226166",
+      "name": "Send to Telegram7",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        23328,
+        1840
+      ],
+      "webhookId": "telegram-send",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        19728,
+        2848
+      ],
+      "id": "e3a442d7-16c1-4e2c-b64f-bcb090d884a6",
+      "name": "⏰ Schedule Stringee Recordings"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Literal SQL seguro para el nodo MySQL de n8n (sin saltos de línea, sin \"$\", sin \"{{\").\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\").replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// \"followup_id|lead_id|synced|created_epoch|call_status|outcome\" -> objeto\nfunction parseOwner(s) {\n  if (!s) return null;\n  const p = String(s).split('|');\n  if (p.length < 4 || !p[0]) return null;\n  return { followup_id: p[0], lead_id: p[1] || null, synced: Number(p[2]) === 1 ? 1 : 0, created_epoch: Number(p[3]) || null, call_status: p[4] || null, outcome: p[5] || null };\n}\n// Duración desde el header WAV (sólo informativo: CRM no filtra por duración)\nfunction wavSecs(buf) {\n  try {\n    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = buf.readUInt32LE(28);\n    if (!byteRate) return null;\n    return Math.round(Math.max(0, buf.length - 44) / byteRate);\n  } catch (e) { return null; }\n}\nfunction countryOf(digits) {\n  if (digits.startsWith('977')) return 'nepal';\n  if (digits.startsWith('91')) return 'india';\n  if (digits.startsWith('58')) return 'venezuela';\n  if (digits.startsWith('52')) return 'mexico';\n  if (digits.startsWith('57')) return 'colombia';\n  return 'unknown';\n}\n// Condición común: filas válidas de wf_call_followups (excluye las históricas 'undefined')\n// (sin el carácter dólar: dentro del nodo MySQL, n8n arma la query con String.replace y un dólar seguido de\n// comilla se interpreta como patrón de reemplazo, corrompiendo el SQL)\nconst FCF_OK = \"CHAR_LENGTH(f.followup_id) = 36 AND f.followup_id REGEXP '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' AND f.phone <> 'undefined' AND f.lead_id <> 'undefined'\";\n// Si el nodo MySQL anterior devolvió un error como item, se corta la ejecución (nunca se sigue \"a ciegas\")\nfunction assertNoDbError(items, where) {\n  const bad = items.filter(i => i && i.json && (i.json.error || (i.json.message && i.json.filename === undefined && i.json.owner === undefined)));\n  if (bad.length) throw new Error('Error de MySQL en ' + where + ': ' + String(bad[0].json.message || JSON.stringify(bad[0].json.error)).slice(0, 300));\n}\n\n// ============================================================================\n// 🔄 Fetch & Convert Stringee Recordings — PASO 1: sólo LISTA (no descarga audio).\n// - Alcance: grabaciones de las últimas MAX_AGE_HOURS (72 h rodantes, sin el corte de\n//   medianoche UTC del WF10 anterior: antes, lo no subido antes de 00:00 UTC se perdía).\n// - SIN BACKFILL al publicar: el primer ciclo del WF10 nuevo guarda su hora (static data)\n//   y nunca se toman grabaciones de más de 30 min antes de esa hora.\n//   Backlog anterior SÓLO con aprobación: BACKLOG_FROM = '2026-09-20T00:00:00Z' (máx. 10 días).\n//   PREFLIGHT sección 9 muestra cuántas se subirían.\n// - Excluye las ya registradas en el ledger (= subidas con PUT confirmado).\n// - Arma UNA consulta que busca, para cada grabación, su followup DUEÑO:\n//   la PRIMERA fila provider='stringee' del mismo teléfono creada entre 2 min\n//   antes y 90 min después del timestamp de la grabación. WF9 crea esa fila al\n//   cerrar el job de ESA llamada; la siguiente llamada al mismo lead no ocurre\n//   hasta que ese job se resolvió (y por el ciclo 3x3, >= 2 h después).\n// El audio se descarga recién en \"🧮 Decidir y Descargar\", sólo para las que se suben.\n// ============================================================================\nconst MAX_AGE_HOURS = 72;\nconst BACKLOG_FROM = '';   // '' = sin backfill. Con aprobación: fecha ISO desde la que se sube el backlog (máx. 10 días)\nconst ledger = new Set($input.all().map(i => i.json && i.json.filename).filter(Boolean));\nconst errs = $input.all().filter(i => i.json && (i.json.error || i.json.message) && !i.json.filename);\nif (errs.length) throw new Error('No se pudo leer el ledger wf10_sent_recordings: se omite el ciclo para no reprocesar todo');\n\nconst listData = await this.helpers.httpRequest({ method: 'GET', url: 'http://172.18.0.1:8091/recordings', json: true, timeout: 20000 });\nconst files = (listData && listData.recordings) || [];\nconst now = Date.now();\nconst sd = $getWorkflowStaticData('global');\nif (!sd.wf10_first_run_ms) sd.wf10_first_run_ms = now;          // primer ciclo del WF10 nuevo (se guarda sólo en ejecuciones reales)\nconst backlogMs = BACKLOG_FROM ? Date.parse(BACKLOG_FROM) : NaN;\nconst floorMs = Number.isFinite(backlogMs)\n  ? Math.max(now - 240 * 3600e3, backlogMs)\n  : Math.max(now - MAX_AGE_HOURS * 3600e3, sd.wf10_first_run_ms - 30 * 60e3);\nconst cand = [];\nlet inLedger = 0, tooOld = 0, empty = 0, badName = 0;\nfor (const r of files) {\n  const fn = String(r.filename || '');\n  const m = fn.match(/^stringee-(\\d{8,15})-(\\d{12,14})\\.wav$/);\n  if (!m) { badName++; continue; }\n  if (ledger.has(fn)) { inLedger++; continue; }\n  const tMs = Number(m[2]);\n  if (tMs < floorMs) { tooOld++; continue; }\n  if (Number(r.size_bytes) <= 44) { empty++; continue; }\n  cand.push({ filename: fn, phone_digits: m[1], t_ms: tMs, size_bytes: Number(r.size_bytes) || 0 });\n}\ncand.sort((a, b) => a.t_ms - b.t_ms); // las más viejas primero\nconsole.log(`WF10 Stringee: ${files.length} en worker | pendientes=${cand.length} | en ledger=${inLedger} | anteriores a ${new Date(floorMs).toISOString()} (sin backfill)=${tooOld} | vacías=${empty} | nombre inválido=${badName}`);\nif (!cand.length) return [];\n\nconst rows = cand.map(c => 'SELECT ' + q(c.filename) + ' AS filename, ' + q(c.phone_digits.slice(-10)) + ' AS p10, ' + q(Math.floor(c.t_ms / 1000)) + ' AS t_s').join(' UNION ALL ');\nconst lookup_sql = \"SELECT r.filename, (SELECT CONCAT_WS('|', f.followup_id, f.lead_id, COALESCE(f.recording_synced,0), UNIX_TIMESTAMP(f.created_at), COALESCE(f.call_status,''), COALESCE(f.outcome,'')) \" +\n  \"FROM wf_call_followups f WHERE f.provider = 'stringee' AND \" + FCF_OK + \" AND RIGHT(f.phone,10) = r.p10 \" +\n  \"AND f.created_at >= FROM_UNIXTIME(r.t_s - 120) AND f.created_at <= FROM_UNIXTIME(r.t_s + 5400) \" +\n  \"ORDER BY f.created_at ASC, f.id ASC LIMIT 1) AS owner FROM (\" + rows + \") r\";\nreturn [{ json: { candidates: cand, lookup_sql } }];\n"
+      },
+      "id": "f0de754b-fb93-4a67-a325-422fd7aecdcd",
+      "name": "🔄 Fetch & Convert Stringee Recordings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20320,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================================\n// Telegram recibe SOLO grabaciones ya subidas al CRM (PUT confirmado) y de >= 60 s,\n// y sólo si ESTA ejecución fue la que marcó recording_synced 0->1 (así una subida\n// duplicada por dos ejecuciones simultáneas no manda el audio dos veces).\n// El CRM recibe todas las contestadas, sin importar la duración.\n// ============================================================================\nlet items = [];\ntry { items = $('🧾 Evaluar PUT (Stringee)').all(); } catch (e) { items = []; }\nlet flipped = new Set();\ntry { flipped = new Set($('💾 Mark Recording Synced (Stringee)').all().map(i => i.json && i.json.followup_id).filter(Boolean)); } catch (e) { flipped = new Set(); }\nreturn items\n  .filter(it => it.json && it.json.uploaded === true && it.binary && it.binary.data && flipped.has(it.json.followup_id))\n  .filter(it => it.json.suppress_telegram !== true && it.json.duration_unknown !== true && Number(it.json.duration_secs || 0) >= 60)\n  .map(it => {\n    const phone = String(it.json.phone_digits || it.json.phone || '').replace(/[^0-9]/g, '');\n    const secs = Number(it.json.duration_secs || 0);\n    const date = String(it.json.date || new Date().toISOString().slice(0, 10));\n    return {\n      json: Object.assign({}, it.json, { phone, country: it.json.country || 'unknown', date, duration_secs: secs }),\n      // se clona el binary sólo para cambiar el nombre visible en Telegram\n      binary: { data: Object.assign({}, it.binary.data, { fileName: `${phone}_${date}_${secs}s.wav` }) }\n    };\n  });\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22784,
+        2688
+      ],
+      "id": "5fe37163-d1c4-4f76-8151-51f99f008182",
+      "name": "Code in JavaScript (Stringee)"
+    },
+    {
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ ({india: '-1004454561082', nepal: '-1004454561082', mexico: '-1003616406932'})[$json.country] || '-1003984044945' }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📞 STRINGEE {{ $json.phone }} — {{ ($json.country || 'unknown').toUpperCase() }} — {{ $json.date }} — {{ $json.duration_secs }}s"
+        }
+      },
+      "id": "ad3f86ef-ee44-4b41-96de-27e202e8f165",
+      "name": "Send to Telegram (Stringee)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        23008,
+        2784
+      ],
+      "webhookId": "telegram-send-stringee-1",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ ({india: '-1003984044945', nepal: '-1003984044945', mexico: '-1003616406932'})[$json.country] || '-1003984044945' }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📞 STRINGEE {{ $json.phone }} — {{ ($json.country || 'unknown').toUpperCase() }} — {{ $json.date }} — {{ $json.duration_secs }}s"
+        }
+      },
+      "id": "dad32dfd-685c-40cf-b100-b0c0910325f9",
+      "name": "Send to Telegram1 (Stringee)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        23008,
+        2592
+      ],
+      "webhookId": "telegram-send-stringee-2",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.lookup_sql }}",
+        "options": {}
+      },
+      "id": "17f92529-45f7-4aed-8181-a15153cd111d",
+      "name": "🔍 Lookup Followup ID (Asterisk)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        20640,
+        2160
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "decision-attach",
+              "leftValue": "={{ $json.decision }}",
+              "rightValue": "attach",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2d341f74-6435-48c3-8c4f-e230cade0ec9",
+      "name": "🔀 Followup Encontrado? (Asterisk)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        21088,
+        2160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.18.0.1:8092/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "24790e9a-8ad6-44f1-927b-48593b955c14",
+      "name": "🔐 Login LeadStudio (WF10-Asterisk)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21312,
+        2000
+      ],
+      "retryOnFail": false,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Literal SQL seguro para el nodo MySQL de n8n (sin saltos de línea, sin \"$\", sin \"{{\").\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\").replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// \"followup_id|lead_id|synced|created_epoch|call_status|outcome\" -> objeto\nfunction parseOwner(s) {\n  if (!s) return null;\n  const p = String(s).split('|');\n  if (p.length < 4 || !p[0]) return null;\n  return { followup_id: p[0], lead_id: p[1] || null, synced: Number(p[2]) === 1 ? 1 : 0, created_epoch: Number(p[3]) || null, call_status: p[4] || null, outcome: p[5] || null };\n}\n// Duración desde el header WAV (sólo informativo: CRM no filtra por duración)\nfunction wavSecs(buf) {\n  try {\n    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = buf.readUInt32LE(28);\n    if (!byteRate) return null;\n    return Math.round(Math.max(0, buf.length - 44) / byteRate);\n  } catch (e) { return null; }\n}\nfunction countryOf(digits) {\n  if (digits.startsWith('977')) return 'nepal';\n  if (digits.startsWith('91')) return 'india';\n  if (digits.startsWith('58')) return 'venezuela';\n  if (digits.startsWith('52')) return 'mexico';\n  if (digits.startsWith('57')) return 'colombia';\n  return 'unknown';\n}\n// Condición común: filas válidas de wf_call_followups (excluye las históricas 'undefined')\n// (sin el carácter dólar: dentro del nodo MySQL, n8n arma la query con String.replace y un dólar seguido de\n// comilla se interpreta como patrón de reemplazo, corrompiendo el SQL)\nconst FCF_OK = \"CHAR_LENGTH(f.followup_id) = 36 AND f.followup_id REGEXP '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' AND f.phone <> 'undefined' AND f.lead_id <> 'undefined'\";\n// Si el nodo MySQL anterior devolvió un error como item, se corta la ejecución (nunca se sigue \"a ciegas\")\nfunction assertNoDbError(items, where) {\n  const bad = items.filter(i => i && i.json && (i.json.error || (i.json.message && i.json.filename === undefined && i.json.owner === undefined)));\n  if (bad.length) throw new Error('Error de MySQL en ' + where + ': ' + String(bad[0].json.message || JSON.stringify(bad[0].json.error)).slice(0, 300));\n}\n\n// ============================================================================\n// 🔗 Attach Audio + Token (Asterisk) — modo \"Run Once for Each Item\".\n// Token de ESTE item (Login) + decisión/followup de ESTE item + audio del MISMO\n// item por pairing (Convert Base64 to Binary). Si falta algo, falla (el webhook\n// responde 500 y el worker reintenta): nunca se hace PUT a un followup vacío.\n// ============================================================================\nconst token = $input.item.json.accessToken;\nconst dec = $('🧮 Decidir Match (Asterisk)').item.json;\nconst src = $('Convert Base64 to Binary').item;\nif (!token) throw new Error('Login LeadStudio sin accessToken');\nif (!dec || dec.decision !== 'attach' || !dec.followup_id) throw new Error('item sin followup_id / decisión attach');\nif (!src || !src.binary || !src.binary.data) throw new Error('item sin audio (binary.data)');\nreturn {\n  json: Object.assign({}, dec, { accessToken: token }),\n  binary: src.binary\n};\n"
+      },
+      "id": "214213ff-04d2-4ee3-9a18-99c7ece41c4c",
+      "name": "🔗 Attach Audio + Token (Asterisk)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21536,
+        2000
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/calls/recording/' + $json.followup_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "98b6d146-c4b8-426d-9223-00f11740e79b",
+      "name": "📤 PUT Recording — LeadStudio (Asterisk)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21760,
+        2000
+      ],
+      "retryOnFail": false,
+      "maxTries": 2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.mark_sql }}",
+        "options": {}
+      },
+      "id": "99f70201-4b5e-447b-ba27-2e72a92d6587",
+      "name": "💾 Mark Recording Synced (Asterisk)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        22432,
+        1920
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.lookup_sql }}",
+        "options": {}
+      },
+      "id": "4ded92d1-6d58-4926-b3fe-a0368ced77d2",
+      "name": "🔍 Lookup Followup ID (Stringee)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        20544,
+        2816
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "decision-attach",
+              "leftValue": "={{ $json.decision }}",
+              "rightValue": "attach",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ff28b222-6993-4e87-aef2-2420c298a8b3",
+      "name": "🔀 Followup Encontrado? (Stringee)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        20992,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.18.0.1:8092/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "5b6c7599-8d34-4f64-8775-1473fce2f2f5",
+      "name": "🔐 Login LeadStudio (WF10-Stringee)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21216,
+        2688
+      ],
+      "retryOnFail": false,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Literal SQL seguro para el nodo MySQL de n8n (sin saltos de línea, sin \"$\", sin \"{{\").\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\").replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// \"followup_id|lead_id|synced|created_epoch|call_status|outcome\" -> objeto\nfunction parseOwner(s) {\n  if (!s) return null;\n  const p = String(s).split('|');\n  if (p.length < 4 || !p[0]) return null;\n  return { followup_id: p[0], lead_id: p[1] || null, synced: Number(p[2]) === 1 ? 1 : 0, created_epoch: Number(p[3]) || null, call_status: p[4] || null, outcome: p[5] || null };\n}\n// Duración desde el header WAV (sólo informativo: CRM no filtra por duración)\nfunction wavSecs(buf) {\n  try {\n    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = buf.readUInt32LE(28);\n    if (!byteRate) return null;\n    return Math.round(Math.max(0, buf.length - 44) / byteRate);\n  } catch (e) { return null; }\n}\nfunction countryOf(digits) {\n  if (digits.startsWith('977')) return 'nepal';\n  if (digits.startsWith('91')) return 'india';\n  if (digits.startsWith('58')) return 'venezuela';\n  if (digits.startsWith('52')) return 'mexico';\n  if (digits.startsWith('57')) return 'colombia';\n  return 'unknown';\n}\n// Condición común: filas válidas de wf_call_followups (excluye las históricas 'undefined')\n// (sin el carácter dólar: dentro del nodo MySQL, n8n arma la query con String.replace y un dólar seguido de\n// comilla se interpreta como patrón de reemplazo, corrompiendo el SQL)\nconst FCF_OK = \"CHAR_LENGTH(f.followup_id) = 36 AND f.followup_id REGEXP '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' AND f.phone <> 'undefined' AND f.lead_id <> 'undefined'\";\n// Si el nodo MySQL anterior devolvió un error como item, se corta la ejecución (nunca se sigue \"a ciegas\")\nfunction assertNoDbError(items, where) {\n  const bad = items.filter(i => i && i.json && (i.json.error || (i.json.message && i.json.filename === undefined && i.json.owner === undefined)));\n  if (bad.length) throw new Error('Error de MySQL en ' + where + ': ' + String(bad[0].json.message || JSON.stringify(bad[0].json.error)).slice(0, 300));\n}\n\n// ============================================================================\n// 🔗 Attach Audio + Token — modo \"Run Once for Each Item\" (1 salida por grabación).\n// Toma el token de ESTE item (Login) y el audio del MISMO item por pairing\n// (nunca .first(): cada grabación lleva su propio binario).\n// Si falta algo, falla: no se hace PUT a un followup vacío.\n// ============================================================================\nconst token = $input.item.json.accessToken;\nconst src = $('🧮 Decidir y Descargar (Stringee)').item;\nif (!token) throw new Error('Login LeadStudio sin accessToken');\nif (!src || !src.json || !src.json.followup_id) throw new Error('item sin followup_id');\nif (!src.binary || !src.binary.data) throw new Error('item sin audio (binary.data) para ' + src.json.filename);\nreturn {\n  json: Object.assign({}, src.json, { accessToken: token }),\n  binary: src.binary\n};\n"
+      },
+      "id": "26974477-bb01-4b73-963d-d3f9816f8c71",
+      "name": "🔗 Attach Audio + Token (Stringee)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21440,
+        2688
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/calls/recording/' + $json.followup_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "2438cdeb-8d08-48d8-9752-455ac2892476",
+      "name": "📤 PUT Recording — LeadStudio (Stringee)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        21664,
+        2688
+      ],
+      "retryOnFail": false,
+      "maxTries": 2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.mark_sql }}",
+        "options": {}
+      },
+      "id": "b7b74624-e778-4531-97c6-2aecba28f700",
+      "name": "💾 Mark Recording Synced (Stringee)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        22112,
+        2688
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT filename FROM wf10_sent_recordings WHERE sent_at >= DATE_SUB(NOW(), INTERVAL 30 DAY);",
+        "options": {}
+      },
+      "id": "522329ad-a35b-40f4-8df6-45ffd186d9b2",
+      "name": "🔎 Ya Enviadas (ledger)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        20000,
+        2816
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Literal SQL seguro para el nodo MySQL de n8n (sin saltos de línea, sin \"$\", sin \"{{\").\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\").replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// \"followup_id|lead_id|synced|created_epoch|call_status|outcome\" -> objeto\nfunction parseOwner(s) {\n  if (!s) return null;\n  const p = String(s).split('|');\n  if (p.length < 4 || !p[0]) return null;\n  return { followup_id: p[0], lead_id: p[1] || null, synced: Number(p[2]) === 1 ? 1 : 0, created_epoch: Number(p[3]) || null, call_status: p[4] || null, outcome: p[5] || null };\n}\n// Duración desde el header WAV (sólo informativo: CRM no filtra por duración)\nfunction wavSecs(buf) {\n  try {\n    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = buf.readUInt32LE(28);\n    if (!byteRate) return null;\n    return Math.round(Math.max(0, buf.length - 44) / byteRate);\n  } catch (e) { return null; }\n}\nfunction countryOf(digits) {\n  if (digits.startsWith('977')) return 'nepal';\n  if (digits.startsWith('91')) return 'india';\n  if (digits.startsWith('58')) return 'venezuela';\n  if (digits.startsWith('52')) return 'mexico';\n  if (digits.startsWith('57')) return 'colombia';\n  return 'unknown';\n}\n// Condición común: filas válidas de wf_call_followups (excluye las históricas 'undefined')\n// (sin el carácter dólar: dentro del nodo MySQL, n8n arma la query con String.replace y un dólar seguido de\n// comilla se interpreta como patrón de reemplazo, corrompiendo el SQL)\nconst FCF_OK = \"CHAR_LENGTH(f.followup_id) = 36 AND f.followup_id REGEXP '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' AND f.phone <> 'undefined' AND f.lead_id <> 'undefined'\";\n// Si el nodo MySQL anterior devolvió un error como item, se corta la ejecución (nunca se sigue \"a ciegas\")\nfunction assertNoDbError(items, where) {\n  const bad = items.filter(i => i && i.json && (i.json.error || (i.json.message && i.json.filename === undefined && i.json.owner === undefined)));\n  if (bad.length) throw new Error('Error de MySQL en ' + where + ': ' + String(bad[0].json.message || JSON.stringify(bad[0].json.error)).slice(0, 300));\n}\n\n// ============================================================================\n// ⚙️ SQL ledger — registra en wf10_sent_recordings SOLO grabaciones con PUT confirmado:\n//  filas devueltas por \"💾 Mark Recording Synced\" (LeadStudio respondió 2xx + hasRecording).\n// Nunca registra una grabación sin followup o con PUT fallido.\n// ============================================================================\nfunction num(v) { const n = Number(v); return Number.isFinite(n) ? Math.round(n) : 0; }\nconst rows = $input.all().map(i => i.json || {})\n  .map(r => ({ filename: r.ledger_filename || null, phone: r.phone, country: r.country, secs: r.duration_secs }))\n  .filter(r => r.filename && /^[A-Za-z0-9._-]+\\.wav$/.test(r.filename));\nif (!rows.length) { console.log('WF10: nada que registrar en ledger'); return []; }\nconst values = rows.map(r => '(' + [q(r.filename), q(r.phone || null), q(r.country || null), num(r.secs)].join(', ') + ')').join(', ');\nconsole.log(`WF10: registrando ${rows.length} grabación(es) en ledger`);\nreturn [{ json: { sql: 'INSERT INTO wf10_sent_recordings (filename, phone, country, duration_secs) VALUES ' + values + ' ON DUPLICATE KEY UPDATE sent_at = sent_at', n: rows.length } }];\n"
+      },
+      "id": "c1de1fe8-70b5-46a4-abf5-24a062662996",
+      "name": "⚙️ SQL Registrar Enviadas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22336,
+        2688
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "72ba7627-e7af-472c-9ea4-c72232e8027c",
+      "name": "💾 Registrar Enviadas (ledger)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        22560,
+        2688
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Literal SQL seguro para el nodo MySQL de n8n (sin saltos de línea, sin \"$\", sin \"{{\").\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\").replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// \"followup_id|lead_id|synced|created_epoch|call_status|outcome\" -> objeto\nfunction parseOwner(s) {\n  if (!s) return null;\n  const p = String(s).split('|');\n  if (p.length < 4 || !p[0]) return null;\n  return { followup_id: p[0], lead_id: p[1] || null, synced: Number(p[2]) === 1 ? 1 : 0, created_epoch: Number(p[3]) || null, call_status: p[4] || null, outcome: p[5] || null };\n}\n// Duración desde el header WAV (sólo informativo: CRM no filtra por duración)\nfunction wavSecs(buf) {\n  try {\n    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = buf.readUInt32LE(28);\n    if (!byteRate) return null;\n    return Math.round(Math.max(0, buf.length - 44) / byteRate);\n  } catch (e) { return null; }\n}\nfunction countryOf(digits) {\n  if (digits.startsWith('977')) return 'nepal';\n  if (digits.startsWith('91')) return 'india';\n  if (digits.startsWith('58')) return 'venezuela';\n  if (digits.startsWith('52')) return 'mexico';\n  if (digits.startsWith('57')) return 'colombia';\n  return 'unknown';\n}\n// Condición común: filas válidas de wf_call_followups (excluye las históricas 'undefined')\n// (sin el carácter dólar: dentro del nodo MySQL, n8n arma la query con String.replace y un dólar seguido de\n// comilla se interpreta como patrón de reemplazo, corrompiendo el SQL)\nconst FCF_OK = \"CHAR_LENGTH(f.followup_id) = 36 AND f.followup_id REGEXP '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' AND f.phone <> 'undefined' AND f.lead_id <> 'undefined'\";\n// Si el nodo MySQL anterior devolvió un error como item, se corta la ejecución (nunca se sigue \"a ciegas\")\nfunction assertNoDbError(items, where) {\n  const bad = items.filter(i => i && i.json && (i.json.error || (i.json.message && i.json.filename === undefined && i.json.owner === undefined)));\n  if (bad.length) throw new Error('Error de MySQL en ' + where + ': ' + String(bad[0].json.message || JSON.stringify(bad[0].json.error)).slice(0, 300));\n}\n\n// ============================================================================\n// 🧮 Decidir Match (Asterisk) — una sola decisión por grabación:\n//   attach            -> dueño encontrado y pendiente (recording_synced=0)   -> PUT\n//   not_pending       -> el dueño ya tiene recording_synced=1 (reenvío / sin grabación esperada) -> 200, sin PUT\n//   followup_not_found-> WF2 todavía no escribió la fila (o no existe)       -> 503 (el worker reintenta)\n//   invalid_audio     -> WAV vacío/ inválido                                  -> 200, no se reintenta\n// ============================================================================\nassertNoDbError($input.all(), '🔍 Lookup Followup ID (Asterisk)');\nconst conv = $('Convert Base64 to Binary').first().json;\nconst row = ($input.first() && $input.first().json) || {};\nconst owner = parseOwner(row.owner);\nconst base = {\n  provider: 'asterisk', phone: conv.phone, phone_digits: conv.phone_digits, date: conv.date, filename: conv.filename,\n  uniqueid: conv.uniqueid, call_epoch: conv.call_epoch, country: conv.country, duration_secs: conv.duration_secs,\n  duration_unknown: conv.duration_unknown, audio_bytes: conv.audio_bytes, match_mode: conv.match_mode\n};\nlet decision, http_status, reason;\nif (!conv.valid_audio) { decision = 'invalid_audio'; http_status = 200; reason = 'WAV vacío o inválido: no se sube'; }\nelse if (!owner) { decision = 'followup_not_found'; http_status = 503; reason = 'sin fila asterisk para este teléfono y hora de llamada (todavía)'; }\nelse if (owner.synced === 1) { decision = 'not_pending'; http_status = 200; reason = 'el followup dueño ya tiene recording_synced=1'; }\nelse { decision = 'attach'; http_status = 200; reason = 'dueño pendiente'; }\nconst out = Object.assign({}, base, {\n  decision, http_status, reason,\n  followup_id: owner ? owner.followup_id : null,\n  lead_id: owner ? owner.lead_id : null,\n  owner_created_epoch: owner ? owner.created_epoch : null,\n  owner_delay_secs: owner && conv.call_epoch ? owner.created_epoch - conv.call_epoch : null\n});\nconsole.log(`🧮 WF10 Asterisk | ${conv.phone_digits} uid=${conv.uniqueid} -> ${decision} ${out.followup_id || ''} (${reason})`);\nreturn [{ json: out, pairedItem: { item: 0 } }];\n"
+      },
+      "id": "94cdd79d-5f36-527a-a393-45140f2f1e87",
+      "name": "🧮 Decidir Match (Asterisk)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20864,
+        2160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Literal SQL seguro para el nodo MySQL de n8n (sin saltos de línea, sin \"$\", sin \"{{\").\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\").replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// \"followup_id|lead_id|synced|created_epoch|call_status|outcome\" -> objeto\nfunction parseOwner(s) {\n  if (!s) return null;\n  const p = String(s).split('|');\n  if (p.length < 4 || !p[0]) return null;\n  return { followup_id: p[0], lead_id: p[1] || null, synced: Number(p[2]) === 1 ? 1 : 0, created_epoch: Number(p[3]) || null, call_status: p[4] || null, outcome: p[5] || null };\n}\n// Duración desde el header WAV (sólo informativo: CRM no filtra por duración)\nfunction wavSecs(buf) {\n  try {\n    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = buf.readUInt32LE(28);\n    if (!byteRate) return null;\n    return Math.round(Math.max(0, buf.length - 44) / byteRate);\n  } catch (e) { return null; }\n}\nfunction countryOf(digits) {\n  if (digits.startsWith('977')) return 'nepal';\n  if (digits.startsWith('91')) return 'india';\n  if (digits.startsWith('58')) return 'venezuela';\n  if (digits.startsWith('52')) return 'mexico';\n  if (digits.startsWith('57')) return 'colombia';\n  return 'unknown';\n}\n// Condición común: filas válidas de wf_call_followups (excluye las históricas 'undefined')\n// (sin el carácter dólar: dentro del nodo MySQL, n8n arma la query con String.replace y un dólar seguido de\n// comilla se interpreta como patrón de reemplazo, corrompiendo el SQL)\nconst FCF_OK = \"CHAR_LENGTH(f.followup_id) = 36 AND f.followup_id REGEXP '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' AND f.phone <> 'undefined' AND f.lead_id <> 'undefined'\";\n// Si el nodo MySQL anterior devolvió un error como item, se corta la ejecución (nunca se sigue \"a ciegas\")\nfunction assertNoDbError(items, where) {\n  const bad = items.filter(i => i && i.json && (i.json.error || (i.json.message && i.json.filename === undefined && i.json.owner === undefined)));\n  if (bad.length) throw new Error('Error de MySQL en ' + where + ': ' + String(bad[0].json.message || JSON.stringify(bad[0].json.error)).slice(0, 300));\n}\n\n// ============================================================================\n// 🧾 Evaluar PUT — sólo cuenta como subida si LeadStudio respondió 2xx y confirmó\n// hasRecording (y, si lo devuelve, el mismo followUpId). Recién ahí se genera el\n// UPDATE recording_synced=1 (y la fila de ledger). Un PUT fallido no marca nada.\n// - El nodo PUT tiene \"On Error: continue\": un error de red / timeout / cuerpo no JSON\n//   en UNA grabación llega acá como item con error y NO corta las demás del ciclo.\n// - Rechazo PERMANENTE de LeadStudio (400/404/410/413/415/422): no tiene sentido reintentar\n//   para siempre. Se recuerda por archivo (static data) y recién al 2.º rechazo se deja:\n//   Asterisk responde 200 \"put_rejected\" al worker (antes, 503 = reintentar); Stringee deja de intentarlo.\n// - El UPDATE sólo marca si la fila seguía en 0 y devuelve la fila de ledger SÓLO si\n//   este PUT fue el que la pasó a 1 (ROW_COUNT): si dos ejecuciones suben lo mismo a la\n//   vez, ledger y Telegram salen una sola vez.\n// ============================================================================\nconst PROVIDER = 'asterisk';\n// Asterisk (webhook): siempre sale 1 item para poder responder al worker (OK / reintento / rechazo).\nconst EMIT_FAILURES = true;\nconst PERMANENT = [400, 404, 410, 413, 415, 422];\nconst puts = $input.all();\nconst sent = $('🔗 Attach Audio + Token (Asterisk)').all();\nconst sd = $getWorkflowStaticData('global');\nconst FKEY = PROVIDER === 'stringee' ? 'wf10_fail' : 'wf10_fail_asterisk';\nif (!sd[FKEY]) sd[FKEY] = {};\nconst fails = sd[FKEY];\nfor (const [k, f] of Object.entries(fails)) if (!f || Date.now() - (f.last || 0) > 4 * 86400e3) delete fails[k];\nconst ok = [];\nlet fail = 0;\nputs.forEach((p, i) => {\n  const idx = p.pairedItem && typeof p.pairedItem.item === 'number' ? p.pairedItem.item : i;\n  const a = sent[idx];\n  if (!a) { fail++; console.error('❌ WF10 ' + PROVIDER + ': respuesta PUT sin item de origen (índice ' + idx + ')'); return; }\n  const r = p.json || {};\n  const err = r.error || null;                                   // item de error (red, timeout, cuerpo inválido)\n  const status = Number(r.statusCode || (err && (err.httpCode || err.status)) || 0);\n  let b = r.body;\n  if (typeof b === 'string') { try { b = JSON.parse(b); } catch (e) { b = { raw: b.slice(0, 200) }; } }\n  b = (b && typeof b === 'object') ? b : {};\n  const inner = (b.followUp && typeof b.followUp === 'object') ? b.followUp : b;\n  const has = inner.hasRecording === true || inner.hasRecording === 'true' || b.hasRecording === true || b.hasRecording === 'true';\n  const fid = inner.followUpId || b.followUpId || inner.id || null;\n  const sameId = !fid || String(fid) === String(a.json.followup_id);\n  const j = a.json;\n  const key = PROVIDER === 'asterisk' ? (j.uniqueid || (j.filename + '|' + j.followup_id)) : j.filename;   // memoria de fallas por grabación\n  if (status >= 200 && status < 300 && has && sameId) {\n    const mark_sql = 'UPDATE wf_call_followups SET recording_synced = 1 WHERE followup_id = ' + q(j.followup_id) +\n      ' AND provider = ' + q(PROVIDER) + ' AND COALESCE(recording_synced,0) = 0; SELECT ' + [q(j.filename) + ' AS ledger_filename', q(j.phone_digits || j.phone) + ' AS phone',\n        q(j.country) + ' AS country', q(Number(j.duration_secs) || 0) + ' AS duration_secs', q(j.followup_id) + ' AS followup_id', q(PROVIDER) + ' AS provider'].join(', ') +\n      ' FROM DUAL WHERE ROW_COUNT() > 0';\n    const json = Object.assign({}, j, { put_status: status, uploaded: true, mark_sql });\n    delete json.accessToken;\n    delete fails[key];\n    ok.push({ json, binary: a.binary, pairedItem: { item: idx } });\n    console.log('✅ WF10 ' + PROVIDER + ': grabación ' + j.filename + ' -> followup ' + j.followup_id + ' (HTTP ' + status + ')');\n  } else {\n    fail++;\n    const prev = fails[key] || { n: 0, perm: 0 };\n    const permanent = PERMANENT.includes(status) && prev.perm >= 1;   // 2.º rechazo del mismo archivo\n    const why = err ? ('error: ' + String(err.message || err.description || JSON.stringify(err)).slice(0, 160)) : JSON.stringify(r.body || '').slice(0, 200);\n    const msg = 'PUT no confirmado | HTTP ' + (status || 'sin respuesta') + ' | hasRecording=' + has + ' | followUpId=' + fid + ' | ' + why;\n    console.error('❌ WF10 ' + PROVIDER + ': ' + j.filename + ' -> ' + j.followup_id + ' ' + (permanent ? '[RECHAZO PERMANENTE] ' : '') + msg);\n    const f = { n: prev.n + 1, perm: prev.perm + (PERMANENT.includes(status) ? 1 : 0), last: Date.now(), status, followup_id: j.followup_id };\n    fails[key] = f;\n    if (EMIT_FAILURES) {\n      const json = Object.assign({}, j, { put_status: status, uploaded: false, permanent,\n        http_status: permanent ? 200 : 503, status_text: permanent ? 'put_rejected' : 'put_failed', reason: msg });\n      delete json.accessToken;\n      ok.push({ json, pairedItem: { item: idx } });\n    }\n  }\n});\nconsole.log('🧾 WF10 ' + PROVIDER + ': PUT confirmados=' + ok.filter(x => x.json.uploaded).length + ' | fallidos=' + fail);\nreturn ok;\n"
+      },
+      "id": "c428b3c7-578f-52e3-afec-0a21d6168907",
+      "name": "🧾 Evaluar PUT (Asterisk)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21984,
+        2000
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "put-ok",
+              "leftValue": "={{ $json.uploaded }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "27c5cc70-f417-5f0a-a99e-e7815b08d16c",
+      "name": "🔀 PUT OK? (Asterisk)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        22208,
+        2000
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Respuesta al worker después de marcar. 'attached' = esta ejecución pasó recording_synced 0->1;\n// 'attached_already_synced' = el PUT salió bien pero otra entrega simultánea ya la había marcado.\nconst ev = $('🧾 Evaluar PUT (Asterisk)').first().json;\nconst flipped = $input.all().some(i => i.json && i.json.followup_id);\nreturn [{ json: { ok: true, status: flipped ? 'attached' : 'attached_already_synced', followup_id: ev.followup_id, filename: ev.filename, match_mode: ev.match_mode } }];"
+      },
+      "id": "746e22d3-6b0d-5f79-adc5-ce8f6f7f5a3b",
+      "name": "🧾 Resultado Subida (Asterisk)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22656,
+        1920
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b03f3a48-274f-50fd-a3e0-e032ea6eee29",
+      "name": "✅ Respond Attached (Asterisk)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        22880,
+        1920
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, status: $json.status_text, retry: $json.http_status >= 500, http_leadstudio: $json.put_status, followup_id: $json.followup_id, reason: $json.reason }) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "210f0cc5-23e7-5a18-a1d9-c56f9d4ac00f",
+      "name": "⚠️ Respond PUT Fallido (Asterisk)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        22432,
+        2112
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: $json.http_status < 300, status: $json.decision, retry: $json.http_status >= 500, followup_id: $json.followup_id, match_mode: $json.match_mode, reason: $json.reason }) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "26ab85ad-63c5-5b85-af27-226ceb873622",
+      "name": "↩️ Respond Skip (Asterisk)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        21312,
+        2272
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Literal SQL seguro para el nodo MySQL de n8n (sin saltos de línea, sin \"$\", sin \"{{\").\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\").replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// \"followup_id|lead_id|synced|created_epoch|call_status|outcome\" -> objeto\nfunction parseOwner(s) {\n  if (!s) return null;\n  const p = String(s).split('|');\n  if (p.length < 4 || !p[0]) return null;\n  return { followup_id: p[0], lead_id: p[1] || null, synced: Number(p[2]) === 1 ? 1 : 0, created_epoch: Number(p[3]) || null, call_status: p[4] || null, outcome: p[5] || null };\n}\n// Duración desde el header WAV (sólo informativo: CRM no filtra por duración)\nfunction wavSecs(buf) {\n  try {\n    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = buf.readUInt32LE(28);\n    if (!byteRate) return null;\n    return Math.round(Math.max(0, buf.length - 44) / byteRate);\n  } catch (e) { return null; }\n}\nfunction countryOf(digits) {\n  if (digits.startsWith('977')) return 'nepal';\n  if (digits.startsWith('91')) return 'india';\n  if (digits.startsWith('58')) return 'venezuela';\n  if (digits.startsWith('52')) return 'mexico';\n  if (digits.startsWith('57')) return 'colombia';\n  return 'unknown';\n}\n// Condición común: filas válidas de wf_call_followups (excluye las históricas 'undefined')\n// (sin el carácter dólar: dentro del nodo MySQL, n8n arma la query con String.replace y un dólar seguido de\n// comilla se interpreta como patrón de reemplazo, corrompiendo el SQL)\nconst FCF_OK = \"CHAR_LENGTH(f.followup_id) = 36 AND f.followup_id REGEXP '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' AND f.phone <> 'undefined' AND f.lead_id <> 'undefined'\";\n// Si el nodo MySQL anterior devolvió un error como item, se corta la ejecución (nunca se sigue \"a ciegas\")\nfunction assertNoDbError(items, where) {\n  const bad = items.filter(i => i && i.json && (i.json.error || (i.json.message && i.json.filename === undefined && i.json.owner === undefined)));\n  if (bad.length) throw new Error('Error de MySQL en ' + where + ': ' + String(bad[0].json.message || JSON.stringify(bad[0].json.error)).slice(0, 300));\n}\n\n// ============================================================================\n// 🧮 Decidir y Descargar (Stringee) — por cada grabación pendiente:\n//   attach          -> dueño pendiente (recording_synced=0): se descarga el audio y va al PUT\n//   (omitida)       -> el dueño ya tiene recording_synced=1: no se sube y NO se registra en ledger\n//                      (el ledger es sólo para PUT confirmados por LeadStudio)\n//   (sin dueño)     -> todavía no existe la fila de WF9: NO se registra nada, queda para el próximo ciclo\n// Un followup recibe UNA sola grabación: la más vieja de esa llamada (aunque haya fallado antes).\n// Cada item lleva SU propio binario (nunca se comparte audio entre items).\n// Fallas anteriores (memoria en static data, la escribe \"🧾 Evaluar PUT (Stringee)\"):\n//   - primero van las grabaciones SIN fallas previas (una que falla siempre no bloquea a las nuevas)\n//   - reintento con espera creciente: 1.ª falla -> próximo ciclo, 2.ª -> 5 min, 3.ª -> 15 min, luego cada 60 min\n//   - 2 rechazos PERMANENTES de LeadStudio (400/404/409/410/413/415/422) -> no se reintenta más (queda en el log)\n// ============================================================================\nconst MAX_UPLOADS_PER_CYCLE = 10;\nconst meta = $('🔄 Fetch & Convert Stringee Recordings').first().json;\nconst byFile = new Map((meta.candidates || []).map(c => [c.filename, c]));\nassertNoDbError($input.all(), '🔍 Lookup Followup ID (Stringee)');\nconst rows = $input.all().map(i => i.json || {}).filter(r => r.filename);\nconst sd = $getWorkflowStaticData('global');\nconst fails = sd.wf10_fail || {};\nconst NOW_MS = Date.now();\nfor (const [fn, f] of Object.entries(fails)) if (!f || NOW_MS - (f.last || 0) > 4 * 86400e3) delete fails[fn];   // limpieza\nsd.wf10_fail = fails;\nconst BACKOFF_MIN = [0, 5, 15, 60];\nconst usedFollowup = new Set();\nconst out = [];\nlet waiting = 0, skipped = 0, deferred = 0, dlFail = 0, attach = 0, backoff = 0, rejected = 0;\nconst tOf = r => (byFile.get(r.filename) || {}).t_ms;\nconst oldestByOwner = new Map();   // dueño pendiente -> su archivo más viejo (el único que se puede subir)\nfor (const r of rows) {\n  const o = parseOwner(r.owner);\n  if (!o || o.synced === 1 || !byFile.get(r.filename)) continue;\n  const cur = oldestByOwner.get(o.followup_id);\n  if (!cur || tOf(r) < cur.t) oldestByOwner.set(o.followup_id, { fn: r.filename, t: tOf(r) });\n}\nrows.sort((a, b) => ((fails[a.filename] ? 1 : 0) - (fails[b.filename] ? 1 : 0)) || (tOf(a) - tOf(b)));\nfor (const r of rows) {\n  const c = byFile.get(r.filename);\n  if (!c) continue;\n  const owner = parseOwner(r.owner);\n  if (!owner) { waiting++; continue; }\n  const base = { provider: 'stringee', filename: c.filename, phone: c.phone_digits, phone_digits: c.phone_digits,\n    date: new Date(c.t_ms).toISOString().slice(0, 10), recording_ts: new Date(c.t_ms).toISOString(), country: countryOf(c.phone_digits),\n    followup_id: owner.followup_id, lead_id: owner.lead_id, owner_created_epoch: owner.created_epoch,\n    owner_delay_secs: owner.created_epoch ? owner.created_epoch - Math.floor(c.t_ms / 1000) : null };\n  if (owner.synced === 1) { skipped++; continue; }   // ya tiene su grabación (u origen sin grabación esperada)\n  if ((oldestByOwner.get(owner.followup_id) || {}).fn !== c.filename) { deferred++; continue; }   // otro archivo de la misma llamada\n  const f = fails[c.filename];\n  if (f && f.perm >= 2) { rejected++; continue; }\n  if (f && NOW_MS - (f.last || 0) < BACKOFF_MIN[Math.min(f.n, BACKOFF_MIN.length) - 1] * 60e3) { backoff++; continue; }\n  if (usedFollowup.has(owner.followup_id) || attach >= MAX_UPLOADS_PER_CYCLE) { deferred++; continue; }\n  let dl;\n  try {\n    dl = await this.helpers.httpRequest({ method: 'GET', url: 'http://172.18.0.1:8091/recordings/' + encodeURIComponent(c.filename), json: true, timeout: 30000 });\n  } catch (e) { dlFail++; console.error('❌ WF10 Stringee: no se pudo descargar ' + c.filename + ': ' + e.message); continue; }\n  const b64 = dl && dl.ok && dl.audio_base64 ? String(dl.audio_base64) : '';\n  const buf = Buffer.from(b64, 'base64');\n  if (buf.length <= 44 || buf.toString('ascii', 0, 4) !== 'RIFF') { dlFail++; console.error('❌ WF10 Stringee: audio inválido ' + c.filename); continue; }\n  const secs = wavSecs(buf);\n  usedFollowup.add(owner.followup_id);\n  attach++;\n  out.push({\n    json: Object.assign(base, { decision: 'attach', audio_bytes: buf.length, duration_secs: secs === null ? 0 : secs, duration_unknown: secs === null }),\n    binary: { data: { data: b64, mimeType: 'audio/wav', fileName: c.filename } }\n  });\n}\nconsole.log(`🧮 WF10 Stringee: a subir=${attach} | dueño ya sincronizado (omitidas)=${skipped} | sin followup todavía=${waiting} | diferidas=${deferred} | en espera por falla previa=${backoff} | rechazadas por LeadStudio (no se reintentan)=${rejected} | descarga fallida=${dlFail}`);\nreturn out;\n"
+      },
+      "id": "8ecf1de3-2d03-539e-a8c0-c6a6dc19e49c",
+      "name": "🧮 Decidir y Descargar (Stringee)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20768,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Literal SQL seguro para el nodo MySQL de n8n (sin saltos de línea, sin \"$\", sin \"{{\").\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\").replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// \"followup_id|lead_id|synced|created_epoch|call_status|outcome\" -> objeto\nfunction parseOwner(s) {\n  if (!s) return null;\n  const p = String(s).split('|');\n  if (p.length < 4 || !p[0]) return null;\n  return { followup_id: p[0], lead_id: p[1] || null, synced: Number(p[2]) === 1 ? 1 : 0, created_epoch: Number(p[3]) || null, call_status: p[4] || null, outcome: p[5] || null };\n}\n// Duración desde el header WAV (sólo informativo: CRM no filtra por duración)\nfunction wavSecs(buf) {\n  try {\n    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = buf.readUInt32LE(28);\n    if (!byteRate) return null;\n    return Math.round(Math.max(0, buf.length - 44) / byteRate);\n  } catch (e) { return null; }\n}\nfunction countryOf(digits) {\n  if (digits.startsWith('977')) return 'nepal';\n  if (digits.startsWith('91')) return 'india';\n  if (digits.startsWith('58')) return 'venezuela';\n  if (digits.startsWith('52')) return 'mexico';\n  if (digits.startsWith('57')) return 'colombia';\n  return 'unknown';\n}\n// Condición común: filas válidas de wf_call_followups (excluye las históricas 'undefined')\n// (sin el carácter dólar: dentro del nodo MySQL, n8n arma la query con String.replace y un dólar seguido de\n// comilla se interpreta como patrón de reemplazo, corrompiendo el SQL)\nconst FCF_OK = \"CHAR_LENGTH(f.followup_id) = 36 AND f.followup_id REGEXP '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' AND f.phone <> 'undefined' AND f.lead_id <> 'undefined'\";\n// Si el nodo MySQL anterior devolvió un error como item, se corta la ejecución (nunca se sigue \"a ciegas\")\nfunction assertNoDbError(items, where) {\n  const bad = items.filter(i => i && i.json && (i.json.error || (i.json.message && i.json.filename === undefined && i.json.owner === undefined)));\n  if (bad.length) throw new Error('Error de MySQL en ' + where + ': ' + String(bad[0].json.message || JSON.stringify(bad[0].json.error)).slice(0, 300));\n}\n\n// ============================================================================\n// 🧾 Evaluar PUT — sólo cuenta como subida si LeadStudio respondió 2xx y confirmó\n// hasRecording (y, si lo devuelve, el mismo followUpId). Recién ahí se genera el\n// UPDATE recording_synced=1 (y la fila de ledger). Un PUT fallido no marca nada.\n// - El nodo PUT tiene \"On Error: continue\": un error de red / timeout / cuerpo no JSON\n//   en UNA grabación llega acá como item con error y NO corta las demás del ciclo.\n// - Rechazo PERMANENTE de LeadStudio (400/404/410/413/415/422): no tiene sentido reintentar\n//   para siempre. Se recuerda por archivo (static data) y recién al 2.º rechazo se deja:\n//   Asterisk responde 200 \"put_rejected\" al worker (antes, 503 = reintentar); Stringee deja de intentarlo.\n// - El UPDATE sólo marca si la fila seguía en 0 y devuelve la fila de ledger SÓLO si\n//   este PUT fue el que la pasó a 1 (ROW_COUNT): si dos ejecuciones suben lo mismo a la\n//   vez, ledger y Telegram salen una sola vez.\n// ============================================================================\nconst PROVIDER = 'stringee';\n// Asterisk (webhook): siempre sale 1 item para poder responder al worker (OK / reintento / rechazo).\nconst EMIT_FAILURES = false;\nconst PERMANENT = [400, 404, 410, 413, 415, 422];\nconst puts = $input.all();\nconst sent = $('🔗 Attach Audio + Token (Stringee)').all();\nconst sd = $getWorkflowStaticData('global');\nconst FKEY = PROVIDER === 'stringee' ? 'wf10_fail' : 'wf10_fail_asterisk';\nif (!sd[FKEY]) sd[FKEY] = {};\nconst fails = sd[FKEY];\nfor (const [k, f] of Object.entries(fails)) if (!f || Date.now() - (f.last || 0) > 4 * 86400e3) delete fails[k];\nconst ok = [];\nlet fail = 0;\nputs.forEach((p, i) => {\n  const idx = p.pairedItem && typeof p.pairedItem.item === 'number' ? p.pairedItem.item : i;\n  const a = sent[idx];\n  if (!a) { fail++; console.error('❌ WF10 ' + PROVIDER + ': respuesta PUT sin item de origen (índice ' + idx + ')'); return; }\n  const r = p.json || {};\n  const err = r.error || null;                                   // item de error (red, timeout, cuerpo inválido)\n  const status = Number(r.statusCode || (err && (err.httpCode || err.status)) || 0);\n  let b = r.body;\n  if (typeof b === 'string') { try { b = JSON.parse(b); } catch (e) { b = { raw: b.slice(0, 200) }; } }\n  b = (b && typeof b === 'object') ? b : {};\n  const inner = (b.followUp && typeof b.followUp === 'object') ? b.followUp : b;\n  const has = inner.hasRecording === true || inner.hasRecording === 'true' || b.hasRecording === true || b.hasRecording === 'true';\n  const fid = inner.followUpId || b.followUpId || inner.id || null;\n  const sameId = !fid || String(fid) === String(a.json.followup_id);\n  const j = a.json;\n  const key = PROVIDER === 'asterisk' ? (j.uniqueid || (j.filename + '|' + j.followup_id)) : j.filename;   // memoria de fallas por grabación\n  if (status >= 200 && status < 300 && has && sameId) {\n    const mark_sql = 'UPDATE wf_call_followups SET recording_synced = 1 WHERE followup_id = ' + q(j.followup_id) +\n      ' AND provider = ' + q(PROVIDER) + ' AND COALESCE(recording_synced,0) = 0; SELECT ' + [q(j.filename) + ' AS ledger_filename', q(j.phone_digits || j.phone) + ' AS phone',\n        q(j.country) + ' AS country', q(Number(j.duration_secs) || 0) + ' AS duration_secs', q(j.followup_id) + ' AS followup_id', q(PROVIDER) + ' AS provider'].join(', ') +\n      ' FROM DUAL WHERE ROW_COUNT() > 0';\n    const json = Object.assign({}, j, { put_status: status, uploaded: true, mark_sql });\n    delete json.accessToken;\n    delete fails[key];\n    ok.push({ json, binary: a.binary, pairedItem: { item: idx } });\n    console.log('✅ WF10 ' + PROVIDER + ': grabación ' + j.filename + ' -> followup ' + j.followup_id + ' (HTTP ' + status + ')');\n  } else {\n    fail++;\n    const prev = fails[key] || { n: 0, perm: 0 };\n    const permanent = PERMANENT.includes(status) && prev.perm >= 1;   // 2.º rechazo del mismo archivo\n    const why = err ? ('error: ' + String(err.message || err.description || JSON.stringify(err)).slice(0, 160)) : JSON.stringify(r.body || '').slice(0, 200);\n    const msg = 'PUT no confirmado | HTTP ' + (status || 'sin respuesta') + ' | hasRecording=' + has + ' | followUpId=' + fid + ' | ' + why;\n    console.error('❌ WF10 ' + PROVIDER + ': ' + j.filename + ' -> ' + j.followup_id + ' ' + (permanent ? '[RECHAZO PERMANENTE] ' : '') + msg);\n    const f = { n: prev.n + 1, perm: prev.perm + (PERMANENT.includes(status) ? 1 : 0), last: Date.now(), status, followup_id: j.followup_id };\n    fails[key] = f;\n    if (EMIT_FAILURES) {\n      const json = Object.assign({}, j, { put_status: status, uploaded: false, permanent,\n        http_status: permanent ? 200 : 503, status_text: permanent ? 'put_rejected' : 'put_failed', reason: msg });\n      delete json.accessToken;\n      ok.push({ json, pairedItem: { item: idx } });\n    }\n  }\n});\nconsole.log('🧾 WF10 ' + PROVIDER + ': PUT confirmados=' + ok.filter(x => x.json.uploaded).length + ' | fallidos=' + fail);\nreturn ok;\n"
+      },
+      "id": "b9ac379d-09ab-53ee-a68d-dfe9f6980323",
+      "name": "🧾 Evaluar PUT (Stringee)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21888,
+        2688
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🧭 WF10 final — grabaciones → Activity existente (29/09)\n**WF10 no crea Activities.** Sólo adjunta el audio al followup que ya creó WF2 (Asterisk) o WF9 (Stringee), usando `wf_call_followups`.\n\n**Dueño de la grabación** = la primera fila del mismo proveedor y teléfono creada desde el inicio de la llamada (Asterisk: UNIQUEID, hasta 15 min; Stringee: timestamp del archivo, hasta 90 min). Si el dueño ya tiene `recording_synced=1`, no se sube.\n\n**`recording_synced=1` y ledger sólo después de que LeadStudio confirma el PUT** (2xx + hasRecording). PUT fallido o sin followup → nada se marca y se reintenta. Una grabación cuyo dueño ya está sincronizado se omite (sin PUT y sin ledger).\n\n**Asterisk:** el webhook responde al final: 200 subida / ya sincronizada / rechazo permanente de LeadStudio, 503 reintentar (sin fila todavía o PUT fallido).\n**Stringee:** todas las pendientes por ciclo (máx. 10 subidas), cada una con su propio audio; sin backfill al publicar (ver BACKLOG_FROM en Fetch). Telegram sólo >= 60 s y una sola vez.",
+        "height": 400,
+        "width": 620,
+        "color": 4
+      },
+      "id": "8cc8b6b3-3da0-56a1-a7d6-55f854b57bf1",
+      "name": "🧭 Nota — WF10 final",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        19700,
+        1560
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Convert Base64 to Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Base64 to Binary": {
+      "main": [
+        [
+          {
+            "node": "🔍 Lookup Followup ID (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Lookup Followup ID (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "🧮 Decidir Match (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧮 Decidir Match (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "🔀 Followup Encontrado? (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Followup Encontrado? (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF10-Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "↩️ Respond Skip (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF10-Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "🔗 Attach Audio + Token (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Attach Audio + Token (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "📤 PUT Recording — LeadStudio (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📤 PUT Recording — LeadStudio (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "🧾 Evaluar PUT (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧾 Evaluar PUT (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "🔀 PUT OK? (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 PUT OK? (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "💾 Mark Recording Synced (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⚠️ Respond PUT Fallido (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Mark Recording Synced (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "🧾 Resultado Subida (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧾 Resultado Subida (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond Attached (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ Respond Attached (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram7",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Schedule Stringee Recordings": {
+      "main": [
+        [
+          {
+            "node": "🔎 Ya Enviadas (ledger)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Ya Enviadas (ledger)": {
+      "main": [
+        [
+          {
+            "node": "🔄 Fetch & Convert Stringee Recordings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔄 Fetch & Convert Stringee Recordings": {
+      "main": [
+        [
+          {
+            "node": "🔍 Lookup Followup ID (Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Lookup Followup ID (Stringee)": {
+      "main": [
+        [
+          {
+            "node": "🧮 Decidir y Descargar (Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧮 Decidir y Descargar (Stringee)": {
+      "main": [
+        [
+          {
+            "node": "🔀 Followup Encontrado? (Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Followup Encontrado? (Stringee)": {
+      "main": [
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF10-Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF10-Stringee)": {
+      "main": [
+        [
+          {
+            "node": "🔗 Attach Audio + Token (Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Attach Audio + Token (Stringee)": {
+      "main": [
+        [
+          {
+            "node": "📤 PUT Recording — LeadStudio (Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📤 PUT Recording — LeadStudio (Stringee)": {
+      "main": [
+        [
+          {
+            "node": "🧾 Evaluar PUT (Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧾 Evaluar PUT (Stringee)": {
+      "main": [
+        [
+          {
+            "node": "💾 Mark Recording Synced (Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Mark Recording Synced (Stringee)": {
+      "main": [
+        [
+          {
+            "node": "⚙️ SQL Registrar Enviadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ SQL Registrar Enviadas": {
+      "main": [
+        [
+          {
+            "node": "💾 Registrar Enviadas (ledger)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Registrar Enviadas (ledger)": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript (Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript (Stringee)": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram (Stringee)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send to Telegram1 (Stringee)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "e3ba0631-9f8a-4f52-9805-83a31443a39d",
+  "meta": {
+    "instanceId": "951e31ab3e87f13831add2bcd0187f0950ac80a953aef8301767a7a9715933f0"
+  },
+  "nodeGroups": [],
+  "id": "TW1CHksqyf66MjQz",
+  "tags": []
+}

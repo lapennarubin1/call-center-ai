@@ -1,0 +1,17 @@
+== ASTERISK_WF10_FIX: CHECK (sólo lectura) ==
+Asterisk: Asterisk 20.6.0~dfsg+~cs6.13.40431414-2build5 built by nobody @ buildd.debian.org on a unknown running Linux on 2024-04-15 00:13:12 UTC   usuario del proceso: asterisk
+  CAMBIO  [from-client-elevenlabs] _+52XXXXXXXXXX prioridad 4  (/etc/asterisk/extensions.conf:8)
+     antes:   same => n,MixMonitor(${RECORDING},b)
+     después: same => n,MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh "${EXTEN}" "${RECORDING}" "${UNIQUEID}" ANSWER)
+  CAMBIO  [from-client-elevenlabs] _+91XXXXXXXXXX prioridad 4  (/etc/asterisk/extensions.conf:27)
+     antes:   same => n,MixMonitor(${RECORDING},b)
+     después: same => n,MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh "${EXTEN}" "${RECORDING}" "${UNIQUEID}" ANSWER)
+  CAMBIO  [from-client-elevenlabs] _+977XXXXXXXXXX prioridad 4  (/etc/asterisk/extensions.conf:17)
+     antes:   same => n,MixMonitor(${RECORDING},b)
+     después: same => n,MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh "${EXTEN}" "${RECORDING}" "${UNIQUEID}" ANSWER)
+  dialplan actual: 61 extensiones, 141 prioridades, 31 contextos
+• /usr/local/bin/wf10-enqueue.py existe y es ejecutable
+• asterisk puede escribir en /var/spool/wf10/queue
+• asterisk puede escribir /var/log/asterisk/wf10-enqueue.log
+Llamadas activas: 8 active calls
+✅ CHECK OK: 'apply' haría exactamente los cambios listados.

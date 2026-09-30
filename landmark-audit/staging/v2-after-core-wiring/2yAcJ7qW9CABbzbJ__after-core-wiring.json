@@ -1,0 +1,1148 @@
+{
+  "id": "2yAcJ7qW9CABbzbJ",
+  "name": "TEMPLATE_WF14_RECONCILIATION_ANALYTICS_V2",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-22T07:32:49.369Z",
+  "updatedAt": "2026-09-22T08:23:30.534Z",
+  "isArchived": false,
+  "versionId": "e06f1ef5-7f62-4a25-8708-ad44e4ddc23c",
+  "versionCounter": 2,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
+  "nodes": [
+    {
+      "id": "2c024acf-73c7-4d4c-b953-14c1a77803f9",
+      "name": "NOTE 00 00 — TRIGGER",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        40
+      ],
+      "parameters": {
+        "content": "## 00 — TRIGGER\n\nTEMPLATE_WF14_RECONCILIATION_ANALYTICS_V2 · v2.0.0\nContratos: ANALYTICS_EVENT v2.2 · TEMPLATE_DATA v2.2\nRollback: WF14 v1 — desactivar este workflow; v1 vuelve a sincronizar (§12)\n\nCada 5 minutos. **El dashboard no espera a este workflow**: si WF14 no corre en\nuna hora, los KPIs del panel siguen siendo correctos porque salen de\n`wf_call_jobs` y `wf_events`. Lo que se acumula es el trabajo de\nreconciliación, que es exactamente lo que debe acumularse.",
+        "height": 360,
+        "width": 420,
+        "color": 4
+      }
+    },
+    {
+      "id": "0011efa4-3599-498d-8af2-a47efddc9feb",
+      "name": "[TRIGGER] Every Five Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "143858ab-657e-420c-ba72-f366d0f76196",
+      "name": "[CONFIG] Load Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LM_PANEL_URL || \"http://172.18.0.1:8081\" }}/api/settings",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1lFXJDSI9rAJvJ2B",
+          "name": "Landmark Panel API STAGING"
+        }
+      }
+    },
+    {
+      "id": "2fb74e74-f6b7-47da-a135-c84a592138cf",
+      "name": "NOTE 01 01 — LOAD CONFIG",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        440,
+        40
+      ],
+      "parameters": {
+        "content": "## 01 — LOAD CONFIG\n\nLos umbrales de reconciliación son\n**configuración** (`wf_settings`), no literales: cuántos minutos hace falta que\nun `DISPATCHING` lleve parado para considerarlo perdido depende de la latencia\nreal de cada proveedor.\n\nSi `/api/settings` no responde, se usan los defaults documentados (los mismos\nque siembra la migración) y se deja constancia en el log.",
+        "height": 360,
+        "width": 420,
+        "color": 3
+      }
+    },
+    {
+      "id": "2e6349fb-1b0b-49a5-9c6f-51001398c3de",
+      "name": "[CONFIG] Resolve Thresholds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst resp = $input.first().json || {};\nconst code = Number(resp.statusCode || 0);\nconst s = ((resp.body || {}).settings) || {};\nconst defaults = { reconcile_dispatching_minutes: 5, reconcile_unknown_minutes: 5,\n                   reconcile_dispatched_minutes: 60, reconcile_claimed_minutes: 10,\n                   reconcile_ledger_minutes: 15, wf14_leadstudio_page_size: 200 };\nif (code < 200 || code >= 300) {\n  console.log('[WF14] WARN /api/settings HTTP ' + code + ': usando defaults documentados');\n}\nconst cfg = Object.assign({}, defaults, s);\nreturn [{ json: Object.assign({}, cfg, { execution_id: $execution.id,\n                                         settings_from_api: code >= 200 && code < 300 }) }];\n"
+      }
+    },
+    {
+      "id": "6317e585-9306-4266-a4af-ae23e84783e7",
+      "name": "NOTE 02 02 — RECONCILE CALL JOBS",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        960,
+        40
+      ],
+      "parameters": {
+        "content": "## 02 — RECONCILE CALL JOBS\n\nReclasifica lo que quedó a medias.\n**Nunca re-despacha.**\n\n| estado viejo | qué pasó | qué se hace |\n|---|---|---|\n| `CLAIMED` sin despachar | no salió llamada | → `RELEASED` (se re-reclama tras el backoff) |\n| `DISPATCHING` parado | **pudo** salir | → `NEEDS_RECONCILIATION` |\n| `UNKNOWN` | pudo salir | → `NEEDS_RECONCILIATION` |\n| `DISPATCHED` sin post-call | salió, no llegó el resultado | → `NEEDS_RECONCILIATION` |\n\nLa diferencia entre `UNKNOWN` y `NEEDS_RECONCILIATION` importa: `UNKNOWN` es lo\nque acaba de reportar el adapter; `NEEDS_RECONCILIATION` es lo que ya nadie va a\nresolver solo. **Ninguno de los dos se vuelve a llamar.**",
+        "height": 460,
+        "width": 420,
+        "color": 2
+      }
+    },
+    {
+      "id": "d9c6ebc9-641c-42c9-b645-26c0db2cbb79",
+      "name": "[DB] Reconcile Stale Claimed",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        980,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET state = 'RELEASED', error_class = 'TECHNICAL', error_code = 'STALE_CLAIM',\n       tech_retry_count = tech_retry_count + 1,\n       next_tech_retry_at = DATE_ADD(UTC_TIMESTAMP(), INTERVAL\n         LEAST(POW(2, tech_retry_count), 60) MINUTE),\n       updated_at = UTC_TIMESTAMP()\n WHERE state = 'CLAIMED'\n   AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)",
+        "options": {
+          "queryReplacement": "={{ $json.reconcile_claimed_minutes }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "0d5de06e-9a93-44dc-939c-5641bf8b1572",
+      "name": "[DB] Reconcile Stale Dispatching",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        1240,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET state = 'NEEDS_RECONCILIATION', error_class = 'AMBIGUOUS',\n       error_code = 'STALE_DISPATCHING', updated_at = UTC_TIMESTAMP()\n WHERE state = 'DISPATCHING'\n   AND updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)",
+        "options": {
+          "queryReplacement": "={{ $('[CONFIG] Resolve Thresholds').item.json.reconcile_dispatching_minutes }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "9e409c58-a787-4584-9656-3276aca60264",
+      "name": "[DB] Reconcile Unknown",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET state = 'NEEDS_RECONCILIATION', updated_at = UTC_TIMESTAMP()\n WHERE state = 'UNKNOWN'\n   AND updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)",
+        "options": {
+          "queryReplacement": "={{ $('[CONFIG] Resolve Thresholds').item.json.reconcile_unknown_minutes }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "4fed5454-7f66-417b-bde5-5e8026c8911e",
+      "name": "[DB] Reconcile Dispatched Without Postcall",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        1760,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_call_jobs\n   SET state = 'NEEDS_RECONCILIATION', error_code = 'NO_POSTCALL',\n       error_class = 'AMBIGUOUS', updated_at = UTC_TIMESTAMP()\n WHERE state = 'DISPATCHED'\n   AND dispatched_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)",
+        "options": {
+          "queryReplacement": "={{ $('[CONFIG] Resolve Thresholds').item.json.reconcile_dispatched_minutes }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "d06ace03-e63f-48a2-a9a7-5eb522d93fcd",
+      "name": "NOTE 03 03 — RECONCILE LEDGERS",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        40
+      ],
+      "parameters": {
+        "content": "## 03 — RECONCILE LEDGERS\n\nLos tres ledgers de idempotencia:\nconversaciones, pedidos de tool y grabaciones.\n\nUn claim huérfano (n8n murió con la reserva tomada) **no se reintenta solo**:\npasa a revisión. Reintentar un `POST /followups`, una creación de cuenta o un\nlink de pago que pudo haberse ejecutado es peor que dejarlo para un humano.",
+        "height": 380,
+        "width": 420,
+        "color": 2
+      }
+    },
+    {
+      "id": "c42c9f14-648a-48f0-87ac-5727407de65b",
+      "name": "[DB] Reconcile Conversation Ledger",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        2020,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_conversation_ledger\n   SET state = 'NEEDS_RECONCILIATION', error_code = 'STALE_CLAIM'\n WHERE state = 'CLAIMED' AND followup_id IS NULL\n   AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)",
+        "options": {
+          "queryReplacement": "={{ $('[CONFIG] Resolve Thresholds').item.json.reconcile_ledger_minutes }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "ab819c37-593e-4284-9b52-880eb83320e4",
+      "name": "[DB] Reconcile Tool Requests",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        2280,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_tool_requests\n   SET state = 'NEEDS_RECONCILIATION', error_code = 'STALE_CLAIM',\n       updated_at = UTC_TIMESTAMP()\n WHERE state = 'CLAIMED'\n   AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? MINUTE)",
+        "options": {
+          "queryReplacement": "={{ $('[CONFIG] Resolve Thresholds').item.json.reconcile_ledger_minutes }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "016f7c38-d84b-43af-b1b4-e5d037c66cc4",
+      "name": "[DB] Reconcile Recording Ledger",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        2540,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_recording_ledger\n   SET state = 'FAILED', error_code = 'STALE_CLAIM', updated_at = UTC_TIMESTAMP()\n WHERE state = 'CLAIMED'\n   AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 MINUTE)",
+        "options": {}
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "ba60952a-0e9d-442b-a207-fbe93ceab485",
+      "name": "NOTE 04 04 — OPEN ISSUES",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2780,
+        40
+      ],
+      "parameters": {
+        "content": "## 04 — OPEN ISSUES\n\nTodo lo que quedó en `NEEDS_RECONCILIATION`\nse convierte en un issue con `issue_key` **determinista**: volver a detectarlo\nsuma `occurrences`, no crea filas nuevas. Así el panel muestra \"3 llamadas a\nrevisar\", no \"3.000 alertas repetidas\".\n\nTambién se abre `TECH_RETRY_REPEATED` cuando un lead acumula reintentos técnicos\ncontra el mismo proveedor: eso no es un problema del lead, es un problema del\nproveedor, y conviene verlo antes de que consuma la ventana de llamadas.",
+        "height": 400,
+        "width": 420,
+        "color": 2
+      }
+    },
+    {
+      "id": "ea09910b-4a3d-4bd5-8821-b8553b3f49bd",
+      "name": "[DB] Open Call Reconciliation Issues",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        2800,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wf_reconciliation_issues\n  (issue_key, issue_type, entity_type, entity_id, lead_id, country_iso,\n   severity, state, detail_json, first_seen_at, last_seen_at)\nSELECT CONCAT('CALL_NEEDS_RECONCILIATION:call_job:', j.call_job_id),\n       'CALL_NEEDS_RECONCILIATION', 'call_job', j.call_job_id, j.lead_id,\n       j.country_iso, 'WARN', 'OPEN',\n       JSON_OBJECT('state', j.state, 'error_code', j.error_code,\n                   'route_key', j.route_key, 'attempt', j.attempt,\n                   'provider', j.provider),\n       UTC_TIMESTAMP(), UTC_TIMESTAMP()\n  FROM wf_call_jobs j\n WHERE j.state = 'NEEDS_RECONCILIATION'\n   AND j.updated_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)\nON DUPLICATE KEY UPDATE occurrences = occurrences + 1,\n        last_seen_at = UTC_TIMESTAMP()",
+        "options": {}
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "a862b2c2-7ce0-4176-9ff7-20fd1efdf4ca",
+      "name": "[DB] Open Followup Reconciliation Issues",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        3060,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wf_reconciliation_issues\n  (issue_key, issue_type, entity_type, entity_id, lead_id, country_iso,\n   severity, state, detail_json, first_seen_at, last_seen_at)\nSELECT CONCAT('FOLLOWUP_NEEDS_RECONCILIATION:conversation:', l.conversation_id),\n       'FOLLOWUP_NEEDS_RECONCILIATION', 'conversation', l.conversation_id,\n       l.lead_id, NULL, 'ERROR', 'OPEN',\n       JSON_OBJECT('state', l.state, 'error_code', l.error_code,\n                   'route_key', l.route_key, 'call_job_id', l.call_job_id),\n       UTC_TIMESTAMP(), UTC_TIMESTAMP()\n  FROM wf_conversation_ledger l\n WHERE l.state = 'NEEDS_RECONCILIATION'\n   AND l.updated_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)\nON DUPLICATE KEY UPDATE occurrences = occurrences + 1,\n        last_seen_at = UTC_TIMESTAMP()",
+        "options": {}
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "3bcf2a88-057d-4af4-81e9-7ab56be43816",
+      "name": "[DB] Open Tech Retry Issues",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        3320,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wf_reconciliation_issues\n  (issue_key, issue_type, entity_type, entity_id, lead_id, country_iso,\n   severity, state, detail_json, first_seen_at, last_seen_at)\nSELECT CONCAT('TECH_RETRY_REPEATED:route:', j.route_key),\n       'TECH_RETRY_REPEATED', 'route', j.route_key, NULL, j.country_iso,\n       'WARN', 'OPEN',\n       JSON_OBJECT('released_jobs', COUNT(*), 'provider', j.provider,\n                   'max_retries', MAX(j.tech_retry_count)),\n       UTC_TIMESTAMP(), UTC_TIMESTAMP()\n  FROM wf_call_jobs j\n WHERE j.state = 'RELEASED'\n   AND j.updated_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)\n GROUP BY j.route_key, j.country_iso, j.provider\nHAVING COUNT(*) >= 5\nON DUPLICATE KEY UPDATE occurrences = occurrences + 1,\n        last_seen_at = UTC_TIMESTAMP(), detail_json = VALUES(detail_json)",
+        "options": {}
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "9f2a16cb-488b-43a1-90d2-90283988e5f2",
+      "name": "NOTE 05 05 — CRM SYNC (LEGACY)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3560,
+        40
+      ],
+      "parameters": {
+        "content": "## 05 — CRM SYNC (LEGACY)\n\nSe conserva la sincronización\n`LeadStudio -> crm_leads` de v1 porque otras pantallas del panel la usan y\nporque la reconciliación necesita el lado del CRM para comparar.\n\nUsa `GET /api/leads` (reporting, sin cupo), **nunca** `/queue`: la cola es para\nllamar, y consumirla acá le robaría leads a WF2.\n\nDiferencia clave con v1: esto **ya no alimenta el dashboard del call center**.\nEs una copia para comparar, no la fuente de la verdad.",
+        "height": 420,
+        "width": 420,
+        "color": 6
+      }
+    },
+    {
+      "id": "a7c9e37f-3a7b-4143-a627-dde0b407efd5",
+      "name": "[CRM] Get Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        3580,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/auth/login",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth"
+      },
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "uA7mfYZBwicXc83u",
+          "name": "LeadStudio Login V2"
+        }
+      }
+    },
+    {
+      "id": "dcbf2713-7a48-4d35-bb50-a0ad3623a1b3",
+      "name": "[CRM] Check Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst resp = $input.first().json || {};\nconst token = (resp.body && resp.body.accessToken) || null;\nconst cfg = $('[CONFIG] Resolve Thresholds').first().json;\nif (!token) console.log('[WF14] AUTH_ERROR: sin token, se omite la sincronizacion del CRM');\nreturn [{ json: Object.assign({}, cfg, { access_token: token, token_ok: !!token }) }];\n"
+      }
+    },
+    {
+      "id": "d9860765-9a85-4dd9-803e-c0b3291c8518",
+      "name": "[CRM] Token Is Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4100,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6a838106-0711-47d0-8854-c22bbadaee4f",
+              "leftValue": "={{ $json.token_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e06f15e6-7c45-4546-ac6f-90e2c1776637",
+      "name": "[CRM] Fetch Leads Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4360,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Barrido por estado. Paginado explícito; sin agotar la cola de llamadas.\nconst cfg = $json;\nconst STATUSES = ['NOT_CONTACTED', 'ATTEMPTING', 'NO_ANSWER', 'CONTACTED',\n                  'SNOOZED', 'UNREACHABLE', 'CLOSED'];\nconst pageSize = Number(cfg.wf14_leadstudio_page_size || 200);\nconst base = ($env.LM_LEADSTUDIO_URL || 'https://lead-studio-9gnl.onrender.com') +\n             '/api/leads';\nconst seen = new Map();\nfor (const status of STATUSES) {\n  let offset = 0, guard = 0;\n  while (guard++ < 50) {\n    let res;\n    try {\n      res = await this.helpers.httpRequest({ method: 'GET',\n        url: base + '?limit=' + pageSize + '&offset=' + offset +\n             '&status=' + encodeURIComponent(status),\n        headers: { Authorization: 'Bearer ' + cfg.access_token },\n        json: true, timeout: 30000 });\n    } catch (e) {\n      console.log('[WF14] ' + status + ' offset ' + offset + ': ' + e.message);\n      break;\n    }\n    const leads = res.leads || [];\n    for (const l of leads) { if (l.id) seen.set(String(l.id), l); }\n    const total = Number(res.total || 0);\n    offset += pageSize;\n    if (!leads.length || offset >= total) break;\n  }\n}\nconsole.log('[WF14] snapshot del CRM: ' + seen.size + ' lead(s) unicos');\nif (!seen.size) return [];\n\nfunction sqlDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace('T', ' ');\n}\nconst rows = [...seen.values()].map(l => ({\n  lead_id: String(l.id).slice(0, 64),\n  full_name: String(l.name || '').trim().slice(0, 160) || null,\n  phone: String(l.phone || '').replace(/[^0-9+]/g, '').slice(0, 32) || null,\n  language: String(l.language || '').trim().slice(0, 16) || null,\n  status: String(l.status || '').trim().toUpperCase().slice(0, 48) || null,\n  stage: String(l.stage || '').trim().toUpperCase().slice(0, 48) || null,\n  call_attempts: Number(l.attempts || 0) || 0,\n  do_not_call: l.doNotCall ? 1 : 0,\n  last_contacted_at: sqlDate(l.lastContactedAt),\n  next_follow_up_at: sqlDate(l.nextFollowUpAt),\n  account_opened: (l.accountOpened === true ||\n                   String(l.stage || '').toUpperCase() === 'INTERESTED') ? 1 : 0\n}));\n// Lotes de 500: ni una sentencia por fila ni un INSERT gigante.\nconst BATCH = 500, out = [];\nfor (let i = 0; i < rows.length; i += BATCH) {\n  out.push({ json: { batch: rows.slice(i, i + BATCH), batch_num: out.length + 1,\n                     batch_size: Math.min(BATCH, rows.length - i),\n                     execution_id: cfg.execution_id } });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "b7393642-cbed-43be-be25-e60fc6a1fcb2",
+      "name": "NOTE 06 06 — UPSERT crm_leads",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4340,
+        40
+      ],
+      "parameters": {
+        "content": "## 06 — UPSERT crm_leads\n\n`INSERT ... ON DUPLICATE KEY UPDATE` en\nlotes de 500. El país sale del prefijo real del teléfono (autoritativo) y no del\ncampo `country` del lead, que puede venir nulo.\n\nEl `provider` de `crm_leads` **ya no** se deduce de \"si aparece en\nstringee_calls\": en V2 la ruta y el proveedor de cada llamada están en\n`wf_call_jobs`. Se conserva la columna para no romper las pantallas viejas, pero\nla verdad está en el job.",
+        "height": 400,
+        "width": 420,
+        "color": 3
+      }
+    },
+    {
+      "id": "d736c213-c10b-41d7-a387-fc7e7fde14da",
+      "name": "[DB] Upsert Crm Leads",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        4620,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO crm_leads\n  (lead_id, full_name, phone, country, country_code, language, status, stage,\n   call_attempts, do_not_call, last_contacted_at, next_follow_up_at, provider,\n   synced_at)\nSELECT j.lead_id, j.full_name, j.phone,\n       CASE WHEN j.phone LIKE '+977%' OR j.phone LIKE '977%' THEN 'nepal'\n            WHEN j.phone LIKE '+52%'  OR j.phone LIKE '52%'  THEN 'mexico'\n            WHEN j.phone LIKE '+91%'  OR j.phone LIKE '91%'  THEN 'india'\n            WHEN j.phone LIKE '+57%'  OR j.phone LIKE '57%'  THEN 'colombia'\n            WHEN j.phone LIKE '+58%'  OR j.phone LIKE '58%'  THEN 'venezuela'\n            ELSE 'unknown' END,\n       CASE WHEN j.phone LIKE '+977%' OR j.phone LIKE '977%' THEN '+977'\n            WHEN j.phone LIKE '+52%'  OR j.phone LIKE '52%'  THEN '+52'\n            WHEN j.phone LIKE '+91%'  OR j.phone LIKE '91%'  THEN '+91'\n            WHEN j.phone LIKE '+57%'  OR j.phone LIKE '57%'  THEN '+57'\n            WHEN j.phone LIKE '+58%'  OR j.phone LIKE '58%'  THEN '+58'\n            ELSE '' END,\n       j.language, j.status, j.stage, j.call_attempts, j.do_not_call,\n       j.last_contacted_at, j.next_follow_up_at,\n       (SELECT c.provider FROM wf_call_jobs c WHERE c.lead_id = j.lead_id\n         ORDER BY c.created_at DESC LIMIT 1),\n       UTC_TIMESTAMP()\n  FROM JSON_TABLE(?, '$[*]' COLUMNS (\n        lead_id VARCHAR(64) PATH '$.lead_id',\n        full_name VARCHAR(160) PATH '$.full_name',\n        phone VARCHAR(32) PATH '$.phone',\n        language VARCHAR(16) PATH '$.language',\n        status VARCHAR(48) PATH '$.status',\n        stage VARCHAR(48) PATH '$.stage',\n        call_attempts INT PATH '$.call_attempts',\n        do_not_call INT PATH '$.do_not_call',\n        last_contacted_at DATETIME PATH '$.last_contacted_at',\n        next_follow_up_at DATETIME PATH '$.next_follow_up_at')) AS j\nON DUPLICATE KEY UPDATE\n  full_name = VALUES(full_name), phone = VALUES(phone),\n  country = VALUES(country), country_code = VALUES(country_code),\n  language = VALUES(language), status = VALUES(status), stage = VALUES(stage),\n  call_attempts = VALUES(call_attempts), do_not_call = VALUES(do_not_call),\n  last_contacted_at = VALUES(last_contacted_at),\n  next_follow_up_at = VALUES(next_follow_up_at),\n  provider = COALESCE(VALUES(provider), provider),\n  synced_at = VALUES(synced_at)",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.batch) }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "cf5031fa-ce69-4302-beb9-1e0f58d1fcd7",
+      "name": "NOTE 07 07 — COMPARE LOCAL vs CRM",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4860,
+        40
+      ],
+      "parameters": {
+        "content": "## 07 — COMPARE LOCAL vs CRM\n\nDos comparaciones, ambas **solo de\nlectura** sobre los datos locales:\n\n · **cuenta local sin reflejo en el CRM** — hay `ACCOUNT_CREATED` en\n   `wf_events` y el CRM no marca la cuenta → `CRM_ACCOUNT_MISSING`\n · **estado divergente** — el lead quedó `ATTEMPTING` en el CRM pero\n   localmente la llamada terminó hace rato → `CRM_STATUS_MISMATCH`\n\nUn issue **no corrige** nada. Se abre para que una persona decida. Corregir\nautomáticamente el CRM desde acá es cómo se pierden datos sin que nadie lo\nnote.",
+        "height": 420,
+        "width": 420,
+        "color": 2
+      }
+    },
+    {
+      "id": "a56c3b24-3c13-48fb-b453-26c7672a83d2",
+      "name": "[DB] Compare Accounts",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        4880,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wf_reconciliation_issues\n  (issue_key, issue_type, entity_type, entity_id, lead_id, country_iso,\n   severity, state, detail_json, first_seen_at, last_seen_at)\nSELECT CONCAT('CRM_ACCOUNT_MISSING:lead:', e.lead_id), 'CRM_ACCOUNT_MISSING',\n       'lead', e.lead_id, e.lead_id, e.country_iso, 'WARN', 'OPEN',\n       JSON_OBJECT('local_event', e.event_key, 'provider', e.provider,\n                   'crm_stage', c.stage, 'crm_account_opened', 0),\n       UTC_TIMESTAMP(), UTC_TIMESTAMP()\n  FROM wf_events e\n  JOIN crm_leads c ON c.lead_id = e.lead_id\n WHERE e.event_type = 'ACCOUNT_CREATED'\n   AND e.occurred_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 7 DAY)\n   AND COALESCE(c.stage, '') <> 'INTERESTED'\nON DUPLICATE KEY UPDATE occurrences = occurrences + 1,\n        last_seen_at = UTC_TIMESTAMP(), detail_json = VALUES(detail_json)",
+        "options": {}
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "766a51c3-06ff-4455-bc37-e119b28304c7",
+      "name": "[DB] Compare Lead Status",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        5140,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wf_reconciliation_issues\n  (issue_key, issue_type, entity_type, entity_id, lead_id, country_iso,\n   severity, state, detail_json, first_seen_at, last_seen_at)\nSELECT CONCAT('CRM_STATUS_MISMATCH:lead:', c.lead_id), 'CRM_STATUS_MISMATCH',\n       'lead', c.lead_id, c.lead_id, j.country_iso, 'WARN', 'OPEN',\n       JSON_OBJECT('crm_status', c.status, 'local_state', j.state,\n                   'local_result', j.result, 'call_job_id', j.call_job_id),\n       UTC_TIMESTAMP(), UTC_TIMESTAMP()\n  FROM crm_leads c\n  JOIN wf_call_jobs j ON j.lead_id = c.lead_id\n WHERE c.status = 'ATTEMPTING' AND j.state = 'COMPLETED'\n   AND j.completed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 HOUR)\n   AND j.completed_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY)\nON DUPLICATE KEY UPDATE occurrences = occurrences + 1,\n        last_seen_at = UTC_TIMESTAMP(), detail_json = VALUES(detail_json)",
+        "options": {}
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "976f1dfc-04a8-4cc6-89d2-8317e074c335",
+      "name": "NOTE 08 08 — PROVIDER RECONCILE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        5380,
+        40
+      ],
+      "parameters": {
+        "content": "## 08 — PROVIDER RECONCILE\n\nSe conserva el volcado del call-log\ndel worker Stringee a `stringee_calls` (volumen y duración reales del\nproveedor), para poder contrastar lo que facturó el proveedor contra lo que\nregistró el suite.\n\n`from_start_time` va en **segundos** (Stringee rechaza milisegundos). Ese\ndetalle costó una tarde en v1 y queda anotado acá.",
+        "height": 360,
+        "width": 420,
+        "color": 6
+      }
+    },
+    {
+      "id": "0dabd175-9209-4112-be55-73e0a5e00622",
+      "name": "[PROVIDER] Fetch Stringee Call Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        5400,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LM_STRINGEE_WORKER_URL || \"http://172.18.0.1:8091\" }}/call-log",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "200"
+            },
+            {
+              "name": "from_start_time",
+              "value": "={{ Math.floor((Date.now() - 20*60*1000) / 1000) }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bc54c1a5-3b1f-40fb-8813-e454ead50485",
+      "name": "[PROVIDER] Normalize Call Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5660,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst resp = $input.first().json || {};\nconst code = Number(resp.statusCode || 0);\nconst body = resp.body || {};\nconst calls = (body.data && body.data.calls) || body.calls || [];\nif (code < 200 || code >= 300) {\n  console.log('[WF14] call-log del worker HTTP ' + code + ': se omite');\n  return [];\n}\nif (!calls.length) { console.log('[WF14] sin llamadas nuevas en el call-log'); return []; }\nconst rows = calls.map(c => {\n  const to = String(c.to_number || '').replace(/[^0-9]/g, '');\n  return { call_id: String(c.id || ''), phone: to,\n           answered: Number(c.answer_time) > 0 ? 1 : 0,\n           duration_secs: Number(c.answer_duration || 0),\n           start_time: Number(c.start_time || 0),\n           answer_time: Number(c.answer_time || 0),\n           stop_time: Number(c.stop_time || 0) };\n}).filter(r => r.call_id);\nconsole.log('[WF14] call-log: ' + rows.length + ' llamada(s)');\nreturn [{ json: { batch: rows, batch_size: rows.length } }];\n"
+      }
+    },
+    {
+      "id": "a9b1449e-8218-4027-96a3-667b10a69638",
+      "name": "[DB] Upsert Stringee Calls",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        5920,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO stringee_calls\n  (call_id, lead_id, phone, country, answered, duration_secs, start_time,\n   answer_time, stop_time)\nSELECT t.call_id,\n       (SELECT c.lead_id FROM crm_leads c\n         WHERE RIGHT(c.phone, 10) = RIGHT(t.phone, 10) LIMIT 1),\n       t.phone,\n       CASE WHEN t.phone LIKE '977%' THEN 'nepal'\n            WHEN t.phone LIKE '52%'  THEN 'mexico'\n            WHEN t.phone LIKE '91%'  THEN 'india'\n            ELSE 'unknown' END,\n       t.answered, t.duration_secs, t.start_time, t.answer_time, t.stop_time\n  FROM JSON_TABLE(?, '$[*]' COLUMNS (\n        call_id VARCHAR(64) PATH '$.call_id',\n        phone VARCHAR(32) PATH '$.phone',\n        answered INT PATH '$.answered',\n        duration_secs INT PATH '$.duration_secs',\n        start_time BIGINT PATH '$.start_time',\n        answer_time BIGINT PATH '$.answer_time',\n        stop_time BIGINT PATH '$.stop_time')) AS t\nON DUPLICATE KEY UPDATE\n  lead_id = COALESCE(VALUES(lead_id), lead_id), country = VALUES(country),\n  answered = VALUES(answered), duration_secs = VALUES(duration_secs),\n  answer_time = VALUES(answer_time), stop_time = VALUES(stop_time)",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.batch) }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "6bce3233-00d3-4da2-8b89-00eeb85ca6e0",
+      "name": "NOTE 09 09 — SUMMARY",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        6160,
+        40
+      ],
+      "parameters": {
+        "content": "## 09 — SUMMARY\n\nResumen de la corrida y registro en\n`panel_sync_log` (compatibilidad con las pantallas existentes).\n\nLo que **no** hay acá: ningún cálculo de KPI. Los números del panel salen de\n`wf_call_jobs` y `wf_events`, en tiempo real, sin pasar por este workflow.",
+        "height": 340,
+        "width": 420,
+        "color": 4
+      }
+    },
+    {
+      "id": "15c1398b-91c0-41b6-9d92-21dc8ceaaf9e",
+      "name": "[DB] Load Reconciliation Counters",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        6180,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT COUNT(*) FROM wf_call_jobs WHERE state = 'NEEDS_RECONCILIATION')\n     AS jobs_needing_reconciliation,\n  (SELECT COUNT(*) FROM wf_call_jobs WHERE state = 'RELEASED') AS jobs_released,\n  (SELECT COUNT(*) FROM wf_conversation_ledger\n    WHERE state = 'NEEDS_RECONCILIATION') AS ledger_needing_reconciliation,\n  (SELECT COUNT(*) FROM wf_tool_requests\n    WHERE state = 'NEEDS_RECONCILIATION') AS tools_needing_reconciliation,\n  (SELECT COUNT(*) FROM wf_recording_ledger WHERE state = 'ORPHAN')\n     AS recordings_orphan,\n  (SELECT COUNT(*) FROM wf_reconciliation_issues WHERE state = 'OPEN')\n     AS issues_open",
+        "options": {}
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "7439a55a-f934-46b5-a658-ea78348ecd91",
+      "name": "[LOG] Reconciliation Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst c = $input.first().json || {};\nconst s = { workflow: 'WF14', execution_id: $execution.id,\n            jobs_needing_reconciliation: Number(c.jobs_needing_reconciliation || 0),\n            jobs_released: Number(c.jobs_released || 0),\n            ledger_needing_reconciliation: Number(c.ledger_needing_reconciliation || 0),\n            tools_needing_reconciliation: Number(c.tools_needing_reconciliation || 0),\n            recordings_orphan: Number(c.recordings_orphan || 0),\n            issues_open: Number(c.issues_open || 0) };\nconsole.log('[WF14][exec=' + $execution.id + '] ' + JSON.stringify(s));\nif (s.issues_open > 0) {\n  console.log('[WF14] hay ' + s.issues_open + ' issue(s) abiertos: /callcenter/issues');\n}\nreturn [{ json: s }];\n"
+      }
+    },
+    {
+      "id": "5bc3bbc9-cff7-48a2-8942-297e19641223",
+      "name": "[DB] Record Sync Log",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        6700,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO panel_sync_log (source, rows_in, status, synced_at)\nVALUES ('crm-v2', ?, 'ok', UTC_TIMESTAMP())",
+        "options": {
+          "queryReplacement": "={{ $json.issues_open }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "adb42b8a-0f04-46e5-9113-ff6e6bcf25df",
+      "name": "[LOG] Crm Sync Skipped",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4360,
+        960
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Sin token no se sincroniza el CRM, pero la reconciliación LOCAL de las\n// secciones 02-04 ya corrió: eso es lo que no puede dejar de hacerse.\nconsole.log('[WF14][exec=' + $execution.id + '] sincronizacion del CRM omitida ' +\n            '(AUTH_ERROR); la reconciliacion local si se ejecuto');\nreturn [{ json: { ok: true, crm_sync: false, reason: 'AUTH_ERROR' } }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "[TRIGGER] Every Five Minutes": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Load Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Load Settings": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Resolve Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Resolve Thresholds": {
+      "main": [
+        [
+          {
+            "node": "[DB] Reconcile Stale Claimed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Reconcile Stale Claimed": {
+      "main": [
+        [
+          {
+            "node": "[DB] Reconcile Stale Dispatching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Reconcile Stale Dispatching": {
+      "main": [
+        [
+          {
+            "node": "[DB] Reconcile Unknown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Reconcile Unknown": {
+      "main": [
+        [
+          {
+            "node": "[DB] Reconcile Dispatched Without Postcall",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Reconcile Dispatched Without Postcall": {
+      "main": [
+        [
+          {
+            "node": "[DB] Reconcile Conversation Ledger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Reconcile Conversation Ledger": {
+      "main": [
+        [
+          {
+            "node": "[DB] Reconcile Tool Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Reconcile Tool Requests": {
+      "main": [
+        [
+          {
+            "node": "[DB] Reconcile Recording Ledger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Reconcile Recording Ledger": {
+      "main": [
+        [
+          {
+            "node": "[DB] Open Call Reconciliation Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Open Call Reconciliation Issues": {
+      "main": [
+        [
+          {
+            "node": "[DB] Open Followup Reconciliation Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Open Followup Reconciliation Issues": {
+      "main": [
+        [
+          {
+            "node": "[DB] Open Tech Retry Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Open Tech Retry Issues": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Get Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Get Token": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Check Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Check Token": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Token Is Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Token Is Valid": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Fetch Leads Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[LOG] Crm Sync Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Fetch Leads Snapshot": {
+      "main": [
+        [
+          {
+            "node": "[DB] Upsert Crm Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Upsert Crm Leads": {
+      "main": [
+        [
+          {
+            "node": "[DB] Compare Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Compare Accounts": {
+      "main": [
+        [
+          {
+            "node": "[DB] Compare Lead Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Compare Lead Status": {
+      "main": [
+        [
+          {
+            "node": "[PROVIDER] Fetch Stringee Call Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[PROVIDER] Fetch Stringee Call Log": {
+      "main": [
+        [
+          {
+            "node": "[PROVIDER] Normalize Call Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[PROVIDER] Normalize Call Log": {
+      "main": [
+        [
+          {
+            "node": "[DB] Upsert Stringee Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Upsert Stringee Calls": {
+      "main": [
+        [
+          {
+            "node": "[DB] Load Reconciliation Counters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Load Reconciliation Counters": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Reconciliation Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LOG] Reconciliation Summary": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record Sync Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "saveManualExecutions": true,
+    "timezone": "UTC",
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "2yAcJ7qW9CABbzbJ",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-22T07:32:49.369Z",
+      "updatedAt": "2026-09-22T07:32:49.369Z"
+    }
+  ],
+  "activeVersion": null
+}

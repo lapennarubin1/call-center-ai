@@ -1,0 +1,168 @@
+--- WF2 :: 🏁 Guardar Resultado (Asterisk) :: jsCode (ANTES)
++++ WF2 :: 🏁 Guardar Resultado (Asterisk) :: jsCode (DESPUÉS)
+@@ -56,8 +56,15 @@
+ 
+ const out = [];
+ let fails = 0;
++let deferred = 0;
+ 
+-for (const item of $input.all()) {
++// Este nodo va DESPUÉS del registro diferido (MySQL): $input trae las claves confirmadas;
++// las llamadas clasificadas vienen del nodo Classify.
++const confirmedKeys = new Set(
++  $input.all().map(i => (i.json || {}).event_key).filter(Boolean).map(String)
++);
++
++for (const item of $('🔍 Classify Dial Result (Asterisk)').all()) {
+   const j = item.json || {};
+ 
+   if (!j.lead_id) {
+@@ -68,6 +75,45 @@
+   }
+ 
+   // ------------------------------------------------------------
++  // DIFERIDA (llamada contestada)
++  // LeadStudio fija durationSeconds en el POST y no lo deja editar
++  // después. Esta llamada acaba de ser contestada: todavía no existe
++  // el billsec. WF9 crea la ÚNICA Activity al terminar la llamada
++  // (durationSeconds = CDR.billsec) y aplica el ciclo de vida.
++  // Aquí NO se hace POST ni PATCH: el lead sigue ATTEMPTING y el
++  // Mantenimiento lo retiene mientras el registro esté sin resolver.
++  // Sólo si el registro durable quedó CONFIRMADO; si no, se conserva
++  // el comportamiento anterior (Activity inmediata): nunca se pierde
++  // una llamada.
++  // ------------------------------------------------------------
++  if (
++    String(j.outcome || '').toUpperCase() === 'CONNECTED' &&
++    String(j.callStatus || '').toUpperCase() === 'ANSWERED' &&
++    j.elevenlabs_call_id &&
++    confirmedKeys.has('elevenlabs:' + j.elevenlabs_call_id)
++  ) {
++    deferred++;
++    console.log(
++      `⏳ Asterisk ${j.lead_id}: contestada → la Activity la crea WF9 ` +
++      `al terminar (${j.elevenlabs_call_id})`
++    );
++    out.push({
++      json: {
++        ...j,
++        deferred_to_wf9: true,
++        patch_ok: null,
++        patch_http: null,
++        stage_requested: j.stage || null,
++        stage_ok: null,
++        stage_http: null,
++        followup_ok: null,
++        followup_id: null
++      }
++    });
++    continue;
++  }
++
++  // ------------------------------------------------------------
+   // FOLLOWUP
+   // ------------------------------------------------------------
+   let fu = null;
+@@ -214,6 +260,7 @@
+ 
+ console.log(
+   `🏁 Asterisk: ${out.length} guardados | ` +
++  `${deferred} diferidos a WF9 | ` +
+   `${fails} PATCH fallidos`
+ );
+ 
+
+--- WF2 :: 🧹 Mantenimiento Leads (reactivar + liberar) :: jsCode (ANTES)
++++ WF2 :: 🧹 Mantenimiento Leads (reactivar + liberar) :: jsCode (DESPUÉS)
+@@ -134,7 +134,7 @@
+       const u = unresolved.get(String(l.id));
+       if (u && u.n > 0) {
+         heldByJob++;
+-        if (u.sinceMs && nowMs - u.sinceMs > 2 * 3600000) console.error(`🚨 ${c.key}: ${l.id} lleva >2 h en ATTEMPTING con job Stringee sin resolver`);
++        if (u.sinceMs && nowMs - u.sinceMs > 2 * 3600000) console.error(`🚨 ${c.key}: ${l.id} lleva >2 h en ATTEMPTING con una llamada sin resolver (job Stringee o Asterisk contestada)`);
+         continue;
+       }
+       if (safeAttempts(l.attempts) >= MAX_ATTEMPTS) { staleOps.push(closeOp(l.id)); closedAttempting++; continue; }
+
+--- WF2 :: 🧭 Nota — Diseño v2 :: content (ANTES)
++++ WF2 :: 🧭 Nota — Diseño v2 :: content (DESPUÉS)
+@@ -13,3 +13,4 @@
+ 
+ `/leads/queue` solo acepta `limit` (1–200) y `dialCode`. `/leads` acepta `status`, `dialCode`, `limit`, `offset`.
+ 8. Stringee: cada job despachado queda en `wf_call_events` (ledger) y el worker avisa a WF9 por `callback_url`; WF9 crea la Activity. Agotamiento (9 intentos) = CLOSED + stage UNRESPONSIVE (no LOST).
++9. Asterisk CONTESTADA: LeadStudio fija `durationSeconds` en el POST y no permite editarlo. WF2 NO crea la Activity al contestar: deja el lead ATTEMPTING y registra la llamada en `wf_call_events` (`elevenlabs:<conversation_id>`, `dispatched_at`); WF9 crea la ÚNICA Activity al terminar, con `CDR.billsec` (respaldo: duración de ElevenLabs). NO_ANSWER / FAILED / error de proveedor siguen siendo de WF2.
+
+--- WF2 :: 🗄️ Leer Estado Eventos (Mantenimiento) :: query (ANTES)
++++ WF2 :: 🗄️ Leer Estado Eventos (Mantenimiento) :: query (DESPUÉS)
+@@ -1 +1 @@
+-SELECT 'ok' AS kind, NULL AS lead_id, COUNT(*) AS n, NULL AS hold_ms, NULL AS set_ms FROM wf_call_events UNION ALL SELECT 'unresolved', lead_id, COUNT(*), NULL, MIN(TIMESTAMPDIFF(MICROSECOND, '1970-01-01 00:00:00', COALESCE(dispatched_at, first_seen_at)) DIV 1000) FROM wf_call_events WHERE source = 'stringee' AND state IN ('RECEIVED', 'PROCESSING', 'FAILED') AND lead_id IS NOT NULL GROUP BY lead_id UNION ALL SELECT 'hold', e.lead_id, 1, TIMESTAMPDIFF(MICROSECOND, '1970-01-01 00:00:00', e.next_retry_at) DIV 1000, TIMESTAMPDIFF(MICROSECOND, '1970-01-01 00:00:00', e.processed_at) DIV 1000 FROM wf_call_events e JOIN (SELECT lead_id, MAX(event_at) AS mx FROM wf_call_events WHERE lifecycle_applied = 1 AND lead_id IS NOT NULL AND event_at IS NOT NULL GROUP BY lead_id) m ON m.lead_id = e.lead_id AND m.mx = e.event_at WHERE e.lifecycle_applied = 1 AND e.next_retry_at IS NOT NULL UNION ALL SELECT 'stuck', NULL, COUNT(*), NULL, NULL FROM wf_call_events WHERE state = 'FAILED' AND error_count >= 5
++SELECT 'ok' AS kind, NULL AS lead_id, COUNT(*) AS n, NULL AS hold_ms, NULL AS set_ms FROM wf_call_events UNION ALL SELECT 'unresolved', lead_id, COUNT(*), NULL, MIN(TIMESTAMPDIFF(MICROSECOND, '1970-01-01 00:00:00', COALESCE(dispatched_at, first_seen_at)) DIV 1000) FROM wf_call_events WHERE (source = 'stringee' OR (source = 'elevenlabs' AND provider = 'asterisk' AND dispatched_at IS NOT NULL)) AND state IN ('RECEIVED', 'PROCESSING', 'FAILED') AND lead_id IS NOT NULL GROUP BY lead_id UNION ALL SELECT 'hold', e.lead_id, 1, TIMESTAMPDIFF(MICROSECOND, '1970-01-01 00:00:00', e.next_retry_at) DIV 1000, TIMESTAMPDIFF(MICROSECOND, '1970-01-01 00:00:00', e.processed_at) DIV 1000 FROM wf_call_events e JOIN (SELECT lead_id, MAX(event_at) AS mx FROM wf_call_events WHERE lifecycle_applied = 1 AND lead_id IS NOT NULL AND event_at IS NOT NULL GROUP BY lead_id) m ON m.lead_id = e.lead_id AND m.mx = e.event_at WHERE e.lifecycle_applied = 1 AND e.next_retry_at IS NOT NULL UNION ALL SELECT 'stuck', NULL, COUNT(*), NULL, NULL FROM wf_call_events WHERE state = 'FAILED' AND error_count >= 5
+
+### NODO NUEVO: 🧾 Build Deferred Ledger (Asterisk)
+--- WF2 :: 🧾 Build Deferred Ledger (Asterisk) :: jsCode (ANTES)
++++ WF2 :: 🧾 Build Deferred Ledger (Asterisk) :: jsCode (DESPUÉS)
+@@ -1 +1,56 @@
++// ============================================================================
++// 🧾 BUILD DEFERRED LEDGER (ASTERISK) — llamada Asterisk CONTESTADA.
++//
++// Por qué existe: LeadStudio fija durationSeconds en el POST /followups y NO lo deja
++// editar después (PATCH /followups/{id} -> 400 "Nothing to update"). Este nodo corre
++// cuando la llamada acaba de ser contestada (la API de ElevenLabs responde al contestar,
++// no al colgar), o sea antes de conocer el billsec real. Por eso la Activity de una
++// llamada contestada la crea WF9 al TERMINAR la llamada (con CDR.billsec).
++//
++// Aquí sólo se deja un registro durable en wf_call_events con la MISMA clave que usan el
++// webhook y el polling de ElevenLabs (elevenlabs:<conversation_id>): mismo evento, sin
++// duplicados. dispatched_at es la marca "esta llamada la creará WF9".
++// Luego se CONFIRMA con un SELECT: 🏁 Guardar Resultado (Asterisk) sólo difiere la Activity
++// de las llamadas confirmadas; si el registro falla, crea la Activity como antes (nunca se
++// pierde una llamada).
++// Sin llamadas contestadas en este lote -> consulta vacía (SELECT 1).
++// Horas en UTC explícito.
++// ============================================================================
++const CONV_RE = /^conv_[A-Za-z0-9]{8,64}$/;
++function q(v) {
++  if (v === null || v === undefined || v === '') return 'NULL';
++  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';
++  return "'" + String(v).replace(/\u0000/g, '').replace(/[\r\n]+/g, ' ').replace(/\$/g, '').replace(/\\/g, '\\\\').replace(/'/g, "''")
++    .replace(/\{\{/g, '{ {').replace(/\}\}/g, '} }') + "'";
++}
++function dt(v) {
++  const t = v ? new Date(v).getTime() : NaN;
++  return Number.isFinite(t) ? "'" + new Date(t).toISOString().replace('T', ' ').replace('Z', '') + "'" : 'UTC_TIMESTAMP(3)';
++}
++const locked = $('📥 Fetch + Lock (Asterisk)').all().map(i => i.json || {});
++const phoneOf = id => { const l = locked.find(x => x.lead_id === id); return l ? String(l.phone || '').replace(/[^0-9+]/g, '').slice(0, 32) : null; };
++const rows = [];
++const keys = [];
++for (const it of $input.all()) {
++  const j = it.json || {};
++  if (String(j.outcome || '').toUpperCase() !== 'CONNECTED' || String(j.callStatus || '').toUpperCase() !== 'ANSWERED') continue;
++  const conv = String(j.elevenlabs_call_id || '');
++  if (!CONV_RE.test(conv) || !j.lead_id) continue;
++  const att = Number(j.attempts);
++  const key = 'elevenlabs:' + conv;
++  if (keys.includes(q(key))) continue;
++  keys.push(q(key));
++  rows.push('(' + [q(key), q('elevenlabs'), q('asterisk'), q(conv), q(String(j.lead_id).slice(0, 64)), q(phoneOf(j.lead_id)),
++    q(Number.isInteger(att) && att >= 1 && att <= 99 ? att : null), dt(j.last_call_time), dt(j.last_call_time), 'UTC_TIMESTAMP(3)', q('RECEIVED'),
++    'UTC_TIMESTAMP(3) + INTERVAL 3 MINUTE', q(JSON.stringify({ via: 'wf2_asterisk_answered_deferred' }))].join(', ') + ')');
++}
++if (!rows.length) return [{ json: { ledger_rows: 0, ledger_sql: 'SELECT 1 AS noop' } }];
++const ledger_sql = 'INSERT INTO wf_call_events (event_key, source, provider, external_id, lead_id, phone, call_attempts, ' +
++  'event_at, dispatched_at, first_seen_at, state, next_attempt_at, payload) VALUES ' + rows.join(', ') +
++  ' ON DUPLICATE KEY UPDATE provider = VALUES(provider), lead_id = COALESCE(lead_id, VALUES(lead_id)), ' +
++  'phone = COALESCE(phone, VALUES(phone)), call_attempts = COALESCE(call_attempts, VALUES(call_attempts)), ' +
++  'event_at = COALESCE(event_at, VALUES(event_at)), dispatched_at = COALESCE(dispatched_at, VALUES(dispatched_at))' +
++  '; SELECT event_key FROM wf_call_events WHERE dispatched_at IS NOT NULL AND event_key IN (' + keys.join(', ') + ')';
++console.log(`🧾 Asterisk contestadas: ${rows.length} llamada(s) registradas para que WF9 cree la Activity al terminar`);
++return [{ json: { ledger_rows: rows.length, ledger_sql } }];
+ 
+
+### NODO NUEVO: 💾 Ledger Deferred (Asterisk)
+--- WF2 :: 💾 Ledger Deferred (Asterisk) :: query (ANTES)
++++ WF2 :: 💾 Ledger Deferred (Asterisk) :: query (DESPUÉS)
+@@ -1 +1 @@
+-
++{{ $json.ledger_sql }}
+

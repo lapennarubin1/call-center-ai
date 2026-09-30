@@ -1,0 +1,260 @@
+[
+  {
+    "id": "1",
+    "name": "WF9: el JSON parsea",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "2",
+    "name": "WF9: estructura de workflow n8n (name, nodes, connections, settings)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "3",
+    "name": "WF9: IDs de nodo únicos (25)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "3b",
+    "name": "WF9: nombres de nodo únicos",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "4",
+    "name": "WF9: todo origen de conexión existe",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "5",
+    "name": "WF9: todo destino de conexión existe",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "6",
+    "name": "WF9: toda referencia $('NODO') apunta a un nodo existente (2 referencias)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "6b",
+    "name": "WF9: toda referencia $('NODO') en nodos activos apunta a un nodo que corre antes (ancestro)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "6c",
+    "name": "WF9: ningún nodo MySQL nuevo/modificado usa $('NODO') dentro de la query (en n8n se resuelve como undefined)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "7",
+    "name": "WF9: sintaxis válida de todos los Code nodes activos (AsyncFunction)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "8",
+    "name": "WF9: sin paths de webhook duplicados (POST elevenlabs-postcall-webhook ; POST stringee-worker-callback)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "8b",
+    "name": "WF9: webhookId únicos",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "1",
+    "name": "WF2: el JSON parsea",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "2",
+    "name": "WF2: estructura de workflow n8n (name, nodes, connections, settings)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "3",
+    "name": "WF2: IDs de nodo únicos (64)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "3b",
+    "name": "WF2: nombres de nodo únicos",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "4",
+    "name": "WF2: todo origen de conexión existe",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "5",
+    "name": "WF2: todo destino de conexión existe",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "6",
+    "name": "WF2: toda referencia $('NODO') apunta a un nodo existente (45 referencias)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "6b",
+    "name": "WF2: toda referencia $('NODO') en nodos activos apunta a un nodo que corre antes (ancestro)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "6c",
+    "name": "WF2: ningún nodo MySQL nuevo/modificado usa $('NODO') dentro de la query (en n8n se resuelve como undefined)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "7",
+    "name": "WF2: sintaxis válida de todos los Code nodes activos (AsyncFunction)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "8",
+    "name": "WF2: sin paths de webhook duplicados (ninguno activo)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "8b",
+    "name": "WF2: webhookId únicos",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "9",
+    "name": "WF9: sólo credenciales existentes (mySql:4NiWyzzJ4JbMkIjT:MySQL account)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "9",
+    "name": "WF2: sólo credenciales existentes y ninguna perdida (mySql:4NiWyzzJ4JbMkIjT:MySQL account, httpHeaderAuth:ui7o7nfbbbmdISf2:Header Auth account)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "9",
+    "name": "WF2: los nodos con credenciales conservan exactamente su referencia",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "10",
+    "name": "WF9: nodos importantes presentes con el mismo ID",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "10",
+    "name": "WF9: webhook de ElevenLabs intacto (path, webhookId, método, responseMode, rawBody)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "10",
+    "name": "WF9: rama de enlace conv-id de Stringee sin cambios",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "10",
+    "name": "WF9: nodos legado deshabilitados eliminados",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "10",
+    "name": "WF2: ningún nodo existente desapareció ni cambió de ID",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "10",
+    "name": "WF2: dial Asterisk, clasificación/guardado Stringee, login y triggers sin cambios",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "10",
+    "name": "WF2: conexiones originales conservadas salvo las documentadas",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "11",
+    "name": "WF9: polling exactamente cada 3 minutos",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "11b",
+    "name": "WF9: ventana de reconciliación 60 min",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "11c",
+    "name": "WF9: procesador cada 1 minuto; reconciliación de jobs no terminales cada 3 min (180 s)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "19b",
+    "name": "WF2 + WF9: ningún nodo activo usa LOST para agotamiento",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "CB",
+    "name": "WF2: POST → Stringee Worker envía callback_url de producción",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "SEC",
+    "name": "WF9: la key de ElevenLabs sólo está en \"Traer Histórico ElevenLabs\" y \"⚙️ Fase 1\" (necesaria para leer conversaciones)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "SEC",
+    "name": "WF9: el secreto HMAC sigue sólo en \"⚙️ Parse Post-Call Data\"",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "SEC",
+    "name": "WF2: la contraseña de LeadStudio no se copió a nodos nuevos (mismos 2 nodos de antes)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "SEC",
+    "name": "WF9/WF2: no se crearon credenciales nuevas ni IDs falsos",
+    "pass": true,
+    "detail": ""
+  }
+]

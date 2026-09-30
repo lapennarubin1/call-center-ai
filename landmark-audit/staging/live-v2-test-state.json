@@ -1,0 +1,28 @@
+{
+  "active_before": [
+    {
+      "id": "442FDm64j2YTx9mW",
+      "name": "WF7+WF8 MULTI-PAIS — Payment Link + Callback (100% LeadStudio API)"
+    },
+    {
+      "id": "6ods2vlMKHhuhpQS",
+      "name": "INDIA + NEPAL WF3 — Account Creation (API LeadStudio + CashStudio)"
+    },
+    {
+      "id": "ap50YtvxxjErCPtq",
+      "name": "WF14 - CRM Sync (LeadStudio API → MySQL) + Stringee Call Log"
+    },
+    {
+      "id": "Bem8pAJ4gxZWrhDU",
+      "name": "WF2 UNIFICADO — Asterisk + Stringee (API LeadStudio, follow-up automático)"
+    },
+    {
+      "id": "TW1CHksqyf66MjQz",
+      "name": "WF10 — Recordings to LeadStudio API + Telegram (Multipais, sin Drive)"
+    },
+    {
+      "id": "wNUh5ugIlHCyShyI",
+      "name": "INDIA MULTI-PAIS WF9 — Post-Call Handler (100% LeadStudio API, sin Sheets)"
+    }
+  ]
+}

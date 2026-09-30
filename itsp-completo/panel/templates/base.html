@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}Consola ITSP{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% if session.get('user') %}
+<div class="shell">
+  <aside class="side">
+    <div class="brand">itsp·core<small>consola de operaciones</small></div>
+    <nav class="nav">
+      <a href="{{ url_for('dashboard') }}" class="{{ 'active' if active=='dashboard' }}">Panel general</a>
+      <div class="grp">Operación</div>
+      <a href="{{ url_for('clients') }}" class="{{ 'active' if active=='clients' }}">Clientes</a>
+      <a href="{{ url_for('providers') }}" class="{{ 'active' if active=='providers' }}">Proveedores</a>
+      <a href="{{ url_for('cdr') }}" class="{{ 'active' if active=='cdr' }}">Llamadas (CDR)</a>
+      <a href="{{ url_for('fraud') }}" class="{{ 'active' if active=='fraud' }}">Eventos de fraude</a>
+      <div class="grp">Facturación</div>
+      <a href="{{ url_for('plans') }}" class="{{ 'active' if active=='plans' }}">Planes y tarifas</a>
+      <a href="{{ url_for('invoices') }}" class="{{ 'active' if active=='invoices' }}">Facturas</a>
+    </nav>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <h1>{% block heading %}{% endblock %}</h1>
+      <div style="display:flex;gap:10px;align-items:center">
+        <form method="post" action="{{ url_for('apply_config') }}" style="margin:0">
+          <button class="btn btn-primary btn-sm" type="submit">Aplicar y recargar Asterisk</button>
+        </form>
+        <span class="tag">{{ session['user'] }}</span>
+        <a class="btn btn-sm" href="{{ url_for('logout') }}">Salir</a>
+      </div>
+    </div>
+    <div class="content">
+      {% with msgs = get_flashed_messages(with_categories=true) %}
+        {% for cat,msg in msgs %}
+          <div class="flash flash-{{ 'error' if cat=='error' else 'ok' }}">{{ msg }}</div>
+        {% endfor %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</div>
+{% else %}
+  {% block guest %}{% endblock %}
+{% endif %}
+</body>
+</html>

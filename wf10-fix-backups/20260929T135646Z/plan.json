@@ -1,0 +1,60 @@
+{
+  "targets": [
+    {
+      "context": "from-client-elevenlabs",
+      "exten": "_+52XXXXXXXXXX",
+      "priority": 4,
+      "file": "/etc/asterisk/extensions.conf",
+      "line": 8,
+      "old_app": "MixMonitor(${RECORDING},b)",
+      "new_app": "MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh \"${EXTEN}\" \"${RECORDING}\" \"${UNIQUEID}\" ANSWER)",
+      "wav_expr": "${RECORDING}",
+      "opts": "b",
+      "system": "System(/usr/local/bin/wf10-enqueue.py \"${EXTEN}\" \"${RECORDING}\" \"${UNIQUEID}\" \"${DIALSTATUS}\")",
+      "old_line": " same => n,MixMonitor(${RECORDING},b)",
+      "new_line": " same => n,MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh \"${EXTEN}\" \"${RECORDING}\" \"${UNIQUEID}\" ANSWER)"
+    },
+    {
+      "context": "from-client-elevenlabs",
+      "exten": "_+91XXXXXXXXXX",
+      "priority": 4,
+      "file": "/etc/asterisk/extensions.conf",
+      "line": 27,
+      "old_app": "MixMonitor(${RECORDING},b)",
+      "new_app": "MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh \"${EXTEN}\" \"${RECORDING}\" \"${UNIQUEID}\" ANSWER)",
+      "wav_expr": "${RECORDING}",
+      "opts": "b",
+      "system": "System(/usr/local/bin/wf10-enqueue.py \"${EXTEN}\" \"${RECORDING}\" \"${UNIQUEID}\" \"${DIALSTATUS}\")",
+      "old_line": " same => n,MixMonitor(${RECORDING},b)",
+      "new_line": " same => n,MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh \"${EXTEN}\" \"${RECORDING}\" \"${UNIQUEID}\" ANSWER)"
+    },
+    {
+      "context": "from-client-elevenlabs",
+      "exten": "_+977XXXXXXXXXX",
+      "priority": 4,
+      "file": "/etc/asterisk/extensions.conf",
+      "line": 17,
+      "old_app": "MixMonitor(${RECORDING},b)",
+      "new_app": "MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh \"${EXTEN}\" \"${RECORDING}\" \"${UNIQUEID}\" ANSWER)",
+      "wav_expr": "${RECORDING}",
+      "opts": "b",
+      "system": "System(/usr/local/bin/wf10-enqueue.py \"${EXTEN}\" \"${RECORDING}\" \"${UNIQUEID}\" \"${DIALSTATUS}\")",
+      "old_line": " same => n,MixMonitor(${RECORDING},b)",
+      "new_line": " same => n,MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh \"${EXTEN}\" \"${RECORDING}\" \"${UNIQUEID}\" ANSWER)"
+    }
+  ],
+  "already": [],
+  "errors": [],
+  "counts": {
+    "extensions": 61,
+    "priorities": 141,
+    "contexts": 31
+  },
+  "files": {
+    "/etc/asterisk/extensions.conf": {
+      "sha256_before": "35da05e1a8a8c1f591428376cf6894e0fc6203a992f61a02d5a0e393998ae1df",
+      "staged": "/root/wf10-fix-backups/20260929T135646Z/new_a787a5509b",
+      "sha256_after": "3ab3b21fc4b03a3f599a9f57db2eee7c16e0b77fc3a89b540fcf274fd2b3b85d"
+    }
+  }
+}

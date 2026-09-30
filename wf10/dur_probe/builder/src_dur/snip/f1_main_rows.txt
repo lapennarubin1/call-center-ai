@@ -1,0 +1,15 @@
+const START = Date.now();
+// Los eventos vienen del claim; el CDR (billsec) del nodo MySQL intermedio. Si ese nodo falló, se usa la duración de ElevenLabs.
+const rows = $('🔒 Claim + Leer Eventos (MySQL)').all().map(i => i.json || {});
+{
+  let cdrErr = null;
+  for (const it of $input.all()) {
+    const r = (it && it.json) || {};
+    if (r.error || (r.message && !r.ref)) { cdrErr = r.message || r.error; continue; }
+    if (!r.ref) continue;
+    if (!CDR_BY_EVENT.has(r.ref)) CDR_BY_EVENT.set(r.ref, []);
+    CDR_BY_EVENT.get(r.ref).push(r);
+  }
+  if (cdrErr) CDR_FAILED = true;
+  if (cdrErr) console.error('🚨 CDR no disponible (' + JSON.stringify(cdrErr).slice(0, 200) + '): las llamadas Asterisk usarán la duración de ElevenLabs');
+}

@@ -1,0 +1,28 @@
+# =====================================================================
+#  /etc/fail2ban/jail.local  —  Proteccion anti fuerza-bruta SIP
+#  Requiere que Asterisk escriba el "security log" (ver logger.conf).
+#  Copia este archivo a /etc/fail2ban/jail.local y reinicia fail2ban.
+# =====================================================================
+[DEFAULT]
+# No banees tus propias IPs de administracion:
+ignoreip = 127.0.0.1/8 ::1 TU_IP_ADMIN_1 TU_IP_ADMIN_2
+bantime  = 86400          # 24h de baneo
+findtime = 600            # ventana de 10 min
+maxretry = 5
+banaction = nftables-multiport
+
+[asterisk]
+enabled  = true
+port     = 5060,5061
+filter   = asterisk-security
+# Ubuntu/Debian suele usar /var/log/asterisk/security o /var/log/asterisk/messages
+logpath  = /var/log/asterisk/security
+maxretry = 5
+findtime = 600
+bantime  = 86400
+
+[sshd]
+enabled = true
+port    = 22
+maxretry = 4
+bantime  = 604800         # 7 dias para SSH

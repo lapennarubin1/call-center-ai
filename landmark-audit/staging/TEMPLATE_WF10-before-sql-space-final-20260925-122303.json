@@ -1,0 +1,851 @@
+{
+  "id": "8capACjGjSnSRFBV",
+  "name": "TEMPLATE_WF10_RECORDINGS_V2",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-22T07:32:49.279Z",
+  "updatedAt": "2026-09-25T12:16:44.608Z",
+  "isArchived": false,
+  "versionId": "a5ea5f1a-2a84-4f9d-a345-c2d71d2f8fb7",
+  "versionCounter": 5,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
+  "nodes": [
+    {
+      "id": "fb34f75c-ee47-4fe7-a102-f7990a2fe6f3",
+      "name": "[TRIGGER] Recording Push",
+      "webhookId": "8304ec6a-2db2-4b4e-9247-401729677be0",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -200
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recording-v2",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "2b5b8893-c4c3-4523-9b30-dd4fe188af78",
+      "name": "[PUSH] Normalize Recording",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "\nconst body = $json.body || $json;\n\nif (!body.audio_base64) {\n  throw new Error('WF10: audio_base64 missing');\n}\n\nconst buffer = Buffer.from(\n  String(body.audio_base64),\n  'base64'\n);\n\nif (!buffer || buffer.length <= 44) {\n  throw new Error('WF10: invalid or empty WAV');\n}\n\nlet duration_seconds = 0;\nlet duration_unknown = true;\n\ntry {\n  if (\n    buffer.length >= 44 &&\n    buffer.toString('ascii',0,4) === 'RIFF'\n  ) {\n    const byteRate = buffer.readUInt32LE(28);\n\n    if (byteRate > 0) {\n      duration_seconds = Math.round(\n        Math.max(0,buffer.length - 44) / byteRate\n      );\n      duration_unknown = false;\n    }\n  }\n} catch (e) {}\n\nconst filename =\n  String(\n    body.filename ||\n    body.conversation_id ||\n    body.call_job_id ||\n    ('recording-' + Date.now() + '.wav')\n  );\n\nconst recording_key =\n  String(\n    body.recording_key ||\n    filename ||\n    body.conversation_id ||\n    body.call_job_id\n  );\n\nreturn [{\n  json:{\n    source:'PUSH',\n    recording_key,\n\n    call_job_id:\n      body.call_job_id || null,\n\n    conversation_id:\n      body.conversation_id || null,\n\n    followup_id:\n      body.followup_id || null,\n\n    provider_call_id:\n      body.provider_call_id || null,\n\n    lead_id:\n      body.lead_id || null,\n\n    route_key:\n      body.route_key || null,\n\n    country_iso:\n      body.country_iso || null,\n\n    provider:\n      body.provider || null,\n\n    adapter_key:\n      body.adapter_key || null,\n\n    phone:\n      body.phone || null,\n\n    filename,\n\n    date:\n      body.date ||\n      new Date().toISOString().slice(0,10),\n\n    duration_seconds,\n    duration_unknown,\n\n    suppress_telegram:\n      body.suppress_telegram === true ||\n      String(body.suppress_telegram || '')\n        .toLowerCase() === 'true'\n  },\n\n  binary:{\n    data:{\n      data:buffer.toString('base64'),\n      mimeType:'audio/wav',\n      fileName:filename\n    }\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "9b591479-a867-4046-aec1-f897fc375a02",
+      "name": "[TRIGGER] Stringee Recording Poll",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        440
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "4a0bfbdc-f211-4728-be95-db5ada0fc225",
+      "name": "[DB] Stringee Already Processed",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "alwaysOutputData": true,
+      "position": [
+        240,
+        440
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nSELECT recording_key AS filename\nFROM wf10_recording_ledger\nWHERE source='STRINGEE_WORKER'\n  AND crm_synced=1\n  AND created_at >= UTC_TIMESTAMP() - INTERVAL 14 DAY\n",
+        "options": {
+          "queryReplacement": "={{ [] }}",
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "0f1dbf79-cc80-453f-a963-1ae79d6c8bb1",
+      "name": "[PULL] Fetch Stringee Recordings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        440
+      ],
+      "parameters": {
+        "jsCode": "\nconst already = new Set(\n  $input.all()\n    .map(i => i.json && (i.json.filename || i.json.recording_key))\n    .filter(Boolean)\n);\n\nconst list = await this.helpers.httpRequest({\n  method:'GET',\n  url:'http://172.18.0.1:8091/recordings',\n  json:true\n});\n\nconst recordings =\n  list.recordings || [];\n\nconst today =\n  new Date().toISOString().slice(0,10);\n\nconst out=[];\n\nfunction wavDuration(b64,sizeBytes) {\n  try {\n    const head=Buffer.from(\n      String(b64).slice(0,120),\n      'base64'\n    );\n\n    if (head.length < 44) return null;\n    if (head.toString('ascii',0,4)!=='RIFF') return null;\n\n    const byteRate=head.readUInt32LE(28);\n\n    if (!byteRate) return null;\n\n    return Math.round(\n      Math.max(\n        0,\n        Number(sizeBytes || 0) - 44\n      ) / byteRate\n    );\n\n  } catch(e) {\n    return null;\n  }\n}\n\nfor (const rec of recordings) {\n\n  if (!rec || !rec.filename) continue;\n\n  if (already.has(rec.filename)) {\n    continue;\n  }\n\n  let date='';\n\n  try {\n    date=new Date(\n      Number(rec.timestamp_ms)\n    ).toISOString().slice(0,10);\n  } catch(e) {}\n\n  if (date && date !== today) {\n    continue;\n  }\n\n  try {\n\n    const dl =\n      await this.helpers.httpRequest({\n        method:'GET',\n        url:\n          'http://172.18.0.1:8091/recordings/'\n          + encodeURIComponent(rec.filename),\n        json:true\n      });\n\n    if (!dl.ok || !dl.audio_base64) {\n      continue;\n    }\n\n    const secs =\n      wavDuration(\n        dl.audio_base64,\n        rec.size_bytes\n      );\n\n    out.push({\n      json:{\n        source:'STRINGEE_WORKER',\n        recording_key:String(rec.filename),\n\n        call_job_id:\n          rec.call_job_id || null,\n\n        conversation_id:\n          rec.conversation_id || null,\n\n        followup_id:\n          rec.followup_id || null,\n\n        provider_call_id:\n          rec.provider_call_id || null,\n\n        lead_id:\n          rec.lead_id || null,\n\n        route_key:\n          rec.route_key || null,\n\n        country_iso:\n          rec.country_iso || null,\n\n        provider:\n          rec.provider || 'stringee',\n\n        adapter_key:\n          rec.adapter_key || 'STRINGEE_WORKER',\n\n        phone:\n          rec.phone || null,\n\n        filename:\n          String(rec.filename),\n\n        date:\n          date || today,\n\n        duration_seconds:\n          secs === null ? 0 : secs,\n\n        duration_unknown:\n          secs === null,\n\n        suppress_telegram:false\n      },\n\n      binary:{\n        data:{\n          data:String(dl.audio_base64),\n          mimeType:'audio/wav',\n          fileName:String(rec.filename)\n        }\n      }\n    });\n\n  } catch(e) {}\n}\n\nreturn out;\n"
+      }
+    },
+    {
+      "id": "9f882aea-be22-4915-ae57-c15b331a65cc",
+      "name": "[DB] Resolve Push Context",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "alwaysOutputData": true,
+      "retryOnFail": false,
+      "position": [
+        720,
+        -200
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nSELECT\n    j.call_job_id,\n    j.lead_id,\n    j.route_key,\n    j.country_iso,\n    j.provider,\n    j.adapter_key,\n    j.result,\n    j.conversation_id,\n    j.provider_call_id,\n\n    COALESCE(\n        j.followup_id,\n        NULLIF($5,'')\n    ) AS followup_id,\n\n    COALESCE(\n        j.lead_id,\n        NULLIF($6,'')\n    ) AS fallback_lead_id,\n\n    CASE\n      WHEN EXISTS (\n        SELECT 1\n        FROM wf10_recording_ledger l\n        WHERE l.recording_key=$7\n          AND l.crm_synced=1\n      )\n      THEN 1\n      ELSE 0\n    END AS already_synced\n\nFROM wf_call_jobs j\n\nWHERE j.call_job_id = COALESCE(\n\n    NULLIF($1,''),\n\n    (\n      SELECT x.call_job_id\n      FROM wf_call_jobs x\n      WHERE x.conversation_id = NULLIF($2,'')\n      LIMIT 1\n    ),\n\n    (\n      SELECT x.call_job_id\n      FROM wf_call_jobs x\n      WHERE x.followup_id = NULLIF($3,'')\n      LIMIT 1\n    ),\n\n    (\n      SELECT x.call_job_id\n      FROM wf_call_jobs x\n      WHERE x.provider_call_id = NULLIF($4,'')\n      LIMIT 1\n    )\n)\n\nLIMIT 1\n",
+        "options": {
+          "queryReplacement": "={{ [\n$json.call_job_id || \"\",\n$json.conversation_id || \"\",\n$json.followup_id || \"\",\n$json.provider_call_id || \"\",\n$json.followup_id || \"\",\n$json.lead_id || \"\",\n$json.recording_key || \"\"\n] }}",
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "65f3b5b4-e31b-4afd-a3b9-11262cd4cb27",
+      "name": "[DB] Resolve Pull Context",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "alwaysOutputData": true,
+      "retryOnFail": false,
+      "position": [
+        720,
+        440
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nSELECT\n    j.call_job_id,\n\n    COALESCE(\n        j.lead_id,\n        f.lead_id\n    ) AS lead_id,\n\n    j.route_key,\n    j.country_iso,\n\n    COALESCE(\n        j.provider,\n        f.provider\n    ) AS provider,\n\n    j.adapter_key,\n\n    COALESCE(\n        j.result,\n        'ANSWERED'\n    ) AS result,\n\n    j.conversation_id,\n    j.provider_call_id,\n\n    COALESCE(\n        j.followup_id,\n        f.followup_id\n    ) AS followup_id,\n\n    f.lead_id AS fallback_lead_id,\n\n    CASE\n      WHEN EXISTS (\n        SELECT 1\n        FROM wf10_recording_ledger l\n        WHERE l.recording_key=$4\n          AND l.crm_synced=1\n      )\n      THEN 1\n      ELSE 0\n    END AS already_synced\n\nFROM (\n    SELECT\n        followup_id,\n        lead_id,\n        provider\n\n    FROM wf_call_followups\n\n    WHERE RIGHT(phone,10)=RIGHT($1,10)\n\n      AND call_status='ANSWERED'\n\n      AND COALESCE(\n          recording_synced,\n          0\n      )=0\n\n      AND (\n          $2=''\n          OR LOWER(provider)=LOWER($3)\n      )\n\n      AND created_at >=\n          UTC_TIMESTAMP() - INTERVAL 1 DAY\n\n    ORDER BY created_at DESC\n\n    LIMIT 1\n) f\n\nLEFT JOIN wf_call_jobs j\n  ON j.followup_id=f.followup_id\n\nLIMIT 1\n",
+        "options": {
+          "queryReplacement": "={{ [\n$json.phone || \"\",\n$json.provider || \"\",\n$json.provider || \"\",\n$json.recording_key || \"\"\n] }}",
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "e94b7702-4995-4930-bfd3-21e6c8b98f35",
+      "name": "[PUSH] Merge Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "\nreturn $input.all().map((row,i) => {\n\n  const src=\n    $('[PUSH] Normalize Recording')\n      .itemMatching(i);\n\n  const s=src.json || {};\n  const d=row.json || {};\n\n  const followup_id =\n    d.followup_id ||\n    s.followup_id ||\n    null;\n\n  const result=\n    String(\n      d.result ||\n      ''\n    ).toUpperCase();\n\n  const context_valid=\n    !!followup_id &&\n    result === 'ANSWERED' &&\n    Number(d.already_synced || 0) === 0 &&\n    !!src.binary?.data;\n\n  return {\n    json:{\n      ...s,\n\n      call_job_id:\n        d.call_job_id ||\n        s.call_job_id ||\n        null,\n\n      lead_id:\n        d.lead_id ||\n        d.fallback_lead_id ||\n        s.lead_id ||\n        null,\n\n      route_key:\n        d.route_key ||\n        s.route_key ||\n        null,\n\n      country_iso:\n        String(\n          d.country_iso ||\n          s.country_iso ||\n          ''\n        ).toUpperCase(),\n\n      provider:\n        d.provider ||\n        s.provider ||\n        null,\n\n      adapter_key:\n        d.adapter_key ||\n        s.adapter_key ||\n        null,\n\n      conversation_id:\n        d.conversation_id ||\n        s.conversation_id ||\n        null,\n\n      provider_call_id:\n        d.provider_call_id ||\n        s.provider_call_id ||\n        null,\n\n      followup_id,\n\n      result:\n        result ||\n        'UNKNOWN',\n\n      already_synced:\n        Number(\n          d.already_synced || 0\n        ) === 1,\n\n      context_valid,\n\n      skip_reason:\n        !followup_id\n          ? 'NO_FOLLOWUP_ID'\n          : result !== 'ANSWERED'\n          ? 'NOT_ANSWERED'\n          : Number(d.already_synced || 0) === 1\n          ? 'ALREADY_SYNCED'\n          : !src.binary?.data\n          ? 'NO_AUDIO'\n          : null\n    },\n\n    binary:src.binary\n  };\n});\n"
+      }
+    },
+    {
+      "id": "4af92f17-42f8-4083-bbd6-e2c7cdc986a9",
+      "name": "[PULL] Merge Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        440
+      ],
+      "parameters": {
+        "jsCode": "\nreturn $input.all().map((row,i) => {\n\n  const src=\n    $('[PULL] Fetch Stringee Recordings')\n      .itemMatching(i);\n\n  const s=src.json || {};\n  const d=row.json || {};\n\n  const followup_id =\n    d.followup_id ||\n    s.followup_id ||\n    null;\n\n  const result=\n    String(\n      d.result ||\n      'ANSWERED'\n    ).toUpperCase();\n\n  const context_valid=\n    !!followup_id &&\n    result === 'ANSWERED' &&\n    Number(d.already_synced || 0) === 0 &&\n    !!src.binary?.data;\n\n  return {\n    json:{\n      ...s,\n\n      call_job_id:\n        d.call_job_id ||\n        s.call_job_id ||\n        null,\n\n      lead_id:\n        d.lead_id ||\n        d.fallback_lead_id ||\n        s.lead_id ||\n        null,\n\n      route_key:\n        d.route_key ||\n        s.route_key ||\n        null,\n\n      country_iso:\n        String(\n          d.country_iso ||\n          s.country_iso ||\n          ''\n        ).toUpperCase(),\n\n      provider:\n        d.provider ||\n        s.provider ||\n        'stringee',\n\n      adapter_key:\n        d.adapter_key ||\n        s.adapter_key ||\n        'STRINGEE_WORKER',\n\n      conversation_id:\n        d.conversation_id ||\n        s.conversation_id ||\n        null,\n\n      provider_call_id:\n        d.provider_call_id ||\n        s.provider_call_id ||\n        null,\n\n      followup_id,\n\n      result,\n\n      already_synced:\n        Number(\n          d.already_synced || 0\n        ) === 1,\n\n      context_valid,\n\n      skip_reason:\n        !followup_id\n          ? 'NO_FOLLOWUP_ID'\n          : result !== 'ANSWERED'\n          ? 'NOT_ANSWERED'\n          : Number(d.already_synced || 0) === 1\n          ? 'ALREADY_SYNCED'\n          : !src.binary?.data\n          ? 'NO_AUDIO'\n          : null\n    },\n\n    binary:src.binary\n  };\n});\n"
+      }
+    },
+    {
+      "id": "06b19901-fb24-4d1d-aa7c-694631ffd25f",
+      "name": "[CORE] Context Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1240,
+        120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1b6abbff-338d-4cb0-8bd2-667c7f82ec34",
+              "leftValue": "={{ $json.context_valid === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c7b79213-7774-4583-bc69-f8e0f9a85eca",
+      "name": "[LOG] Recording Skipped",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1480,
+        480
+      ],
+      "parameters": {
+        "jsCode": "\nreturn $input.all().map(i => ({\n  json:{\n    skipped:true,\n    recording_key:i.json.recording_key || null,\n    call_job_id:i.json.call_job_id || null,\n    followup_id:i.json.followup_id || null,\n    reason:i.json.skip_reason || 'UNKNOWN'\n  }\n}));\n"
+      }
+    },
+    {
+      "id": "a0c3a6aa-b328-4373-8e2d-a0487707f686",
+      "name": "[CRM] Get Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        1880,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth"
+      },
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "uA7mfYZBwicXc83u",
+          "name": "LeadStudio Login V2"
+        }
+      }
+    },
+    {
+      "id": "ef4a7b91-082d-4cbf-a01c-cbc294c52820",
+      "name": "[CRM] Token Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2120,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "77aa49cd-c90a-4384-92f7-313337e025f0",
+              "leftValue": "={{ Number($json.statusCode || 0) >= 200 && Number($json.statusCode || 0) < 300 && !!(($json.body || {}).accessToken || $json.accessToken) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "957eb98b-f514-420a-a8e9-ed8cf69d788a",
+      "name": "[CRM] Attach Token + Recording",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2360,
+        80
+      ],
+      "parameters": {
+        "jsCode": "\nconst token=\n  ($json.body || {}).accessToken ||\n  $json.accessToken ||\n  null;\n\nconst ctx=\n  $('[CORE] Context Valid?').item;\n\nreturn [{\n  json:{\n    ...(ctx.json || {}),\n    access_token:token\n  },\n  binary:ctx.binary\n}];\n"
+      }
+    },
+    {
+      "id": "abf48305-e631-4a50-b257-dbd02adf90be",
+      "name": "[CRM] Upload Recording",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": false,
+      "position": [
+        2600,
+        80
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/calls/recording/' + $json.followup_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "fdfb1977-5d27-40d7-b3d5-7dfa4ee093b7",
+      "name": "[CRM] Check Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2840,
+        80
+      ],
+      "parameters": {
+        "jsCode": "\nconst ctx=\n  $('[CRM] Attach Token + Recording').item;\n\nconst status=\n  Number(\n    $json.statusCode ||\n    $json.status ||\n    0\n  );\n\nconst body=\n  $json.body ||\n  $json.response_body ||\n  $json;\n\nconst ok=\n  status >= 200 &&\n  status < 300 &&\n  (\n    body.hasRecording === true ||\n    !!body.followUpId ||\n    body.ok === true\n  );\n\nreturn [{\n  json:{\n    ...(ctx.json || {}),\n\n    crm_synced:ok,\n    crm_http_status:status,\n\n    crm_followup_id:\n      body.followUpId ||\n      ctx.json.followup_id ||\n      null,\n\n    crm_error:\n      ok\n        ? null\n        : (\n            body.error ||\n            body.message ||\n            ('HTTP_' + status)\n          )\n  },\n\n  binary:ctx.binary\n}];\n"
+      }
+    },
+    {
+      "id": "de6b6924-f876-4eea-932a-db7dab22980d",
+      "name": "[CRM] Upload Successful?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0f3ce65d-d638-4eb8-ba91-9960abd7cff6",
+              "leftValue": "={{ $json.crm_synced === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8ac75e73-9d4a-41d5-a9cc-05e83d5336b9",
+      "name": "[LOG] Upload Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3320,
+        400
+      ],
+      "parameters": {
+        "jsCode": "\nreturn $input.all().map(i => ({\n  json:{\n    recording_key:i.json.recording_key,\n    followup_id:i.json.followup_id,\n    crm_synced:false,\n    error:i.json.crm_error || 'CRM_UPLOAD_FAILED'\n  }\n}));\n"
+      }
+    },
+    {
+      "id": "c8aa7e57-28e0-4fb2-8e2a-04469750d07d",
+      "name": "[DB] Record CRM Sync",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        3320,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nINSERT INTO wf10_recording_ledger (\n  recording_key,\n  call_job_id,\n  conversation_id,\n  followup_id,\n  lead_id,\n  country_iso,\n  provider,\n  adapter_key,\n  filename,\n  duration_seconds,\n  source,\n  crm_synced,\n  telegram_sent,\n  last_error\n)\nVALUES (\n  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,0,NULL\n)\nON DUPLICATE KEY UPDATE\n  call_job_id=VALUES(call_job_id),\n  conversation_id=VALUES(conversation_id),\n  followup_id=VALUES(followup_id),\n  lead_id=VALUES(lead_id),\n  country_iso=VALUES(country_iso),\n  provider=VALUES(provider),\n  adapter_key=VALUES(adapter_key),\n  filename=VALUES(filename),\n  duration_seconds=VALUES(duration_seconds),\n  source=VALUES(source),\n  crm_synced=1,\n  last_error=NULL,\n  updated_at=UTC_TIMESTAMP()\n",
+        "options": {
+          "queryReplacement": "={{ [\n$json.recording_key || \"\",\n$json.call_job_id || null,\n$json.conversation_id || null,\n$json.followup_id || null,\n$json.lead_id || null,\n$json.country_iso || null,\n$json.provider || null,\n$json.adapter_key || null,\n$json.filename || null,\nNumber($json.duration_seconds || 0),\n$json.source || \"UNKNOWN\"\n] }}",
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "05c88667-57e8-4a9a-b495-10c867e3ddcb",
+      "name": "[DB] Mark Legacy Followup Synced",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        3560,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nUPDATE wf_call_followups\nSET recording_synced=1\nWHERE followup_id=$1\n",
+        "options": {
+          "queryReplacement": "={{ [$('[CRM] Check Upload').item.json.followup_id || '')] }}",
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "50d0ce05-2255-4712-8db2-0783dbe454a4",
+      "name": "[TG] Eligible?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3320,
+        160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d6e487db-61aa-4d8f-8297-72d30068f898",
+              "leftValue": "={{ $json.suppress_telegram !== true && $json.duration_unknown !== true && Number($json.duration_seconds || 0) >= 60 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e251d51a-8857-404b-9750-5bd282b844aa",
+      "name": "[TG] Build Targets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3560,
+        160
+      ],
+      "parameters": {
+        "jsCode": "\nconst src=$input.item;\nconst c=String(\n  src.json.country_iso || ''\n).toUpperCase();\n\n/*\n  Current business routing retained from working WF10.\n  IMPORTANT:\n  this does NOT determine the country.\n  country_iso came from the V2 call job.\n\n  Any future country not explicitly mapped falls\n  to the general Telegram target automatically.\n*/\n\nconst primary={\n  IN:'-1004454561082',\n  NP:'-1004454561082',\n  MX:'-1003616406932'\n};\n\nconst secondary={\n  IN:'-1003984044945',\n  NP:'-1003984044945',\n  MX:'-1003616406932'\n};\n\nconst fallback='-1003984044945';\n\nconst targets=[\n  primary[c] || fallback,\n  secondary[c] || fallback\n];\n\nconst unique=[\n  ...new Set(\n    targets.filter(Boolean)\n  )\n];\n\nreturn unique.map(chat_id => ({\n\n  json:{\n    ...src.json,\n    telegram_chat_id:chat_id\n  },\n\n  binary:src.binary\n}));\n",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "7b8b3386-fbfb-4dbd-a031-7fef66371b5d",
+      "name": "[TG] Send Recording",
+      "webhookId": "16e1c041-ff5d-403a-b15f-9795dba50b13",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3800,
+        160
+      ],
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📞 {{ $json.provider || $json.adapter_key || 'CALL' }} | {{ $json.country_iso || 'N/A' }} | {{ $json.phone || $json.lead_id || '' }} | {{ $json.duration_seconds }}s"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "id": "c2143b01-0321-4e81-a96c-de2a3c3f8043",
+      "name": "[DB] Mark Telegram Sent",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4040,
+        160
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\nUPDATE wf10_recording_ledger\nSET telegram_sent=1,\n    updated_at=UTC_TIMESTAMP()\nWHERE recording_key=$1\n  AND crm_synced=1\n",
+        "options": {
+          "queryReplacement": "={{ [$('[TG] Build Targets').item.json.recording_key || '')] }}",
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "[TRIGGER] Recording Push": {
+      "main": [
+        [
+          {
+            "node": "[PUSH] Normalize Recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[PUSH] Normalize Recording": {
+      "main": [
+        [
+          {
+            "node": "[DB] Resolve Push Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Resolve Push Context": {
+      "main": [
+        [
+          {
+            "node": "[PUSH] Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[PUSH] Merge Context": {
+      "main": [
+        [
+          {
+            "node": "[CORE] Context Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TRIGGER] Stringee Recording Poll": {
+      "main": [
+        [
+          {
+            "node": "[DB] Stringee Already Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Stringee Already Processed": {
+      "main": [
+        [
+          {
+            "node": "[PULL] Fetch Stringee Recordings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[PULL] Fetch Stringee Recordings": {
+      "main": [
+        [
+          {
+            "node": "[DB] Resolve Pull Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Resolve Pull Context": {
+      "main": [
+        [
+          {
+            "node": "[PULL] Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[PULL] Merge Context": {
+      "main": [
+        [
+          {
+            "node": "[CORE] Context Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CORE] Context Valid?": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Get Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[LOG] Recording Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Get Token": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Token Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Token Valid?": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Attach Token + Recording",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[LOG] Upload Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Attach Token + Recording": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Upload Recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Upload Recording": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Check Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Check Upload": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Upload Successful?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Upload Successful?": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record CRM Sync",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "[TG] Eligible?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[LOG] Upload Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record CRM Sync": {
+      "main": [
+        [
+          {
+            "node": "[DB] Mark Legacy Followup Synced",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TG] Eligible?": {
+      "main": [
+        [
+          {
+            "node": "[TG] Build Targets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "[TG] Build Targets": {
+      "main": [
+        [
+          {
+            "node": "[TG] Send Recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TG] Send Recording": {
+      "main": [
+        [
+          {
+            "node": "[DB] Mark Telegram Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "saveManualExecutions": true,
+    "timezone": "UTC",
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "8capACjGjSnSRFBV",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-22T07:32:49.279Z",
+      "updatedAt": "2026-09-22T07:32:49.279Z"
+    }
+  ],
+  "activeVersion": null
+}

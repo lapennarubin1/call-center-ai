@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% block title %}Panel · {{ r.label }}{% endblock %}
+
+{% macro delta(v, invert=false) %}
+  {%- if v is not none -%}
+    {%- set good = (v < 0) if invert else (v > 0) -%}
+    <span class="delta {{ 'up' if good else 'down' }}">
+      {{ '+' if v > 0 else '' }}{{ v|p }}%
+    </span>
+  {%- else -%}
+    <span class="delta flat">sin comparación</span>
+  {%- endif -%}
+{% endmacro %}
+
+{% block content %}
+
+<!-- ══ BARRA DE PERÍODO ══════════════════════════════════════════ -->
+<nav class="periods" aria-label="Rango de fechas">
+  {% for k, lbl in [('today','Hoy'),('yesterday','Ayer'),('week','Semana'),
+                    ('month','Mes'),('last7','7 días'),('last30','30 días'),
+                    ('last90','90 días'),('year','Año')] %}
+    <a class="chip {{ 'on' if p.period == k }}" href="?period={{ k }}">{{ lbl }}</a>
+  {% endfor %}
+  <form class="range" method="get">
+    <input type="hidden" name="period" value="custom">
+    <input type="date" name="start" value="{{ p.start or r.range.start }}" aria-label="Desde">
+    <span class="to">→</span>
+    <input type="date" name="end" value="{{ p.end or r.range.end }}" aria-label="Hasta">
+    <button type="submit">Aplicar</button>
+  </form>
+</nav>
+
+{% if r.sync.available and r.sync.stale %}
+<p class="notice stale-warn">
+  {% if r.sync.ever %}
+    Los datos de leads no se actualizan desde hace {{ r.sync.age_min }} minutos (última vez {{ r.sync.last }}).
+    Revisá que <b>WF14</b> siga activo en n8n — las cifras de llamadas son actuales, las de conversión no.
+  {% else %}
+    Todavía no se sincronizaron los leads. Importá y activá <b>WF14</b> en n8n para ver conversión, cuentas abiertas y costo por adquisición.
+  {% endif %}
+</p>
+{% endif %}
+
+<!-- ══ SIGNATURE: TRAZA DE SEÑAL ═════════════════════════════════ -->
+<section class="panel trace-panel">
+  <header class="panel-head">
+    <div>
+      <span class="eyebrow">Traza de tráfico</span>
+      <h2>{{ r.label }}</h2>
+    </div>
+    <div class="legend">
+      <i class="sw total"></i> intentos
+      <i class="sw ans"></i> contestadas
+      <i class="sw cost"></i> costo
+      <span class="sep"></span>
+      <span class="mono muted">pico eje {{ trace.y_max|n }}</span>
+    </div>
+  </header>
+
+  {% if trace.empty %}
+    <p class="empty">No hay llamadas registradas en este rango. Elegí otro período o revisá que el CDR esté escribiendo.</p>
+  {% else %}
+  <svg class="trace" viewBox="0 0 {{ trace.w }} {{ trace.h }}" preserveAspectRatio="none" role="img"
+       aria-label="Volumen de llamadas por período con porción contestada y línea de costo">
+    {% for g in trace.gridlines %}
+      <line class="grid" x1="0" y1="{{ g.y }}" x2="{{ trace.w }}" y2="{{ g.y }}"/>
+    {% endfor %}
+    {% for b in trace.bars %}
+      <g class="bar">
+        <rect class="b-tot" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"/>
+        <rect class="b-ans" x="{{ b.x }}" y="{{ b.ay }}" width="{{ b.w }}" height="{{ b.ah }}"/>
+        <rect class="b-hit" x="{{ b.x }}" y="0" width="{{ b.w }}" height="{{ trace.h }}">
+          <title>{{ b.label }} · {{ b.total|n }} intentos · {{ b.answered|n }} contestadas ({{ b.asr|p }}%) · {{ b.minutes|n }} min · ${{ b.cost|m }}</title>
+        </rect>
+      </g>
+    {% endfor %}
+    <path class="cost-line" d="{{ trace.cost_path }}"/>
+  </svg>
+  <div class="axis mono">
+    <span>{{ trace.bars[0].label }}</span>
+    <span class="muted">costo máx ${{ trace.cost_max|m }}</span>
+    <span>{{ trace.bars[-1].label }}</span>
+  </div>
+  {% endif %}
+</section>
+
+<!-- ══ INDICADORES PRINCIPALES ═══════════════════════════════════ -->
+<section class="kpis">
+  <article class="kpi">
+    <span class="k-label">Intentos de llamada</span>
+    <strong class="k-val mono">{{ r.traffic.total_calls|n }}</strong>
+    <span class="k-foot">{{ delta(r.deltas.total_calls) }} vs período anterior</span>
+  </article>
+
+  <article class="kpi accent-ok">
+    <span class="k-label">Contestadas</span>
+    <strong class="k-val mono">{{ r.traffic.answered|n }}</strong>
+    <span class="k-foot"><b class="mono">{{ r.traffic.asr|p }}%</b> tasa de contestación {{ delta(r.deltas.asr) }}</span>
+  </article>
+
+  <article class="kpi accent-cost">
+    <span class="k-label">Costo del período</span>
+    <strong class="k-val mono">${{ r.traffic.cost|m }}</strong>
+    <span class="k-foot">{{ r.traffic.billed_minutes|n }} min facturados {{ delta(r.deltas.cost, invert=true) }}</span>
+  </article>
+
+  <article class="kpi">
+    <span class="k-label">Duración media</span>
+    <strong class="k-val mono">{{ r.traffic.acd|sec }}<em>s</em></strong>
+    <span class="k-foot">{{ r.traffic.talk_minutes|m }} min hablados en total</span>
+  </article>
+
+  <article class="kpi">
+    <span class="k-label">Costo por contestada</span>
+    <strong class="k-val mono">${{ r.traffic.cost_per_answered|usd4 }}</strong>
+    <span class="k-foot">${{ r.traffic.cost_per_call|usd4 }} por intento</span>
+  </article>
+
+  <article class="kpi {{ 'accent-bad' if r.traffic.failure_rate > 5 }}">
+    <span class="k-label">Fallos técnicos</span>
+    <strong class="k-val mono">{{ r.traffic.tech_failures|n }}</strong>
+    <span class="k-foot"><b class="mono">{{ r.traffic.failure_rate|p }}%</b> · red efectiva {{ r.traffic.ner|p }}%</span>
+  </article>
+</section>
+
+<!-- ══ ESCALERA DEL EMBUDO ═══════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div>
+      <span class="eyebrow">Recorrido</span>
+      <h2>De la marcación a la cuenta abierta</h2>
+    </div>
+    <span class="mono muted">cada peldaño muestra qué queda del anterior</span>
+  </header>
+
+  <ol class="ladder">
+    {% for s in ladder %}
+    <li class="rung r-{{ s.key }}">
+      <div class="rung-head">
+        <span class="rung-label">{{ s.label }}</span>
+        <span class="rung-note">{{ s.note }}</span>
+      </div>
+      <div class="rung-bar"><span style="width: {{ s.width }}%"></span></div>
+      <div class="rung-nums mono">
+        <b>{{ s.v|n }}</b>
+        {% if s.pct_prev is not none %}
+          <span class="keep">{{ s.pct_prev|p }}% del anterior</span>
+          <span class="lost">−{{ s.drop|n }}</span>
+        {% else %}
+          <span class="keep">base</span>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+
+  {% if r.funnel.available %}
+  <div class="ladder-foot">
+    <div><span class="lf-label">Costo por cuenta abierta</span><b class="mono">${{ r.funnel.cpa|m }}</b></div>
+    <div><span class="lf-label">Costo por contacto</span><b class="mono">${{ r.funnel.cost_per_contact|m }}</b></div>
+    <div><span class="lf-label">Devoluciones agendadas</span><b class="mono">{{ r.funnel.scheduled|n }}</b></div>
+    <div><span class="lf-label">Buzón de voz</span><b class="mono">{{ r.funnel.voicemail|n }}</b></div>
+  </div>
+  {% else %}
+  <p class="notice">Los datos de leads todavía no están sincronizados. Activá <b>WF14</b> en n8n para ver conversión y costo por cuenta.</p>
+  {% endif %}
+</section>
+
+<!-- ══ DOS COLUMNAS ══════════════════════════════════════════════ -->
+<div class="grid-2">
+
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">Ritmo del día</span><h2>Actividad por hora <span class="mono muted">IST</span></h2></div>
+    </header>
+    {% if hourly.empty %}
+      <p class="empty">Sin actividad horaria en este rango.</p>
+    {% else %}
+    <svg class="hourly" viewBox="0 0 {{ hourly.w }} {{ hourly.h }}" role="img"
+         aria-label="Llamadas por hora del día en horario de India">
+      {% for b in hourly.bars %}
+        <g class="hbar {{ 'is-peak' if b.peak }}">
+          <rect class="h-tot" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="1"/>
+          <rect class="h-ans" x="{{ b.x }}" y="{{ b.ay }}" width="{{ b.w }}" height="{{ b.ah }}" rx="1"/>
+          <text class="h-lbl mono" x="{{ b.x + b.w/2 }}" y="{{ hourly.h - 6 }}">{{ '%02d'|format(b.hour) }}</text>
+          <rect class="h-hit" x="{{ b.x }}" y="0" width="{{ b.w }}" height="{{ hourly.h }}">
+            <title>{{ '%02d'|format(b.hour) }}:00 IST · {{ b.total|n }} intentos · {{ b.answered|n }} contestadas ({{ b.asr|p }}%) · ${{ b.cost|m }}</title>
+          </rect>
+        </g>
+      {% endfor %}
+    </svg>
+    <p class="cap">La barra sólida es la porción que contestó. La hora marcada es el pico de volumen.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">Calidad del contacto</span><h2>Cuánto duran las contestadas</h2></div>
+    </header>
+    <div class="split">
+      <ul class="hbars dur-bars">
+        {% for b in durbars %}
+        <li>
+          <span class="hb-label mono">{{ b.label }}</span>
+          <span class="hb-track"><i style="width: {{ b.w }}%" class="{{ 'strong' if b.lo >= 30 }}"></i></span>
+          <span class="hb-val mono">{{ b.count|n }}<em>{{ b.pct|p }}%</em></span>
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="stat-block">
+        <span class="sb-num mono">{{ r.durations.meaningful_pct|p }}%</span>
+        <span class="sb-label">de las contestadas superan los 30 segundos</span>
+        <p class="sb-note">Por debajo de 30 s casi siempre es un cuelgue inmediato: el teléfono se atendió, pero no hubo conversación.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">Resultado de marcación</span><h2>Cómo terminó cada llamada</h2></div>
+    </header>
+    <div class="split donut-row">
+      <svg viewBox="0 0 {{ donut.size }} {{ donut.size }}" class="donut" role="img" aria-label="Distribución de resultados de llamada">
+        {% for s in donut.segments %}
+          <circle class="seg tone-{{ s.tone }}" cx="{{ donut.cx }}" cy="{{ donut.cy }}" r="{{ donut.r }}"
+                  fill="none" stroke-width="{{ donut.thickness }}"
+                  stroke-dasharray="{{ s.dash }}" stroke-dashoffset="{{ s.offset }}"
+                  transform="rotate(-90 {{ donut.cx }} {{ donut.cy }})">
+            <title>{{ s.label }}: {{ s.value|n }} ({{ s.pct|p }}%)</title>
+          </circle>
+        {% endfor %}
+        <text class="d-num mono" x="{{ donut.cx }}" y="{{ donut.cy - 2 }}">{{ r.traffic.asr|p }}%</text>
+        <text class="d-cap" x="{{ donut.cx }}" y="{{ donut.cy + 14 }}">contestan</text>
+      </svg>
+      <ul class="dlegend">
+        {% for s in donut.segments %}
+        <li><i class="dot tone-{{ s.tone }}"></i>
+          <span class="dl-label">{{ s.label }}</span>
+          <span class="mono dl-val">{{ s.value|n }}<em>{{ s.pct|p }}%</em></span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">Base de datos</span><h2>Estado del pipeline</h2></div>
+      <span class="mono muted">{{ r.pipeline.total|n if r.pipeline.available else '—' }} leads</span>
+    </header>
+    {% if r.pipeline.available %}
+      <ul class="hbars">
+        {% for s in pipebars %}
+        <li>
+          <span class="hb-label">{{ s.status|estado }}</span>
+          <span class="hb-track"><i style="width: {{ s.w }}%" class="st-{{ (s.status or 'none')|lower }}"></i></span>
+          <span class="hb-val mono">{{ s.n|n }}<em>{{ s.pct|p }}%</em></span>
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="ladder-foot compact">
+        <div><span class="lf-label">Pendientes por llamar</span><b class="mono">{{ r.pipeline.pending|n }}</b></div>
+        <div><span class="lf-label">En curso ahora</span><b class="mono">{{ r.pipeline.in_flight|n }}</b></div>
+        <div><span class="lf-label">No contactar</span><b class="mono">{{ r.pipeline.do_not_call|n }}</b></div>
+      </div>
+    {% else %}
+      <p class="notice">Sincronizá los leads con <b>WF14</b> para ver el estado del pipeline.</p>
+    {% endif %}
+  </section>
+</div>
+
+<!-- ══ TABLA DETALLE ═════════════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div><span class="eyebrow">Detalle</span><h2>Desglose por {{ 'hora' if r.grain=='hour' else 'día' if r.grain=='day' else 'mes' }}</h2></div>
+    <a class="btn" href="/export/daily.csv?period={{ p.period }}&start={{ p.start or '' }}&end={{ p.end or '' }}">Descargar CSV</a>
+  </header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Período</th><th class="r">Intentos</th><th class="r">Contestadas</th>
+          <th class="r">Tasa</th><th class="r">Sin respuesta</th><th class="r">Fallos</th>
+          <th class="r">Minutos</th><th class="r">Media</th><th class="r">Costo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in r.series|reverse %}
+        <tr>
+          <td class="mono">{{ row.bucket }}</td>
+          <td class="r mono">{{ row.total_calls|n }}</td>
+          <td class="r mono">{{ row.answered|n }}</td>
+          <td class="r mono"><span class="pill {{ 'good' if row.asr >= 12 else 'mid' if row.asr >= 8 }}">{{ row.asr|p }}%</span></td>
+          <td class="r mono muted">{{ row.no_answer|n }}</td>
+          <td class="r mono {{ 'bad-txt' if row.failed > row.total_calls * 0.05 }}">{{ row.failed|n }}</td>
+          <td class="r mono">{{ row.billed_minutes|n }}</td>
+          <td class="r mono muted">{{ row.acd|sec }}s</td>
+          <td class="r mono strong-txt">${{ row.cost|m }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Total</td>
+          <td class="r mono">{{ r.traffic.total_calls|n }}</td>
+          <td class="r mono">{{ r.traffic.answered|n }}</td>
+          <td class="r mono">{{ r.traffic.asr|p }}%</td>
+          <td class="r mono">{{ r.traffic.no_answer|n }}</td>
+          <td class="r mono">{{ r.traffic.tech_failures|n }}</td>
+          <td class="r mono">{{ r.traffic.billed_minutes|n }}</td>
+          <td class="r mono">{{ r.traffic.acd|sec }}s</td>
+          <td class="r mono">${{ r.traffic.cost|m }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</section>
+
+{% endblock %}

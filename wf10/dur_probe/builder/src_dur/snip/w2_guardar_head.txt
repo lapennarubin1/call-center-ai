@@ -1,0 +1,11 @@
+const out = [];
+let fails = 0;
+let deferred = 0;
+
+// Este nodo va DESPUÉS del registro diferido (MySQL): $input trae las claves confirmadas;
+// las llamadas clasificadas vienen del nodo Classify.
+const confirmedKeys = new Set(
+  $input.all().map(i => (i.json || {}).event_key).filter(Boolean).map(String)
+);
+
+for (const item of $('🔍 Classify Dial Result (Asterisk)').all()) {

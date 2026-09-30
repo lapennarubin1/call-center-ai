@@ -1,0 +1,88 @@
+{
+  "wf2": {
+    "in": "WF2_UNIFICADO_v2_PATCHED.json",
+    "nodes_before": 64,
+    "nodes_after": 66,
+    "added": [
+      "🧾 Build Deferred Ledger (Asterisk)",
+      "💾 Ledger Deferred (Asterisk)"
+    ],
+    "replacements": 6,
+    "connections": [
+      {
+        "from": "🔍 Classify Dial Result (Asterisk)",
+        "antes": [
+          [
+            "🏁 Guardar Resultado (Asterisk)"
+          ]
+        ],
+        "despues": [
+          [
+            "🧾 Build Deferred Ledger (Asterisk)"
+          ]
+        ]
+      },
+      {
+        "from": "🧾 Build Deferred Ledger (Asterisk)",
+        "antes": [],
+        "despues": [
+          [
+            "💾 Ledger Deferred (Asterisk)"
+          ]
+        ]
+      },
+      {
+        "from": "💾 Ledger Deferred (Asterisk)",
+        "antes": [],
+        "despues": [
+          [
+            "🏁 Guardar Resultado (Asterisk)"
+          ]
+        ]
+      }
+    ]
+  },
+  "wf9": {
+    "in": "WF9_PRODUCTION_FIXED_STRINGEE_RELIABILITY.json",
+    "nodes_before": 25,
+    "nodes_after": 27,
+    "added": [
+      "🧾 Build CDR SQL (Asterisk)",
+      "🗄️ CDR Asterisk (billsec)"
+    ],
+    "replacements": 20,
+    "connections": [
+      {
+        "from": "🔒 Claim + Leer Eventos (MySQL)",
+        "antes": [
+          [
+            "⚙️ Fase 1 — Activity CRM"
+          ]
+        ],
+        "despues": [
+          [
+            "🧾 Build CDR SQL (Asterisk)"
+          ]
+        ]
+      },
+      {
+        "from": "🧾 Build CDR SQL (Asterisk)",
+        "antes": [],
+        "despues": [
+          [
+            "🗄️ CDR Asterisk (billsec)"
+          ]
+        ]
+      },
+      {
+        "from": "🗄️ CDR Asterisk (billsec)",
+        "antes": [],
+        "despues": [
+          [
+            "⚙️ Fase 1 — Activity CRM"
+          ]
+        ]
+      }
+    ]
+  }
+}

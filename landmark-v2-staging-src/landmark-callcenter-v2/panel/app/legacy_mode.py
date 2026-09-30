@@ -1,0 +1,661 @@
+"""Modo de operación: V2_PRIMARY o LEGACY_BACKUP (§48-53).
+
+El problema que evita
+─────────────────────
+El call center viejo sigue instalado y sigue siendo utilizable — es el
+Plan B. Pero si los dos sistemas despachan a la vez, el mismo cliente
+recibe dos llamadas, se le abren dos cuentas o se le mandan dos links de
+pago. No es un problema de datos: es un problema con el cliente al
+teléfono.
+
+Por eso el cambio de modo no es un interruptor. Es:
+
+    1. sólo MASTER
+    2. confirmación explícita, escrita
+    3. el otro sistema tiene que estar apagado ANTES
+    4. queda auditado
+
+El modo es un ENCLAVAMIENTO, no un cartel
+──────────────────────────────────────────
+Una primera versión de este módulo sólo mostraba el modo en su pantalla
+y hacía un preflight al cambiarlo. No bastaba: con V2_PRIMARY puesto, un
+horario legacy podía despertar solo al despachador viejo a las 09:00 y
+empezar a llamar a los mismos clientes. El cartel decía una cosa y el
+sistema hacía otra.
+
+Ahora el modo se aplica en los tres sitios donde se puede empezar a
+llamar:
+
+  1. `guard_legacy_activation()` — un único guard que envuelve
+     `analytics.n8n_switch_set_state`. Como el encendido manual, el
+     masivo y el programado pasan todos por esa función, el guard los
+     cubre a los tres sin duplicar lógica ni tocar `analytics.py`.
+  2. `/api/routes/active` — en LEGACY_BACKUP devuelve cero rutas
+     invocables y lo dice, así que WF2 no tiene a quién llamar.
+  3. WF2 — lee `operating_mode` y termina antes de pedir leads.
+
+Apagar NUNCA se bloquea: un OFF siempre es seguro.
+
+Lo que sigue sin hacer
+──────────────────────
+No enciende workflows por su cuenta. §51 es explícito: no vale apagar
+todo a ciegas. Este módulo dice qué hay que apagar, impide encender lo
+que no toca, y deja el encendido deliberado en manos del usuario.
+
+Tampoco borra nada del legacy. Los grupos, sus workflow_ids, sus estados
+y sus horarios siguen donde estaban: sin ellos el Plan B sería una
+carpeta de documentación, no un plan (§52).
+
+Convivencia (§51)
+─────────────────
+No todos los grupos legacy estorban. Un job que sólo espeja el CRM a
+MySQL es idempotente y puede seguir corriendo. Uno que llama, no. La
+clasificación vive en `legacy_group_classification` y es fail-closed: lo
+que no está clasificado se trata como conflictivo.
+"""
+import re
+
+MODES = ('V2_PRIMARY', 'LEGACY_BACKUP')
+MODE_KEY = 'lm_operating_mode'
+MODE_AT_KEY = 'lm_operating_mode_changed_at'
+MODE_BY_KEY = 'lm_operating_mode_changed_by'
+
+# Categorías que NO pueden convivir con V2 encendido. Tocan al cliente:
+# lo llaman, le agendan, le abren cuenta, le cobran, o cuentan su llamada.
+CONFLICTING_CATEGORIES = ('DISPATCH', 'FOLLOWUP', 'ACCOUNT', 'PAYMENT',
+                          'POST_CALL', 'UNKNOWN')
+# Categorías que sí pueden convivir: sólo leen o son idempotentes.
+COEXISTING_CATEGORIES = ('CRM_SYNC', 'ANALYTICS', 'RECORDING')
+CATEGORIES = tuple(sorted(set(CONFLICTING_CATEGORIES + COEXISTING_CATEGORIES)))
+
+CATEGORY_HELP = {
+    'DISPATCH':  'Places calls. Two dispatchers means the customer is called twice.',
+    'FOLLOWUP':  'Schedules retries. Duplicating it books the same lead twice.',
+    'ACCOUNT':   'Opens trading accounts. Duplicating it opens two accounts.',
+    'PAYMENT':   'Creates payment links. Duplicating it can charge twice.',
+    'POST_CALL': 'Processes call results. Duplicating it double-counts the call.',
+    'RECORDING': 'Attaches recordings. A duplicate attachment is harmless.',
+    'CRM_SYNC':  'Mirrors CRM data into MySQL. Idempotent by design.',
+    'ANALYTICS': 'Reads and aggregates only.',
+    'UNKNOWN':   'Not classified. Treated as conflicting until someone classifies it.',
+}
+
+CONFIRMATION_PHRASE = {
+    'LEGACY_BACKUP': 'SWITCH TO LEGACY',
+    'V2_PRIMARY': 'SWITCH TO V2',
+}
+
+
+class ModeError(ValueError):
+    """El cambio de modo, o el encendido, no se puede hacer.
+
+    Hereda de ValueError A PROPÓSITO, no por comodidad.
+
+    El panel que ya existe captura `ValueError` alrededor de cada
+    encendido de switch, y `analytics.run_due_schedules()` hace lo mismo
+    en su barrido. Si el guard lanzara algo fuera de esa jerarquía:
+
+      · el encendido manual daría un HTTP 500 en vez de un error legible
+      · el planificador se rompería en el primer horario bloqueado y
+        dejaría de procesar los demás
+
+    Es decir: el guard sería correcto y aun así rompería el panel. Al
+    heredar de ValueError, un bloqueo viaja por el MISMO camino que
+    cualquier otro error de negocio del panel — se muestra, se registra y
+    el barrido continúa con el resto de horarios.
+
+    Esto NO debilita el guard: la decisión de bloquear se toma antes y no
+    depende del tipo de excepción; sólo cambia cómo se propaga.
+    """
+
+
+class PermissionDenied(ModeError):
+    pass
+
+
+# ── Lectura ──────────────────────────────────────────────────────────
+def current_mode(db):
+    """Operating mode. Unknown/missing/corrupt MUST fail closed."""
+    try:
+        r = db.one(
+            "SELECT setting_value AS v FROM app_settings WHERE setting_key=§",
+            (MODE_KEY,)
+        )
+    except Exception:
+        return 'UNKNOWN'
+
+    if not r or r.get('v') is None:
+        return 'UNKNOWN'
+
+    v = str(r.get('v') or '').strip().upper()
+    return v if v in MODES else 'UNKNOWN'
+
+
+def mode_info(db):
+    def read_setting(key):
+        try:
+            r = db.one(
+                "SELECT setting_value AS v FROM app_settings WHERE setting_key=§",
+                (key,)
+            )
+            return (r or {}).get('v') or None
+        except Exception:
+            return None
+
+    at = read_setting(MODE_AT_KEY)
+    by = read_setting(MODE_BY_KEY)
+    mode = current_mode(db)
+
+    if mode == 'V2_PRIMARY':
+        label = 'V2 primary'
+        other = 'LEGACY_BACKUP'
+    elif mode == 'LEGACY_BACKUP':
+        label = 'Legacy backup'
+        other = 'V2_PRIMARY'
+    else:
+        # Estado desconocido: la recuperación ofrecida por UI es el modo
+        # seguro, nunca asumir V2_PRIMARY.
+        label = 'Unknown — fail closed'
+        other = 'LEGACY_BACKUP'
+
+    return {
+        'mode': mode,
+        'label': label,
+        'changed_at': at,
+        'changed_by': by,
+        'other': other,
+        'confirmation_phrase': CONFIRMATION_PHRASE[other],
+    }
+
+
+def v2_dispatch_active(db):
+    """¿Hay alguna ruta V2 realmente en condiciones de llamar?
+
+    Es la conjunción de los tres interruptores más el archivado — la misma
+    que usa la API de rutas. Una ruta encendida bajo un país apagado NO
+    está llamando, y exigir apagarla también sería pedir trabajo inútil.
+    """
+    rows = db.q("""
+        SELECT r.route_key
+          FROM call_routes r
+          JOIN voice_providers vp ON vp.id = r.provider_id
+          JOIN countries c ON c.iso = r.iso
+         WHERE r.enabled = 1 AND r.archived_at IS NULL
+           AND vp.enabled = 1
+           AND c.enabled = 1 AND c.archived_at IS NULL
+         ORDER BY r.route_key""")
+    return [r['route_key'] for r in rows]
+
+
+def legacy_groups(db):
+    """Grupos legacy con su clasificación y, si se puede, su estado real.
+
+    El estado ON/OFF vive en n8n, no en la base. Si el panel no puede
+    consultarlo aquí, se devuelve None y el preflight lo trata como
+    'no verificable' — que NO es lo mismo que apagado.
+    """
+    if not db.table_exists('n8n_switches'):
+        return []
+    rows = db.q("""
+        SELECT s.id, s.label, s.workflow_ids,
+               g.category, g.coexists_with_v2, g.rationale
+          FROM n8n_switches s
+          LEFT JOIN legacy_group_classification g
+                 ON g.switch_id = s.id OR g.switch_label = s.label
+         ORDER BY s.label""")
+    out = []
+    for r in rows:
+        cat = r.get('category') or 'UNKNOWN'
+        ids = [x.strip() for x in (r.get('workflow_ids') or '').split(',') if x.strip()]
+        out.append({
+            'id': r['id'], 'label': r['label'],
+            'workflow_ids': ids, 'workflow_count': len(ids),
+            'category': cat,
+            'category_help': CATEGORY_HELP.get(cat, ''),
+            'coexists_with_v2': bool(r.get('coexists_with_v2')),
+            'conflicts': not bool(r.get('coexists_with_v2')),
+            'rationale': r.get('rationale'),
+            'classified': cat != 'UNKNOWN',
+        })
+    return out
+
+
+def compatibility_matrix(db):
+    """La matriz de §51, calculada desde la clasificación real."""
+    grupos = legacy_groups(db)
+    por_cat = {}
+    for g in grupos:
+        por_cat.setdefault(g['category'], []).append(g['label'])
+    return {
+        'categories': [{
+            'category': c,
+            'help': CATEGORY_HELP.get(c, ''),
+            'coexists_with_v2': c in COEXISTING_CATEGORIES,
+            'groups': sorted(por_cat.get(c, [])),
+        } for c in CATEGORIES],
+        'unclassified': sorted(g['label'] for g in grupos if not g['classified']),
+    }
+
+
+# ── El guard: una sola puerta para todo encendido legacy ─────────────
+class ActivationBlocked(ModeError):
+    """Se intentó encender un grupo legacy que el modo no permite."""
+
+
+def guard_legacy_activation(db, switch_id, turn_on, source='manual'):
+    """¿Se puede poner este grupo legacy en este estado, con el modo actual?
+
+    Devuelve (True, None) o (False, motivo). No lanza: quien llama decide
+    si eso es un error de usuario, una fila de auditoría o un last_error
+    del planificador.
+
+    Reglas:
+      · APAGAR siempre se permite. Un OFF nunca crea una llamada duplicada.
+      · En LEGACY_BACKUP se permite encender: el legacy es el sistema.
+      · En V2_PRIMARY sólo se permite encender lo clasificado como
+        conviviente. UNKNOWN cuenta como conflictivo — fail closed.
+    """
+    if not turn_on:
+        return True, None
+
+    modo = current_mode(db)
+    if modo == 'LEGACY_BACKUP':
+        return True, None
+
+    g = _group_for_switch(db, switch_id)
+    if g is None:
+        return False, (f'Operating mode is {modo} and this group is not '
+                       'classified, so the panel cannot tell whether it '
+                       'conflicts with V2. Classify it in Call Center → '
+                       'Legacy Backup first.')
+    if g['conflicts']:
+        return False, (f'Operating mode is {modo}. Group {g["label"]!r} is '
+                       f'{g["category"]}: {CATEGORY_HELP.get(g["category"], "")} '
+                       'Switch to LEGACY_BACKUP first if you need it running.')
+    return True, None
+
+
+def _group_for_switch(db, switch_id):
+    """La clasificación de un grupo, por id. None si no está clasificado."""
+    if not db.table_exists('n8n_switches'):
+        return None
+    r = db.one("""SELECT s.id, s.label, g.category, g.coexists_with_v2
+                    FROM n8n_switches s
+                    LEFT JOIN legacy_group_classification g
+                           ON g.switch_id = s.id OR g.switch_label = s.label
+                   WHERE s.id = §""", (switch_id,))
+    if not r or not r.get('label'):
+        return None
+    cat = r.get('category') or 'UNKNOWN'
+    if cat == 'UNKNOWN':
+        return None
+    return {'label': r['label'], 'category': cat,
+            'conflicts': not bool(r.get('coexists_with_v2'))}
+
+
+def install_activation_guard(analytics_module, get_db=None):
+    """Envuelve `analytics.n8n_switch_set_state` con el guard.
+
+    CUÁNDO se instala importa tanto como QUÉ hace. Ver la nota de
+    `v2_suite`: se llama al IMPORTAR ese módulo, no al registrar las
+    rutas, porque `server.py` arranca el hilo del planificador mucho
+    antes de registrar nada. Instalarlo en `register()` dejaba una
+    ventana en la que el planificador podía encender un grupo legacy sin
+    pasar por el guard.
+
+    Por qué así y no editando `analytics.py`: ese fichero es del panel
+    real y va byte a byte, con un test que lo verifica. Envolverlo desde
+    aquí cubre las TRES vías de encendido con una sola función, porque
+    todas terminan llamando a la misma:
+
+        /callcenter/<id>/on        →  an.n8n_switch_set_state(...)
+        Turn ON all                →  an.n8n_switch_set_state(...)
+        run_due_schedules()        →  n8n_switch_set_state(...)   (global del módulo)
+
+    Sustituir el atributo del módulo intercepta también la llamada
+    interna del planificador, que resuelve el nombre por el global del
+    módulo en cada invocación.
+
+    Idempotente: instalarlo dos veces no anida wrappers.
+    """
+    original = getattr(analytics_module, 'n8n_switch_set_state', None)
+    if original is None or getattr(original, '_lm_guarded', False):
+        return False
+
+    def guarded(db, switch_id, turn_on, *a, **kw):
+        ok, motivo = guard_legacy_activation(db, switch_id, turn_on,
+                                             source='switch')
+        if not ok:
+            _audit_block(db, switch_id, motivo, 'MANUAL')
+            raise ActivationBlocked(motivo)
+        return original(db, switch_id, turn_on, *a, **kw)
+
+    guarded._lm_guarded = True
+    guarded._lm_original = original
+    analytics_module.n8n_switch_set_state = guarded
+    _install_schedule_guard(analytics_module)
+    return True
+
+
+def _install_schedule_guard(analytics_module):
+    """El planificador necesita algo más que el guard: un ON bloqueado no
+    puede quedar como un error opaco. Se envuelve `run_due_schedules`
+    para que un bloqueo escriba un `last_error` legible en la fila del
+    horario, que es donde el usuario lo va a buscar (§1)."""
+    original = getattr(analytics_module, 'run_due_schedules', None)
+    if original is None or getattr(original, '_lm_guarded', False):
+        return
+
+    def guarded(db, *a, **kw):
+        try:
+            return original(db, *a, **kw)
+        finally:
+            _annotate_blocked_schedules(db)
+
+    guarded._lm_guarded = True
+    guarded._lm_original = original
+    analytics_module.run_due_schedules = guarded
+
+
+def _annotate_blocked_schedules(db):
+    """Deja escrito, en el propio horario, por qué no se encendió.
+
+    `n8n_switch_set_state` ya lanzó ActivationBlocked y el planificador
+    la guardó como last_error genérico; aquí se reescribe con la frase
+    que §1 pide, para que se lea sin tener que deducirla.
+    """
+    try:
+        filas = db.q("""SELECT s.id, s.switch_id, s.last_error
+                          FROM n8n_switch_schedules s
+                         WHERE s.last_error LIKE '%%Operating mode is%%'""")
+    except Exception:
+        return
+    modo = current_mode(db)
+    for f in filas:
+        if 'Scheduled activation blocked' in (f.get('last_error') or ''):
+            continue
+        db.execute("UPDATE n8n_switch_schedules SET last_error=§ WHERE id=§",
+                   (f'Scheduled activation blocked: operating mode is {modo}. '
+                    + (f.get('last_error') or ''), f['id']))
+        _audit_block(db, f.get('switch_id'), f.get('last_error'), 'SCHEDULE')
+
+
+def _audit_block(db, switch_id, motivo, source):
+    """Un bloqueo es información operativa: queda registrado."""
+    try:
+        etiqueta = None
+        if switch_id and db.table_exists('n8n_switches'):
+            r = db.one("SELECT label FROM n8n_switches WHERE id=§", (switch_id,))
+            etiqueta = (r or {}).get('label')
+        db.execute("""INSERT INTO billing_audit
+                        (scope, scope_ref, action, field, old_value, new_value,
+                         reason, actor)
+                      VALUES ('MODE',§,'ACTIVATION_BLOCKED','enabled','0','0',§,§)""",
+                   (etiqueta or (str(switch_id) if switch_id else 'unknown'),
+                    (motivo or '')[:255], f'guard:{source.lower()}'))
+    except Exception:
+        # El bloqueo ya ocurrió; no poder auditarlo no debe convertirlo
+        # en un permiso.
+        pass
+
+
+# ── Verificación REAL del estado del legacy ──────────────────────────
+def legacy_live_status(db, analytics_module):
+    """Estado REAL de cada grupo legacy, preguntándole a n8n.
+
+    El panel ya sabía hacer esto: `n8n_switches_with_status()` trae el
+    campo `active` de cada workflow con una sola llamada. Una versión
+    anterior de esta guía decía que el panel "no podía verificar" el
+    estado del legacy. Era falso, y esa frase convertía el enclavamiento
+    en un cartel.
+
+    Devuelve {'ok', 'error', 'groups': [...]}. `ok=False` significa que
+    n8n no contestó — y eso NO se trata como "todo apagado".
+    """
+    try:
+        switches, status_error = analytics_module.n8n_switches_with_status(db)
+    except Exception as ex:
+        return {'ok': False, 'error': str(ex), 'groups': []}
+    if status_error:
+        return {'ok': False, 'error': status_error, 'groups': []}
+
+    clasif = {g['label']: g for g in legacy_groups(db)}
+    out = []
+    for sw in switches:
+        g = clasif.get(sw['label'], {})
+        activos = [w for w in sw.get('workflows', []) if w.get('active') is True]
+        desconocidos = [w for w in sw.get('workflows', []) if w.get('active') is None]
+        out.append({
+            'label': sw['label'],
+            'category': g.get('category', 'UNKNOWN'),
+            'conflicts': g.get('conflicts', True),
+            'active_workflows': [w['name'] for w in activos],
+            'active_count': len(activos),
+            'unknown_count': len(desconocidos),
+            'is_on': bool(activos),
+        })
+    return {'ok': True, 'error': None, 'groups': out}
+
+
+# ── Preflight ────────────────────────────────────────────────────────
+def preflight(db, to_mode, analytics_module=None):
+    """Qué impide cambiar a `to_mode`, en frases que se pueden enseñar.
+
+    Devuelve {'ok': bool, 'blockers': [...], 'warnings': [...], 'actions': [...]}
+    `actions` es lo que el usuario tiene que hacer, no lo que hará el panel:
+    el panel no enciende ni apaga nada por su cuenta.
+
+    Con `analytics_module`, la vuelta a V2 se verifica DE VERDAD contra
+    n8n en vez de pedirle al usuario que mire. Si n8n no contesta, el
+    cambio se BLOQUEA: no saber si el despachador viejo está encendido
+    no es lo mismo que saber que está apagado, y tratarlo igual es
+    exactamente cómo se acaba llamando dos veces al mismo cliente.
+    """
+    to_mode = (to_mode or '').strip().upper()
+    if to_mode not in MODES:
+        raise ModeError(f'Unknown operating mode: {to_mode!r}')
+
+    desde = current_mode(db)
+    out = {'from': desde, 'to': to_mode, 'blockers': [], 'warnings': [],
+           'actions': [], 'ok': False}
+    if desde == to_mode:
+        out['warnings'].append(f'Already in {to_mode}.')
+        out['ok'] = True
+        return out
+
+    grupos = legacy_groups(db)
+    sin_clasificar = [g['label'] for g in grupos if not g['classified']]
+    conflictivos = [g for g in grupos if g['conflicts']]
+
+    if to_mode == 'LEGACY_BACKUP':
+        # §49: antes de dejar que el legacy llame, V2 tiene que estar apagado.
+        rutas = v2_dispatch_active(db)
+        if rutas:
+            out['blockers'].append(
+                'V2 is still able to place calls on these routes: '
+                + ', '.join(rutas) + '.')
+            out['actions'].append(
+                'Disable those routes (or their provider or country) in '
+                'Call Center → Countries before switching.')
+        out['warnings'].append(
+            'Legacy calling workflows stay OFF until you turn them on '
+            'yourself in Call Center. Switching the mode does not start them.')
+    else:
+        # §50: antes de que V2 llame, el legacy que estorba tiene que estar OFF.
+        # Y eso se COMPRUEBA, no se pide por favor.
+        if analytics_module is not None:
+            estado = legacy_live_status(db, analytics_module)
+            if not estado['ok']:
+                out['blockers'].append(
+                    'Cannot reach n8n to verify which legacy workflows are '
+                    f'running ({estado["error"]}). The switch is blocked: not '
+                    'knowing whether the legacy dispatcher is on is not the '
+                    'same as knowing it is off.')
+                out['actions'].append(
+                    'Fix n8n connectivity (N8N_API_URL / N8N_API_KEY) and try again.')
+            else:
+                encendidos = [g for g in estado['groups']
+                              if g['conflicts'] and g['is_on']]
+                if encendidos:
+                    for g in encendidos:
+                        out['blockers'].append(
+                            f'Legacy group {g["label"]!r} ({g["category"]}) is '
+                            'still running in n8n: '
+                            + ', '.join(g['active_workflows']) + '.')
+                    out['actions'].append(
+                        'Turn those groups OFF in Call Center, then switch.')
+                inciertos = [g for g in estado['groups']
+                             if g['conflicts'] and g['unknown_count']]
+                if inciertos:
+                    out['blockers'].append(
+                        'These conflicting groups reference workflows that n8n '
+                        'does not know about, so their state cannot be verified: '
+                        + ', '.join(g['label'] for g in inciertos) + '.')
+                if not encendidos and not inciertos:
+                    out['warnings'].append(
+                        'Verified against n8n: no conflicting legacy workflow '
+                        'is running.')
+        elif conflictivos:
+            # Sin acceso a n8n desde quien llama, se falla cerrado igual.
+            out['blockers'].append(
+                'The live state of the legacy groups could not be checked, so '
+                'the switch is blocked. Conflicting groups: '
+                + ', '.join(sorted(g['label'] for g in conflictivos)) + '.')
+        coexisten = [g['label'] for g in grupos if not g['conflicts']]
+        if coexisten:
+            out['warnings'].append(
+                'These legacy groups can keep running, they do not conflict: '
+                + ', '.join(sorted(coexisten)) + '.')
+
+    if sin_clasificar and _flag(db, 'legacy_unknown_blocks_switch', True):
+        out['blockers'].append(
+            'These legacy groups are not classified, so the panel cannot tell '
+            'whether they conflict: ' + ', '.join(sin_clasificar) + '.')
+        out['actions'].append(
+            'Classify them in Call Center → Legacy Backup, then switch.')
+
+    out['ok'] = not out['blockers']
+    return out
+
+
+def _flag(db, key, default=True):
+    r = db.one("SELECT setting_value AS v FROM wf_settings WHERE setting_key=§", (key,))
+    if not r or r.get('v') is None:
+        return default
+    return str(r['v']).strip() in ('1', 'true', 'True', 'yes')
+
+
+# ── Escritura ────────────────────────────────────────────────────────
+def set_mode(db, actor, role, to_mode, confirmation=None, reason=None,
+             now=None, analytics_module=None):
+    """Cambia el modo. Falla con un mensaje legible si no se puede.
+
+    role: el rol de la sesión. §54 — sólo MASTER.
+    confirmation: la frase exacta, tecleada por el usuario.
+    """
+    if (role or '').lower() != 'master':
+        raise PermissionDenied(
+            'Only the MASTER role can change the operating mode.')
+
+    to_mode = (to_mode or '').strip().upper()
+    if to_mode not in MODES:
+        raise ModeError(f'Unknown operating mode: {to_mode!r}')
+
+    desde = current_mode(db)
+    if desde == to_mode:
+        return {'changed': False, 'mode': desde,
+                'message': f'Already in {to_mode}.'}
+
+    if _flag(db, 'legacy_mode_requires_confirmation', True):
+        esperado = CONFIRMATION_PHRASE[to_mode]
+        if (confirmation or '').strip() != esperado:
+            raise ModeError(
+                f'Type {esperado!r} to confirm. This changes which system is '
+                'allowed to call customers.')
+
+    pf = preflight(db, to_mode, analytics_module)
+    if not pf['ok']:
+        raise ModeError(' '.join(pf['blockers'] + pf['actions']))
+
+    ts = now or _now(db)
+    _set_setting(db, MODE_KEY, to_mode)
+    _set_setting(db, MODE_AT_KEY, ts)
+    _set_setting(db, MODE_BY_KEY, actor)
+
+    # §53: quién, cuándo, desde dónde, hacia dónde, por qué, resultado.
+    db.execute("""INSERT INTO billing_audit
+                    (scope, scope_ref, action, field, old_value, new_value,
+                     reason, actor)
+                  VALUES ('MODE','operating_mode','MODE_CHANGE','mode',§,§,§,§)""",
+               (desde, to_mode, (reason or None), actor))
+    return {'changed': True, 'mode': to_mode, 'from': desde,
+            'warnings': pf['warnings'],
+            'message': f'Operating mode changed from {desde} to {to_mode}.'}
+
+
+def classify_group(db, actor, role, label, category, coexists=None,
+                   rationale=None):
+    """Clasifica un grupo legacy. Sólo MASTER: de esto depende que el
+    panel deje o no convivir dos sistemas que llaman."""
+    if (role or '').lower() != 'master':
+        raise PermissionDenied('Only the MASTER role can classify legacy groups.')
+    category = (category or '').strip().upper()
+    if category not in CATEGORIES:
+        raise ModeError(f'Unknown category {category!r}. '
+                        f'Valid: {", ".join(CATEGORIES)}.')
+    if coexists is None:
+        coexists = category in COEXISTING_CATEGORIES
+    coexists = 1 if coexists else 0
+    # Una categoría conflictiva no se puede marcar como conviviente: sería
+    # decir "esto llama, pero déjalo llamar a la vez que V2".
+    if coexists and category in ('DISPATCH', 'FOLLOWUP', 'ACCOUNT',
+                                 'PAYMENT', 'POST_CALL'):
+        raise ModeError(
+            f'A {category} group cannot be marked as coexisting with V2: '
+            + CATEGORY_HELP[category])
+
+    prev = db.one("""SELECT category, coexists_with_v2
+                       FROM legacy_group_classification WHERE switch_label=§""",
+                  (label,))
+    sid = db.one("SELECT id FROM n8n_switches WHERE label=§", (label,)) \
+        if db.table_exists('n8n_switches') else None
+    db.execute("""INSERT INTO legacy_group_classification
+                    (switch_id, switch_label, category, coexists_with_v2,
+                     rationale, classified_by)
+                  VALUES (§,§,§,§,§,§)
+                  ON DUPLICATE KEY UPDATE
+                    switch_id = VALUES(switch_id),
+                    category = VALUES(category),
+                    coexists_with_v2 = VALUES(coexists_with_v2),
+                    rationale = VALUES(rationale),
+                    classified_by = VALUES(classified_by)""",
+               ((sid or {}).get('id'), label, category, coexists,
+                rationale or None, actor))
+    db.execute("""INSERT INTO billing_audit
+                    (scope, scope_ref, action, field, old_value, new_value,
+                     reason, actor)
+                  VALUES ('MODE',§,'CLASSIFY','category',§,§,§,§)""",
+               (label, (prev or {}).get('category'), category,
+                rationale or None, actor))
+    return True
+
+
+def _set_setting(db, key, value):
+    db.execute("""INSERT INTO app_settings (setting_key, setting_value)
+                  VALUES (§,§)
+                  ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)""",
+               (key, value))
+
+
+def _now(db):
+    r = db.one("SELECT NOW() AS n")
+    return str(r.get('n') or '')
+
+
+def mode_audit(db, limit=50):
+    return db.q("""SELECT scope_ref, action, field, old_value, new_value,
+                          reason, actor, changed_at
+                     FROM billing_audit
+                    WHERE scope='MODE'
+                    ORDER BY changed_at DESC, id DESC
+                    LIMIT """ + str(int(limit)))

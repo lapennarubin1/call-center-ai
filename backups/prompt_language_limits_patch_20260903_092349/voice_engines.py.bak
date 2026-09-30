@@ -1,0 +1,38 @@
+"""Catalogo interno de motores de voz IA — METADATA, no funcionalidad real.
+
+Ningun proveedor de esta lista se conecta de verdad en este bloque: cero
+requests reales, cero creditos consumidos. Es preparacion conceptual para
+cuando existan varios proveedores con capacidades distintas (punto G).
+
+Punto F (UI provider-neutral): la UI normal del cliente NUNCA debe mostrar
+"internal_label" — estos nombres son para uso interno/logs/futuro admin,
+no para la pantalla que ve un tenant. voice_provider en la tabla agents
+sigue siendo 'elevenlabs' por compatibilidad; eso no cambia.
+"""
+
+VOICE_ENGINES: dict[str, dict] = {
+    "elevenlabs": {
+        "internal_label": "ElevenLabs",  # NUNCA renderizar en UI normal del cliente
+        "status": "available",
+        "capabilities": ["conversational_agent", "tts", "multilingual"],
+    },
+    "openai_realtime": {
+        "internal_label": "OpenAI Realtime",
+        "status": "planned",
+        "capabilities": ["realtime_conversation", "voice"],
+    },
+    "fish_audio": {
+        "internal_label": "Fish Audio",
+        "status": "planned",
+        "capabilities": ["tts", "voice_clone", "streaming"],
+    },
+}
+
+# Unico motor aceptado como valor real en este bloque — el resto es
+# metadata/planned, no algo que un tenant pueda elegir todavia.
+DEFAULT_ENGINE = "elevenlabs"
+ALLOWED_ENGINES = {DEFAULT_ENGINE}
+
+
+def is_allowed_engine(key: str | None) -> bool:
+    return key in ALLOWED_ENGINES

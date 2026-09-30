@@ -1,0 +1,261 @@
+Landmark audit — 2026-09-23 12:05 UTC — ventana 7 días
+
+══════ 0. Servicios y errores del panel ══════
+active active active active
+
+══════ 1. Zona horaria MySQL (debe coincidir con UTC) ══════
++--------+------+---------------------+---------------------+
+| gtz    | stz  | now_db              | utc_db              |
++--------+------+---------------------+---------------------+
+| SYSTEM | UTC  | 2026-09-23 12:05:05 | 2026-09-23 12:05:05 |
++--------+------+---------------------+---------------------+
+
+══════ 2. Tablas y columnas clave ══════
+cdr_panel: id,calldate,clid,src,dst,dcontext,channel,dstchannel,lastapp,lastdata,duration,billsec,disposition,accountcode,uniqueid
+crm_leads: lead_id,full_name,phone,country,country_code,language,status,stage,call_attempts,do_not_call,last_contacted_at,next_follow_up_at,provider,synced_at
+crm_conversions: lead_id,full_name,phone,country,provider,stage,created_at,synced_at,account_opened_at
+stringee_calls: id,call_id,conversation_id,lead_id,phone,country,answered,duration_secs,start_time,answer_time,stop_time,created_at,sheet_synced,sheet_synced_recording
+wf_call_followups: id,phone,lead_id,followup_id,provider,outcome,call_status,recording_synced,created_at
+wf2_provider_config: provider,enabled,updated_at
+support_actions: id,created_at,actor,country,action,phone,full_name,amount,currency,result,detail
+panel_sync_log: id,source,rows_in,status,message,synced_at
+
+══════ 3. CUENTAS ABIERTAS — ¿dónde se cortan? ══════
++-----------------+------------------+-------------------+---------------+---------------------+
+| crm_leads_total | leads_interested | conversions_total | conv_sin_lead | ultimo_sync_leads   |
++-----------------+------------------+-------------------+---------------+---------------------+
+|           18857 |                0 |                 0 |             0 | 2026-09-23 12:04:17 |
++-----------------+------------------+-------------------+---------------+---------------------+
++--------+---------+--------+---------+---------------------+
+| source | rows_in | status | message | synced_at           |
++--------+---------+--------+---------+---------------------+
+| crm    |   18771 | ok     | NULL    | 2026-09-23 08:04:19 |
+| crm    |   18771 | ok     | NULL    | 2026-09-23 07:58:18 |
+| crm    |   18771 | ok     | NULL    | 2026-09-23 07:53:19 |
+| crm    |   18771 | ok     | NULL    | 2026-09-23 07:48:21 |
+| crm    |   18771 | ok     | NULL    | 2026-09-23 07:43:20 |
++--------+---------+--------+---------+---------------------+
+-- últimas conversiones:
+-- leads con stage INTERESTED:
+-- aperturas pedidas desde Support/Telegram (últimas 10):
++---------------------+-------------------------+---------+--------------+--------+--------------+
+| created_at          | actor                   | country | phone        | result | detail       |
++---------------------+-------------------------+---------+--------------+--------+--------------+
+| 2026-09-10 07:10:21 | telegram:spartacuss2026 | india   | 919535983796 | ok     | {"ok": true} |
+| 2026-08-27 13:52:42 | telegram:spartacuss2026 | india   | 919535983796 | ok     | {"ok": true} |
+| 2026-08-27 13:34:58 | telegram:spartacuss2026 | india   | 919535983796 | ok     | {"ok": true} |
+| 2026-08-27 13:34:58 | telegram:spartacuss2026 | india   | 919535983796 | ok     | {"ok": true} |
+| 2026-08-27 13:34:11 | telegram:spartacuss2026 | india   | 919535983796 | ok     | {"ok": true} |
+| 2026-08-27 13:06:04 | master                  | india   | 919535983796 | ok     | {"ok": true} |
++---------------------+-------------------------+---------+--------------+--------+--------------+
+
+══════ 4. ASTERISK — trunk de salida vs país del número (últimos 7 días) ══════
+-- Cada trunk debe llamar SOLO a su país: proveedor1→india, proveedor-mx→mexico, proveedor-nepal→nepal
++--------------+--------------+----------+-------------+----------+
+| trunk        | pais_destino | llamadas | contestadas | min_fact |
++--------------+--------------+----------+-------------+----------+
+| proveedor-mx | mexico       |     5404 |        1470 |     1470 |
+| proveedor1   | (no-país)    |   140332 |           0 |        0 |
+| proveedor1   | india        |    10232 |        1942 |     2172 |
+| proveedor1   | nepal        |     1002 |           7 |       13 |
+| proveedor1   | mexico       |      727 |         173 |      173 |
++--------------+--------------+----------+-------------+----------+
+-- *** CRUCES (trunk de un país marcando a otro país) ***
++---------------------+-----------------+---------------------------+-------------+---------+
+| calldate            | dst             | dstchannel                | disposition | billsec |
++---------------------+-----------------+---------------------------+-------------+---------+
+| 2026-09-23 11:47:54 | 901112342743900 | PJSIP/proveedor1-00002bcf | FAILED      |       0 |
+| 2026-09-23 10:11:09 | 901112342743900 | PJSIP/proveedor1-00002bcd | FAILED      |       0 |
+| 2026-09-23 09:18:39 | 901112342743900 | PJSIP/proveedor1-00002bcb | FAILED      |       0 |
+| 2026-09-23 08:46:29 | +9779635332030  | PJSIP/proveedor1-00002bc9 | NO ANSWER   |       0 |
+| 2026-09-23 08:46:29 | +9779949330082  | PJSIP/proveedor1-00002bb9 | NO ANSWER   |       0 |
+| 2026-09-23 08:46:29 | +9779960772598  | PJSIP/proveedor1-00002bb5 | NO ANSWER   |       0 |
+| 2026-09-23 08:46:29 | +9779919707875  | PJSIP/proveedor1-00002bbb | NO ANSWER   |       0 |
+| 2026-09-23 08:46:29 | +9779977018091  | PJSIP/proveedor1-00002bb7 | NO ANSWER   |       0 |
+| 2026-09-23 08:46:29 | +9779998402742  | PJSIP/proveedor1-00002bb3 | NO ANSWER   |       0 |
+| 2026-09-23 08:46:29 | +9779953128053  | PJSIP/proveedor1-00002bc5 | NO ANSWER   |       0 |
+| 2026-09-23 08:46:29 | +9779729194286  | PJSIP/proveedor1-00002bbd | NO ANSWER   |       0 |
+| 2026-09-23 08:46:29 | +9779885282553  | PJSIP/proveedor1-00002bc7 | NO ANSWER   |       0 |
+| 2026-09-23 08:46:29 | +9779909119378  | PJSIP/proveedor1-00002bbf | NO ANSWER   |       0 |
+| 2026-09-23 08:02:49 | +9779729194286  | PJSIP/proveedor1-00002ba1 | NO ANSWER   |       0 |
+| 2026-09-23 08:02:48 | +9779949330082  | PJSIP/proveedor1-00002b9b | NO ANSWER   |       0 |
+| 2026-09-23 08:02:48 | +9779635332030  | PJSIP/proveedor1-00002b97 | NO ANSWER   |       0 |
+| 2026-09-23 08:02:48 | +9779977018091  | PJSIP/proveedor1-00002b91 | NO ANSWER   |       0 |
+| 2026-09-23 08:02:48 | +9779953128053  | PJSIP/proveedor1-00002b7b | NO ANSWER   |       0 |
+| 2026-09-23 08:02:48 | +9779998402742  | PJSIP/proveedor1-00002b8d | NO ANSWER   |       0 |
+| 2026-09-23 08:02:48 | +9779960772598  | PJSIP/proveedor1-00002b90 | NO ANSWER   |       0 |
+| 2026-09-23 08:02:48 | +9779919707875  | PJSIP/proveedor1-00002b87 | NO ANSWER   |       0 |
+| 2026-09-23 08:02:48 | +9779885282553  | PJSIP/proveedor1-00002b81 | NO ANSWER   |       0 |
+| 2026-09-23 08:02:48 | +9779909119378  | PJSIP/proveedor1-00002b9d | NO ANSWER   |       0 |
+| 2026-09-23 08:01:51 | +9779729194286  | PJSIP/proveedor1-00002b79 | NO ANSWER   |       0 |
+| 2026-09-23 08:01:50 | +9779949330082  | PJSIP/proveedor1-00002b73 | NO ANSWER   |       0 |
++---------------------+-----------------+---------------------------+-------------+---------+
+-- CDR sin país reconocible (ruido o formato raro):
++------------+-------+------+
+| dst_inicio | largo | n    |
++------------+-------+------+
+| 001980     |    13 | 4625 |
+| 700198     |    14 | 4623 |
+| +19802     |    12 | 4620 |
+| 008198     |    14 | 4617 |
+| 198028     |    11 | 4617 |
+| 600198     |    14 | 4617 |
+| 500019     |    15 | 4617 |
+| 300019     |    15 | 4613 |
+| 900819     |    15 | 4613 |
+| 800019     |    15 | 4612 |
++------------+-------+------+
+-- Números marcados >5 veces en un mismo día (posible loop):
++------------+-----------------+----------+
+| dia        | dst             | intentos |
++------------+-----------------+----------+
+| 2026-09-18 | 0019802897421   |     4509 |
+| 2026-09-18 | 70019802897421  |     4508 |
+| 2026-09-18 | +19802897421    |     4504 |
+| 2026-09-18 | 500019802897421 |     4501 |
+| 2026-09-18 | 19802897421     |     4501 |
+| 2026-09-18 | 60019802897421  |     4501 |
+| 2026-09-18 | 00819802897421  |     4500 |
+| 2026-09-18 | 300019802897421 |     4498 |
+| 2026-09-18 | 900719802897421 |     4497 |
+| 2026-09-18 | 900819802897421 |     4497 |
+| 2026-09-18 | 900019802897421 |     4496 |
+| 2026-09-18 | 800019802897421 |     4496 |
+| 2026-09-18 | 900919802897421 |     4495 |
+| 2026-09-18 | 200019802897421 |     4494 |
+| 2026-09-18 | 900219802897421 |     4494 |
++------------+-----------------+----------+
+
+══════ 5. STRINGEE — país etiquetado vs número real ══════
++---------+------+--------------------------+--------------------------+
+| country | n    | desde                    | hasta                    |
++---------+------+--------------------------+--------------------------+
+| india   | 2837 | 2026-09-08 08:01:14.2080 | 2026-09-23 08:47:18.3260 |
+| nepal   |    6 | 2026-09-22 08:41:05.2210 | 2026-09-22 09:36:05.6010 |
+| unknown |  154 | 2026-09-08 08:59:48.1730 | 2026-09-23 07:24:02.2230 |
++---------+------+--------------------------+--------------------------+
+-- columna de número: phone  — *** CRUCES (country dice una cosa, el número otra) ***
++---------+------------+-----+
+| country | pais_real  | n   |
++---------+------------+-----+
+| unknown | (no-país)  | 154 |
+| india   | (no-país)  |   2 |
++---------+------------+-----+
+
+══════ 6. CRM — país guardado vs teléfono, y proveedor por país ══════
++------------------+--------------+-------+
+| country_guardado | pais_por_tel | n     |
++------------------+--------------+-------+
+| india            | india        | 18419 |
+| nepal            | nepal        |   394 |
+| india            | (no-E164)    |    44 |
++------------------+--------------+-------+
++-----------+----------+---------------+-------+
+| pais      | provider | status        | n     |
++-----------+----------+---------------+-------+
+| (no-E164) | (null)   | NOT_CONTACTED |    44 |
+| india     | (null)   | NOT_CONTACTED | 17181 |
+| india     | asterisk | ATTEMPTING    |   320 |
+| india     | asterisk | CONTACTED     |   304 |
+| india     | asterisk | NOT_CONTACTED |    50 |
+| india     | stringee | ATTEMPTING    |   421 |
+| india     | stringee | CONTACTED     |    93 |
+| india     | stringee | NOT_CONTACTED |    50 |
+| nepal     | (null)   | NOT_CONTACTED |   355 |
+| nepal     | asterisk | ATTEMPTING    |    20 |
+| nepal     | asterisk | NOT_CONTACTED |    12 |
+| nepal     | asterisk | CONTACTED     |     1 |
+| nepal     | stringee | ATTEMPTING    |     6 |
++-----------+----------+---------------+-------+
+-- *** Stringee fuera de India (no debería existir) ***
++--------------------------------------+----------------+---------+------------+
+| lead_id                              | phone          | country | status     |
++--------------------------------------+----------------+---------+------------+
+| 352a8dd0-3764-4ab4-8a09-63203c4ca6f4 | +9779962087499 | nepal   | ATTEMPTING |
+| 523de89a-5bd5-4d98-9fd1-d0e2e804f9d4 | +9779662276656 | nepal   | ATTEMPTING |
+| 9a47084b-5d26-410b-bcfd-8a48fda527dc | +9779798108060 | nepal   | ATTEMPTING |
+| b4bdf671-8d0b-4d46-b549-275836e17119 | +9779646738566 | nepal   | ATTEMPTING |
+| d669a1dd-4405-446a-8b59-d9a58b1dc595 | +9779770773934 | nepal   | ATTEMPTING |
+| fa2f8c04-dcbc-4a01-901c-948f35bf8f4e | +9779788309893 | nepal   | ATTEMPTING |
++--------------------------------------+----------------+---------+------------+
+
+══════ 7. MISMO LEAD POR DOS PROVEEDORES (últimos 3 días) ══════
++----------+-----------+-----------+------+
+| provider | pais      | outcome   | n    |
++----------+-----------+-----------+------+
+| asterisk | (no-E164) | CONNECTED |   21 |
+| asterisk | (no-E164) | NO_ANSWER |  405 |
+| asterisk | india     | CONNECTED | 1340 |
+| asterisk | india     | NO_ANSWER |  112 |
+| asterisk | nepal     | CONNECTED |    4 |
+| stringee | india     | CONNECTED |  135 |
+| stringee | india     | NO_ANSWER |   19 |
++----------+-----------+-----------+------+
+-- leads con followups de Asterisk Y Stringee:
++--------------------------------------+-------------------+----+---------------------+---------------------+
+| lead_id                              | provs             | n  | primero             | ultimo              |
++--------------------------------------+-------------------+----+---------------------+---------------------+
+| 3cfd5a72-77e5-4cc1-9dad-3e90ee02f365 | asterisk,stringee | 19 | 2026-09-21 08:29:06 | 2026-09-22 12:35:08 |
+| 501b613c-2a38-4ce6-8317-29928817760d | asterisk,stringee | 19 | 2026-09-21 09:13:14 | 2026-09-22 12:22:49 |
+| 5f5091ba-aae1-4e36-affe-1ac9a7e303dc | asterisk,stringee | 19 | 2026-09-21 09:13:19 | 2026-09-22 12:31:13 |
+| e9ff55bc-f751-460c-ae22-868e5ab9c7c9 | asterisk,stringee | 14 | 2026-09-21 08:59:08 | 2026-09-22 12:14:04 |
+| f06932ea-b2e5-4670-af4c-5f1f756c4912 | asterisk,stringee | 14 | 2026-09-21 12:20:10 | 2026-09-23 07:47:32 |
+| a6257dbd-bd2d-4582-833d-f58aa1ac70d8 | asterisk,stringee | 13 | 2026-09-21 13:01:49 | 2026-09-23 07:15:45 |
+| cd965ad1-0338-4981-9c4a-dd0b5ec02076 | asterisk,stringee | 13 | 2026-09-21 09:45:10 | 2026-09-22 12:15:11 |
+| 6497df44-8400-4a27-bbce-84ebff95d1bc | asterisk,stringee | 11 | 2026-09-21 09:13:19 | 2026-09-22 12:24:50 |
+| ae86e1bd-0bb9-4952-b087-450e3b62e4a5 | asterisk,stringee | 11 | 2026-09-21 09:21:03 | 2026-09-22 12:31:12 |
+| 395555d4-99b4-4c51-be9e-3562ec5fa307 | asterisk,stringee | 10 | 2026-09-21 10:05:20 | 2026-09-22 11:56:19 |
+| a66d8bbb-b366-4928-becb-ac3616d2e0ac | asterisk,stringee | 10 | 2026-09-21 09:11:09 | 2026-09-23 07:40:20 |
+| bcdb4b17-d970-441e-ab50-265834dcd654 | asterisk,stringee | 10 | 2026-09-21 09:00:31 | 2026-09-22 12:07:18 |
+| fa83d967-fcd6-4bc8-b27b-e91f3fd1290d | asterisk,stringee |  9 | 2026-09-21 13:17:10 | 2026-09-22 12:43:44 |
+| 12db6f8a-9be5-49fd-9052-27c1a7fc9cb7 | asterisk,stringee |  8 | 2026-09-21 10:55:30 | 2026-09-22 12:09:07 |
+| 233f1e87-59cf-4f96-a0e3-2411463b3886 | asterisk,stringee |  8 | 2026-09-21 10:37:56 | 2026-09-21 12:59:10 |
++--------------------------------------+-------------------+----+---------------------+---------------------+
+-- mismo número en CDR Asterisk y en Stringee el mismo día:
++------------+------------+-------------------+-------------------+
+| dia        | numero     | llamadas_asterisk | llamadas_stringee |
++------------+------------+-------------------+-------------------+
+| 2026-09-23 | 6351114909 |                 9 |                 1 |
+| 2026-09-23 | 6371520332 |                 6 |                 1 |
+| 2026-09-23 | 6372467137 |                12 |                 1 |
+| 2026-09-23 | 7066931203 |                29 |                25 |
+| 2026-09-23 | 7077608670 |                 2 |                 1 |
+| 2026-09-23 | 7735364726 |                13 |                 1 |
+| 2026-09-23 | 7788025146 |                16 |                 3 |
+| 2026-09-23 | 7853942521 |                 5 |                 1 |
+| 2026-09-23 | 7978646350 |                22 |                10 |
+| 2026-09-23 | 8249384278 |                19 |                 1 |
+| 2026-09-23 | 8590158632 |                11 |                 2 |
+| 2026-09-23 | 8593858285 |                13 |                 1 |
+| 2026-09-23 | 8799714575 |                10 |                 1 |
+| 2026-09-23 | 8815228317 |                12 |                 1 |
+| 2026-09-23 | 8917406575 |                 3 |                 1 |
++------------+------------+-------------------+-------------------+
+
+══════ 8. Control WF2 por proveedor ══════
++----------+---------+---------------------+
+| provider | enabled | updated_at          |
++----------+---------+---------------------+
+| asterisk |       1 | 2026-09-15 09:22:11 |
+| stringee |       1 | 2026-09-15 09:22:11 |
++----------+---------+---------------------+
+
+══════ 9. Asterisk — trunks y rutas de salida ══════
+<Endpoint/CID.....................................> <State.....> <Channels.>
+elevenlabs Unavailable 0
+ext100 Not in
+proveedor-mx Not in
+proveedor-nepal Not in
+proveedor1 Not in
+stringee-test Not in
+-- líneas Dial() hacia trunks en el dialplan:
+/etc/asterisk/extensions.conf:5:exten => _+52XXXXXXXXXX,1,NoOp(== Llamada ElevenLabs Mexico - SIN CID rotation ==)
+/etc/asterisk/extensions.conf:7: same => n,Dial(PJSIP/${EXTEN}@proveedor-mx,60)
+/etc/asterisk/extensions.conf:10:exten => _+977X.,1,NoOp(== Llamada ElevenLabs Nepal ==)
+/etc/asterisk/extensions.conf:13: same => n,Dial(PJSIP/${NEPAL_NUMBER}@proveedor1,60)
+/etc/asterisk/extensions.conf:18: same => n,Dial(PJSIP/${EXTEN}@proveedor1,60)
+/etc/asterisk/extensions.conf:21:exten => _X.,1,NoOp(== Llamada ElevenLabs sin + ==)
+/etc/asterisk/extensions.conf:23: same => n,Dial(PJSIP/${EXTEN}@proveedor1,60)
+/etc/asterisk/extensions.conf:27:exten => _.,1,NoOp(== Entrante desde proveedor ==)
+/etc/asterisk/extensions.conf:34:exten => _+52XXXXXXXXXX,1,NoOp(Llamada saliente Mexico)
+/etc/asterisk/extensions.conf:35: same => n,Dial(PJSIP/${EXTEN}@proveedor-mx,60)

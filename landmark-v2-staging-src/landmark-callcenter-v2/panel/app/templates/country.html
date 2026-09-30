@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}Panel · {{ country.country_name }}{% endblock %}
+
+{#
+  ADD COUNTRY — checklist. Secciones en el orden del brief:
+  GENERAL · CALLING ROUTES · FOLLOW-UP · RECORDINGS · ACCOUNT CREATION ·
+  PAYMENT LINK · CALLBACK · VALIDATE
+  Una ruta se puede guardar incompleta mientras esté DISABLED. Activarla
+  corre la validación completa; si falta algo, no se activa.
+#}
+
+{% block content %}
+
+<nav class="countries" aria-label="Call Center">
+  <a class="chip" href="/callcenter/routes">← Countries &amp; Routes</a>
+  <a class="chip on" href="/callcenter/countries/{{ country.iso }}">{{ country.iso }} · {{ country.country_name }}</a>
+</nav>
+
+{% if error %}<p class="notice stale-warn">{{ error }}</p>{% endif %}
+{% if applied and not error %}
+<p class="notice" style="border-left-color: var(--ok); background:#12392C; color: var(--ink-2)">Saved.</p>
+{% endif %}
+
+<!-- ══ VALIDATE — resumen arriba, para verlo primero ════════════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div><span class="eyebrow">Validate configuration</span>
+      <h2>{{ country.iso }}
+        {% if country.enabled %}<span class="pill good">COUNTRY ON</span>{% else %}<span class="pill">COUNTRY OFF</span>{% endif %}
+        {% if country_report.ready %}<span class="pill good">COUNTRY READY</span>{% else %}<span class="pill mid">COUNTRY NOT READY</span>{% endif %}
+        <span class="pill {{ 'good' if country_report.routes_ready else 'mid' }}">ROUTES READY {{ country_report.routes_ready }}/{{ country_report.routes_total }}</span>
+        {% if country_report.tools_ready %}<span class="pill good">TOOLS READY</span>{% else %}<span class="pill mid">TOOLS NOT READY</span>{% endif %}
+      </h2></div>
+    <div>{% if not country.archived_at %}
+      <form method="post" action="/callcenter/countries/{{ country.iso }}/{{ 'disable' if country.enabled else 'enable' }}">
+        <button class="btn {{ 'ghost' if country.enabled }}">{{ 'Turn country OFF' if country.enabled else 'Turn country ON' }}</button></form>
+    {% endif %}</div>
+  </header>
+  {% if country_report.issues %}
+  <p class="notice stale-warn">{% for i in country_report.issues %}{{ i.message }}<br>{% endfor %}</p>
+  {% endif %}
+  <p class="cap">El país se puede encender sin rutas READY (staging): simplemente no llama.
+     Una ruta llama solo si país ON ∧ proveedor ON ∧ ruta ON ∧ ROUTE READY ∧ COUNTRY READY ∧ horario.</p>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <tbody>
+      {% for r in routes %}
+        <tr>
+          <td class="mono"><a href="#route-{{ r.id }}">{{ r.route_key }}</a></td>
+          <td>
+            {% if r.status == 'ARCHIVED' %}<span class="pill">ARCHIVED</span>
+            {% elif r.ready %}<span class="pill good">READY TO ACTIVATE</span>
+            {% else %}<span class="pill mid">NOT READY</span>{% endif %}
+            {% if r.status == 'ACTIVE' %}<span class="pill good">ACTIVE</span>{% endif %}
+            {% if r.calling_now %}<span class="pill good">CALLING NOW · cap {{ r.capacity_now }}</span>
+            {% elif r.status != 'ARCHIVED' %}<span class="cap">no llama: {{ r.blocked_by|join(' · ') }}</span>{% endif %}
+          </td>
+          <td class="cap">
+            {% if r.status != 'ARCHIVED' and not r.ready %}
+              Missing:
+              <ul style="margin:4px 0 0 16px">{% for i in r.config_issues %}<li>{{ i.message }}</li>{% endfor %}</ul>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td class="cap">Sin rutas todavía — agregá una en CALLING ROUTES.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══ GENERAL ══════════════════════════════════════════════════════ -->
+<section class="panel" style="margin-top:16px">
+  <header class="panel-head">
+    <div><span class="eyebrow">General</span><h2>{{ country.country_name }} {% if country.archived_at %}<span class="pill">archived</span>{% endif %}</h2></div>
+  </header>
+  <form method="post" action="/callcenter/countries/save">
+    <input type="hidden" name="iso" value="{{ country.iso }}">
+    <div class="pricing-row">
+      <label class="cap">Country<br><input name="country_name" value="{{ country.country_name }}" required></label>
+      <label class="cap">ISO<br><input value="{{ country.iso }}" disabled style="max-width:60px"></label>
+      <label class="cap">Dial prefix<br><input name="dial_prefix" value="{{ country.dial_prefix }}" style="max-width:80px" required></label>
+      <label class="cap">Timezone<br><input name="timezone" value="{{ country.timezone }}" list="tzlist" style="max-width:200px" required></label>
+      <label class="cap">Language<br><input name="language" value="{{ country.language }}" style="max-width:70px" required></label>
+      <label class="cap">National digits<br><input name="national_number_len" value="{{ country.national_number_len or '' }}" style="max-width:70px"></label>
+    </div>
+    <button type="submit" class="btn ghost" {{ 'disabled' if country.archived_at }}>Save general</button>
+  </form>
+  <form method="post" action="/callcenter/countries/{{ country.iso }}/{{ 'unarchive' if country.archived_at else 'archive' }}" style="margin-top:6px">
+    <button type="submit" class="btn ghost">{{ 'Unarchive country' if country.archived_at else 'Archive country' }}</button>
+  </form>
+</section>
+
+<!-- ══ CALLING ROUTES ═══════════════════════════════════════════════ -->
+{% for r in routes %}
+<section class="panel" id="route-{{ r.id }}" style="margin-top:16px">
+  <header class="panel-head">
+    <div>
+      <span class="eyebrow">Calling route · {{ r.provider_name }} · adapter {{ r.adapter_key }}</span>
+      <h2><span class="mono">{{ r.route_key }}</span>
+        {% if r.status == 'ACTIVE' %}<span class="pill good">ACTIVE</span>
+        {% elif r.status == 'ARCHIVED' %}<span class="pill">ARCHIVED</span>
+        {% else %}<span class="pill mid">DISABLED</span>{% endif %}
+      </h2>
+      <p class="cap">local {{ r.capacity_source.local_time }} ({{ r.capacity_source.local_day }}) ·
+        {% if r.capacity_source.mode == 'default' %}sin franjas: capacidad {{ r.capacity_default }} 24/7
+        {% elif r.capacity_source.mode == 'window' %}franja {{ r.capacity_source.window }} → {{ r.capacity_now }}
+        {% elif r.capacity_source.mode == 'config_error' %}BLOQUEADA por configuración incompleta
+        {% else %}fuera de franja{% endif %}</p>
+    </div>
+    <div>
+      {% if r.status == 'ARCHIVED' %}
+        <form method="post" action="/callcenter/routes/{{ r.id }}/unarchive" style="display:inline">
+          <input type="hidden" name="back_iso" value="{{ country.iso }}"><button class="btn ghost">Unarchive</button></form>
+      {% else %}
+        <form method="post" action="/callcenter/routes/{{ r.id }}/{{ 'disable' if r.status == 'ACTIVE' else 'enable' }}" style="display:inline">
+          <input type="hidden" name="back_iso" value="{{ country.iso }}">
+          <button class="btn {{ 'ghost' if r.status == 'ACTIVE' }}">{{ 'Disable' if r.status == 'ACTIVE' else 'Activate' }}</button></form>
+        <form method="post" action="/callcenter/routes/{{ r.id }}/archive" style="display:inline"
+              onsubmit="return confirm('Archivar {{ r.route_key }}? No se borra: su clave queda reservada y sigue resolviendo post-calls.')">
+          <input type="hidden" name="back_iso" value="{{ country.iso }}"><button class="btn ghost">Archive</button></form>
+      {% endif %}
+    </div>
+  </header>
+
+  {% set ro = r.status == 'ARCHIVED' %}
+  <form method="post" action="/callcenter/routes/{{ r.id }}/edit">
+    <input type="hidden" name="back_iso" value="{{ country.iso }}">
+    <div class="pricing-row">
+      <label class="cap">ElevenLabs Agent ID<br><input name="elevenlabs_agent_id" value="{{ r.elevenlabs_agent_id or '' }}" style="max-width:300px" {{ 'disabled' if ro }}></label>
+      {% set req = (adapters.get(r.adapter_key) or {}).get('route_requires', []) %}
+      <label class="cap">ElevenLabs Phone ID {% if 'elevenlabs_phone_number_id' in req %}(obligatorio){% endif %}<br>
+        <input name="elevenlabs_phone_number_id" value="{{ r.elevenlabs_phone_number_id or '' }}" style="max-width:300px" {{ 'disabled' if ro }}></label>
+    </div>
+    <div class="pricing-row">
+      <label class="cap">Caller ID {% if 'caller_id' in req %}(obligatorio){% endif %}<br>
+        <input name="caller_id" value="{{ r.caller_id or '' }}" style="max-width:160px" {{ 'disabled' if ro }}></label>
+      <label class="cap">Capacity default<br><input name="capacity_default" value="{{ r.capacity_default }}" style="max-width:80px" {{ 'disabled' if ro }}></label>
+      <label class="cap">Priority<br><input name="priority" value="{{ r.priority }}" style="max-width:70px" {{ 'disabled' if ro }}></label>
+    </div>
+
+    <p class="eyebrow" style="margin-top:10px">Follow-up</p>
+    <div class="pricing-row">
+      <label class="cap">Policy<br>
+        <select name="followup_policy_id" {{ 'disabled' if ro }}>
+          <option value="">— sin política —</option>
+          {% for p in policies %}<option value="{{ p.id }}" {{ 'selected' if p.id == r.followup_policy_id }}>{{ p.policy_key }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <p class="eyebrow" style="margin-top:10px">Recordings</p>
+    <div class="pricing-row">
+      <label class="cap">Recording<br><select name="recording_enabled" {{ 'disabled' if ro }}>
+        <option value="1" {{ 'selected' if r.recording_enabled }}>enabled</option>
+        <option value="0" {{ 'selected' if not r.recording_enabled }}>disabled</option></select></label>
+      <label class="cap">Min seconds<br><input name="recording_min_secs" value="{{ r.recording_min_secs }}" style="max-width:70px" {{ 'disabled' if ro }}></label>
+      <label class="cap">Upload to LeadStudio<br><select name="recording_upload_crm" {{ 'disabled' if ro }}>
+        <option value="1" {{ 'selected' if r.recording_upload_crm }}>yes</option>
+        <option value="0" {{ 'selected' if not r.recording_upload_crm }}>no</option></select></label>
+      <label class="cap">Send to Telegram<br><select name="recording_telegram" {{ 'disabled' if ro }}>
+        <option value="1" {{ 'selected' if r.recording_telegram }}>yes</option>
+        <option value="0" {{ 'selected' if not r.recording_telegram }}>no</option></select></label>
+    </div>
+    <div class="pricing-row">
+      <input name="notes" value="{{ r.notes or '' }}" placeholder="Notes" style="max-width:420px" {{ 'disabled' if ro }}>
+      {% if not ro %}<button type="submit" class="btn">Save route</button>{% endif %}
+    </div>
+  </form>
+
+  <!-- operating schedule / capacity windows -->
+  <p class="eyebrow" style="margin-top:12px">Operating schedule · {{ country.timezone }}</p>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Days</th><th>From</th><th>To</th><th class="r">Capacity</th><th></th><th></th></tr></thead>
+      <tbody>
+      {% for w in r.windows %}
+        <tr>
+          <form method="post" action="/callcenter/routes/window/{{ w.id }}/edit">
+            <input type="hidden" name="back_iso" value="{{ country.iso }}">
+            <td>{% for d in weekday_codes %}<label class="cap" style="margin-right:4px"><input type="checkbox" name="days" value="{{ d }}" {{ 'checked' if d in w.days }} {{ 'disabled' if ro }}>{{ d }}</label>{% endfor %}</td>
+            <td><input name="start_local" value="{{ w.start_local }}" style="max-width:70px" {{ 'disabled' if ro }}></td>
+            <td><input name="end_local" value="{{ w.end_local }}" style="max-width:70px" {{ 'disabled' if ro }}></td>
+            <td class="r"><input name="capacity" value="{{ w.capacity }}" style="max-width:60px" {{ 'disabled' if ro }}></td>
+            <td class="r">{% if not ro %}<button class="btn ghost">Save</button>{% endif %}</td>
+          </form>
+          <td class="r">{% if not ro %}<form method="post" action="/callcenter/routes/window/{{ w.id }}/delete">
+            <input type="hidden" name="back_iso" value="{{ country.iso }}"><button class="btn ghost">✕</button></form>{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="cap">Sin franjas: capacity_default = {{ r.capacity_default }} las 24 h (igual que WF2 hoy).</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not ro %}
+  <form method="post" action="/callcenter/routes/{{ r.id }}/window/new" class="pricing-row" style="margin-top:6px">
+    <input type="hidden" name="back_iso" value="{{ country.iso }}">
+    {% for d in weekday_codes %}<label class="cap" style="margin-right:4px"><input type="checkbox" name="days" value="{{ d }}" {{ 'checked' if d not in ['sat','sun'] }}>{{ d }}</label>{% endfor %}
+    <input name="start_local" placeholder="09:00" style="max-width:70px" required>
+    <input name="end_local" placeholder="14:00" style="max-width:70px" required>
+    <input name="capacity" placeholder="5" style="max-width:60px" required>
+    <button type="submit" class="btn ghost">Add window</button>
+  </form>
+  <p class="cap">Una franja con fin menor al inicio cruza medianoche (p. ej. 20:00→02:00 ocupa hasta las 02:00 del día siguiente).</p>
+  {% endif %}
+
+  <!-- telegram -->
+  <p class="eyebrow" style="margin-top:12px">Telegram destinations</p>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <tbody>
+      {% for t in r.telegram_rows %}
+        <tr><td>{{ t.purpose }}</td><td class="mono">{{ t.chat_id }}</td>
+            <td class="r">{% if not ro %}<form method="post" action="/callcenter/routes/telegram/{{ t.id }}/delete">
+              <input type="hidden" name="back_iso" value="{{ country.iso }}"><button class="btn ghost">✕</button></form>{% endif %}</td></tr>
+      {% else %}
+        <tr><td class="cap">Sin destinos.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not ro %}
+  <form method="post" action="/callcenter/routes/{{ r.id }}/telegram/new" class="pricing-row" style="margin-top:6px">
+    <input type="hidden" name="back_iso" value="{{ country.iso }}">
+    <select name="purpose">{% for p in telegram_purposes %}<option>{{ p }}</option>{% endfor %}</select>
+    <input name="chat_id" placeholder="-1001234567890" style="max-width:190px" required>
+    <button type="submit" class="btn ghost">Add destination</button>
+  </form>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% if not country.archived_at %}
+<section class="panel" style="margin-top:16px">
+  <header class="panel-head"><div><span class="eyebrow">Calling routes</span><h2>Add route</h2></div></header>
+  <form method="post" action="/callcenter/routes/new" class="pricing-row">
+    <input type="hidden" name="iso" value="{{ country.iso }}">
+    <select name="provider_id" required>{% for p in providers %}<option value="{{ p.id }}">{{ p.code }} ({{ p.adapter_key }})</option>{% endfor %}</select>
+    <input name="route_key" placeholder="{{ country.iso }}_PROVEEDOR1 (auto)" style="max-width:200px">
+    <input name="capacity_default" placeholder="3" style="max-width:60px">
+    <button type="submit" class="btn">Add route</button>
+  </form>
+  <p class="cap">Nace DISABLED. Completala y usá “Activate”: si falta algo, el panel te dice qué.</p>
+</section>
+{% endif %}
+
+<!-- ══ TOOLS: ACCOUNT CREATION · PAYMENT LINK · CALLBACK ════════════ -->
+{% for tt in tool_types %}
+{% set t = tools.get(tt) or {} %}
+<section class="panel" style="margin-top:16px">
+  <header class="panel-head">
+    <div><span class="eyebrow">ElevenLabs tool</span>
+      <h2>{{ {'CREATE_ACCOUNT':'Account creation','CREATE_PAYMENT_LINK':'Payment link','CALLBACK':'Callback'}[tt] }}
+        {% if t.enabled %}<span class="pill good">enabled</span>{% else %}<span class="pill">disabled</span>{% endif %}
+        {% if t.enabled and tool_issues.get(tt) %}<span class="pill mid">incomplete</span>{% endif %}
+      </h2></div>
+  </header>
+  {% if tool_issues.get(tt) %}
+    <p class="notice stale-warn">{% for i in tool_issues[tt] %}{{ i.message }}<br>{% endfor %}</p>
+  {% endif %}
+  <form method="post" action="/callcenter/countries/{{ country.iso }}/tools/{{ tt }}">
+    <div class="pricing-row">
+      <label class="cap">Enabled<br><select name="enabled">
+        <option value="0" {{ 'selected' if not t.enabled }}>disabled</option>
+        <option value="1" {{ 'selected' if t.enabled }}>enabled</option></select></label>
+      <label class="cap">Mode<br><select name="mode">{% for m in tool_modes %}<option {{ 'selected' if t.mode == m }}>{{ m }}</option>{% endfor %}</select></label>
+      <label class="cap">Provider<br><input name="provider_key" value="{{ t.provider_key or '' }}" placeholder="cashstudio / okpay" style="max-width:140px"></label>
+      {% if tt == 'CREATE_ACCOUNT' %}<label class="cap">Market<br><input name="market" value="{{ t.market or '' }}" placeholder="IND" style="max-width:80px"></label>{% endif %}
+      {% if tt == 'CREATE_PAYMENT_LINK' %}<label class="cap">Currency<br><input name="currency" value="{{ t.currency or '' }}" placeholder="INR" style="max-width:70px"></label>{% endif %}
+    </div>
+    <div class="pricing-row">
+      <label class="cap">Endpoint (CUSTOM_ENDPOINT)<br><input name="endpoint" value="{{ t.endpoint or '' }}" placeholder="https://..." style="max-width:300px"></label>
+      <label class="cap">Method<br><select name="http_method"><option value=""></option>{% for m in http_methods %}<option {{ 'selected' if t.http_method == m }}>{{ m }}</option>{% endfor %}</select></label>
+      <label class="cap">Credential ref (nombre en n8n)<br><input name="credential_ref" value="{{ t.credential_ref or '' }}" placeholder="PAKISTAN_ACCOUNT_API" style="max-width:220px"></label>
+    </div>
+    <label class="cap">Config JSON (sin secretos)<br>
+      <textarea name="config_json" rows="3" style="width:100%; font-family:'IBM Plex Mono',monospace; font-size:12px">{{ t.config_json or '' }}</textarea></label>
+    <button type="submit" class="btn ghost">Save {{ tt }}</button>
+  </form>
+  <p class="cap">Una tool disabled no bloquea llamadas. Enabled e incompleta, sí: el país queda NOT READY.</p>
+</section>
+{% endfor %}
+
+<datalist id="tzlist">{% for tz in common_timezones %}<option value="{{ tz }}">{% endfor %}</datalist>
+{% endblock %}

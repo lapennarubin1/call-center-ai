@@ -1,0 +1,6 @@
+== ASTERISK_WF10_FIX: APPLY  (backup en /root/wf10-fix-backups/20260930T062115Z) ==
+  YA APLICADO [from-client-elevenlabs] _+52XXXXXXXXXX prioridad 4
+  YA APLICADO [from-client-elevenlabs] _+91XXXXXXXXXX prioridad 4
+  YA APLICADO [from-client-elevenlabs] _+977XXXXXXXXXX prioridad 4
+  dialplan actual: 61 extensiones, 141 prioridades, 31 contextos
+ℹ️  Nada que aplicar.

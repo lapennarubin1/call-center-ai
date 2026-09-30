@@ -1,0 +1,42 @@
+"""Catalogo de locales (idioma + mercado) para agentes de Voice AI.
+
+Separado de countries.py (que es el pais/mercado de una CAMPAÑA) porque un
+agente ademas necesita el idioma en el que habla. Reutiliza los mismos
+codigos de pais que countries.py (MX, IN, AE) para no inventar un segundo
+formato de pais en el proyecto.
+
+Ampliable sin tocar la logica que lo consume: agregar un locale nuevo es
+agregar una entrada a SUPPORTED_LOCALES.
+"""
+
+SUPPORTED_LOCALES: dict[str, dict] = {
+    "es-MX": {"label": "Español (México)", "language": "es", "country": "MX"},
+    "en-IN": {"label": "English (India)", "language": "en", "country": "IN"},
+    "en-AE": {"label": "English (UAE)", "language": "en", "country": "AE"},
+}
+
+SUPPORTED_LANGUAGES: dict[str, str] = {
+    "es": "Español",
+    "en": "Inglés",
+}
+
+
+def is_valid_locale(code: str | None) -> bool:
+    return bool(code) and code in SUPPORTED_LOCALES
+
+
+def is_valid_language(code: str | None) -> bool:
+    return bool(code) and code in SUPPORTED_LANGUAGES
+
+
+def locale_choices() -> list[tuple[str, str]]:
+    return [(code, meta["label"]) for code, meta in SUPPORTED_LOCALES.items()]
+
+
+def language_choices() -> list[tuple[str, str]]:
+    return [(code, label) for code, label in SUPPORTED_LANGUAGES.items()]
+
+
+def language_for_locale(locale: str | None) -> str | None:
+    meta = SUPPORTED_LOCALES.get(locale or "")
+    return meta["language"] if meta else None

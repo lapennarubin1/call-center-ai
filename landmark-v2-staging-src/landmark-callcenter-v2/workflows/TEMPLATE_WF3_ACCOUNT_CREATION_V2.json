@@ -1,0 +1,1706 @@
+{
+  "name": "TEMPLATE_WF3_ACCOUNT_CREATION_V2",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 00 — TRIGGERS\n\nTEMPLATE_WF3_ACCOUNT_CREATION_V2 · v2.0.0\nContratos: TEMPLATE_DATA v2.2 · ANALYTICS_EVENT v2.2 · CRM_ENGLISH_RULE\nRollback: WF3 v1 — desactivar este workflow; v1 vuelve a atender su webhook (§12)\n\nDos entradas, una sola tubería:\n · **tool de ElevenLabs** durante la llamada (`create-account-v2`)\n · **sub-workflow** desde el bot de WhatsApp\n\nLa respuesta al agente sale por `[TOOL] Respond To Agent`, siempre con un\nmensaje de negocio legible **en inglés**, nunca un 500.",
+        "height": 400,
+        "width": 420,
+        "color": 4
+      },
+      "id": "1437ec26-ab62-4d7e-9c45-dfc95a741bf0",
+      "name": "NOTE 00 00 — TRIGGERS",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-account-v2",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "64776eeb-fcb2-43f1-9452-d0fff8a1dc8d",
+      "name": "[TRIGGER] Account Tool Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "create-account-v2"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "lead_id"
+            },
+            {
+              "name": "full_name"
+            },
+            {
+              "name": "phone"
+            },
+            {
+              "name": "country_iso"
+            },
+            {
+              "name": "conversation_id"
+            },
+            {
+              "name": "whatsapp_number"
+            }
+          ]
+        }
+      },
+      "id": "ec1ded43-c719-4d65-acef-223f301eaa70",
+      "name": "[TRIGGER] Called By Bot",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 01 — PARSE & VALIDATE\n\n`country_iso` es **obligatorio y\nexplícito**. No se deduce del prefijo del teléfono: esa inferencia es\nexactamente lo que el estándar prohíbe (§1.2).\n\n`lead_id` debe ser un UUID de LeadStudio. Sin un lead real no se puede crear una\ncuenta: se responde al agente con un error de negocio en inglés.\n\n`request_ref` = `conversation_id` de la llamada que pidió la tool, o el\n`execution_id` si no hay conversación. Es lo que hace idempotente el pedido:\ndos reintentos de ElevenLabs de la MISMA conversación son un solo pedido.",
+        "height": 420,
+        "width": 420,
+        "color": 6
+      },
+      "id": "693bc4ff-fba8-4da6-9d38-7166f40c2a98",
+      "name": "NOTE 01 01 — PARSE & VALIDATE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        440,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst raw = $input.first().json || {};\nconst b = raw.body || raw;\n\nconst leadId = String(b.lead_id || '').trim();\nconst iso = String(b.country_iso || b.country || '').trim().toUpperCase();\nconst phone = String(b.phone || '').replace(/[^0-9+]/g, '');\nconst fullName = String(b.full_name || '').trim();\nconst conversationId = String(b.conversation_id || '').trim() || null;\nconst waNumber = String(b.whatsapp_number || b.phone || '').replace(/[^0-9+]/g, '');\n\nconst errs = [];\nconst UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nif (!leadId) errs.push('lead_id');\nelse if (!UUID.test(leadId)) errs.push('lead_id no es un UUID de LeadStudio');\nif (!/^[A-Z]{2}$/.test(iso)) errs.push('country_iso (ISO-2 explicito)');\nif (!fullName || fullName.length < 2) errs.push('full_name');\nif (!phone || phone.replace(/\\D/g, '').length < 6) errs.push('phone');\n\nconst requestRef = conversationId || String($execution.id);\nreturn [{ json: {\n  valid: errs.length === 0,\n  error_detail: errs.length ? ('campos invalidos o ausentes: ' + errs.join(', ')) : null,\n  lead_id: leadId, country_iso: iso, phone: phone, full_name: fullName,\n  whatsapp_number: waNumber || phone,\n  conversation_id: conversationId, request_ref: requestRef,\n  request_key: 'CREATE_ACCOUNT:' + leadId + ':' + requestRef,\n  execution_id: $execution.id\n}}];\n"
+      },
+      "id": "0c5200f5-7b29-4159-85a4-e9ec183d1910",
+      "name": "[CONFIG] Parse Tool Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5eb20ba6-81e2-4c68-84fc-03cf4bac6005",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "86ef4c5b-f8b8-4ef8-86f4-1b59d88ae082",
+      "name": "[CONFIG] Request Is Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 02 — COUNTRY TOOL CONFIG\n\n`GET /api/countries/{iso}/tools`.\n\nLas tools pertenecen al **PAÍS**, no al proveedor de voz: `IN_PROVEEDOR1` e\n`IN_STRINGEE` usan exactamente la misma configuración de India.\n\nSe rechaza (con un mensaje de negocio en inglés, no un 500) si:\n · el país está **apagado** (`country_enabled = false`) — §7.3\n · el país no está **READY**\n · la tool `CREATE_ACCOUNT` no está habilitada\n · falta `market` → **CONFIG_ERROR**. No se inventa un market de CashStudio.\n\nDos modos: `CONFIG_ROUTER` (por la API de LeadStudio) y `CUSTOM_ENDPOINT`\n(endpoint propio del país, con su `credential_ref`).",
+        "height": 460,
+        "width": 420,
+        "color": 3
+      },
+      "id": "4c79adbc-f956-4d6b-aada-9689365a80bc",
+      "name": "NOTE 02 02 — COUNTRY TOOL CONFIG",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        960,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LM_PANEL_URL || \"http://172.18.0.1:8080\" }}/api/countries/{{ $json.country_iso }}/tools",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "e85dab73-4e19-4e3a-ab87-779a69e3ec17",
+      "name": "[CONFIG] Load Country Tools",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__PANEL_TOKEN_CREDENTIAL__",
+          "name": "Landmark Panel API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n// ── LM CRM NOTES ────────────────────────────────────────────────────────────\n// Port 1:1 de app/crm_notes.py. TODO texto humano que se escribe o se envía a\n// LeadStudio / CRM va en INGLÉS, sin importar el país, el idioma del cliente ni\n// el del agente (docs/CRM_ENGLISH_RULE.md).\n//\n// NO se traducen: nombre del cliente, teléfono, email, IDs, URLs, route_key,\n// IDs de proveedor. Los enums técnicos siguen el contrato de LeadStudio.\n//\n// tests/test_crm_english_v2.py compara este catálogo con el de Python: si\n// alguien edita una frase en un solo lado, el test falla.\n\nconst LM_PHRASES = {\n  CALL_ANSWERED: 'Call answered.',\n  CALL_NO_ANSWER: 'Call was not answered.',\n  CALL_BUSY: 'Line was busy.',\n  CALL_VOICEMAIL: 'Call reached voicemail.',\n  CALL_CALLBACK: 'Customer requested a callback.',\n  CALL_WRONG_NUMBER: 'Wrong number.',\n  CALL_DNC: 'Customer asked not to be contacted again.',\n  CALL_FAILED: 'Call failed.',\n  CALL_UNKNOWN: 'Call result could not be determined.',\n  FOLLOWUP_RETRY: 'Next attempt scheduled.',\n  FOLLOWUP_CLOSE: 'No further attempts: retry policy exhausted.',\n  FOLLOWUP_COMPLETE: 'Contact established; no retry scheduled.',\n  FOLLOWUP_CALLBACK: 'Callback scheduled.',\n  FOLLOWUP_NONE: 'Result recorded; nothing scheduled.',\n  ACCOUNT_CREATED: 'Trading account created successfully.',\n  ACCOUNT_ALREADY_EXISTS: 'Customer already has a trading account; credentials were not resent (issued once at creation).',\n  ACCOUNT_FAILED: 'Trading account could not be created.',\n  ACCOUNT_REQUESTED: 'Customer requested a trading account.',\n  PAYMENT_LINK_CREATED: 'Payment link sent successfully.',\n  PAYMENT_LINK_FAILED: 'Payment link could not be created.',\n  PAYMENT_CONFIRMED: 'Payment confirmed.',\n  RECORDING_ATTACHED: 'Call recording attached.',\n  RECORDING_SKIPPED: 'Call recording not attached: below minimum duration.',\n  RECORDING_MISSING: 'Call recording not available.',\n  RECONCILIATION_OPENED: 'Automatic reconciliation opened a discrepancy for review.',\n  RECONCILIATION_CLOSED: 'Reconciliation discrepancy resolved.',\n  ERR_CONFIG: 'Request rejected: country configuration is incomplete.',\n  ERR_COUNTRY_DISABLED: 'Request rejected: this country is currently disabled.',\n  ERR_TOOL_DISABLED: 'Request rejected: this tool is not enabled for the country.',\n  ERR_VALIDATION: 'Request rejected: invalid or missing data.',\n  ERR_PROVIDER: 'Request failed at the provider.',\n  ERR_AMBIGUOUS: 'Result unconfirmed; flagged for manual reconciliation.'\n};\n\nconst LM_RESULT_PHRASE = {\n  ANSWERED: 'CALL_ANSWERED', NO_ANSWER: 'CALL_NO_ANSWER', BUSY: 'CALL_BUSY',\n  VOICEMAIL: 'CALL_VOICEMAIL', CALLBACK: 'CALL_CALLBACK',\n  WRONG_NUMBER: 'CALL_WRONG_NUMBER', DNC: 'CALL_DNC', FAILED: 'CALL_FAILED',\n  UNKNOWN: 'CALL_UNKNOWN'\n};\nconst LM_ACTION_PHRASE = {\n  RETRY: 'FOLLOWUP_RETRY', CLOSE: 'FOLLOWUP_CLOSE', COMPLETE: 'FOLLOWUP_COMPLETE',\n  CALLBACK: 'FOLLOWUP_CALLBACK', NONE: 'FOLLOWUP_NONE'\n};\nconst LM_MAX_NOTE = 900;\n\nfunction lmPhrase(key) {\n  if (!(key in LM_PHRASES)) throw new Error('frase desconocida: ' + key);\n  return LM_PHRASES[key];\n}\n\nfunction lmJoin(parts) {\n  return parts.filter(p => p && String(p).trim())\n              .map(p => String(p).trim()).join(' ').slice(0, LM_MAX_NOTE);\n}\n\n\n// Gemelo 1:1 de crm_notes.is_english. Heuristica conservadora: no es un\n// detector de idioma, es una red que hace fallar el caso conocido — que\n// alguien vuelva a meter \"No contesto\" o devanagari en una nota del CRM.\nvar LM_NON_ENGLISH_CHARS = /[\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00fc\\u00c1\\u00c9\\u00cd\\u00d3\\u00da\\u00d1\\u00dc\\u00bf\\u00a1\\u0900-\\u097f\\u0600-\\u06ff]/;\nvar LM_SPANISH_WORDS = new RegExp(\n  '\\\\b(no contest[o\\u00f3]|cuenta creada|llamada|intento|pr[o\\u00f3]xima|correctamente|' +\n  'usuario|contrase[n\\u00f1]a|grabaci[o\\u00f3]n|pago|enlace|fall[o\\u00f3]|d[i\\u00ed]as|h[a\\u00e1]biles|' +\n  'buz[o\\u00f3]n|ocupado|desconocido|pendiente|rechazado|creada|enviado)\\\\b', 'i');\n\n// Palabras funcionales del espanol que casi no aparecen en una nota en\n// ingles. Se exigen DOS distintas: con una habria falsos positivos\n// (\"la carte\"), con dos ya es una frase en espanol. NO incluye \"son\",\n// \"no\", \"a\", \"e\", \"o\" ni \"va\", que si son palabras inglesas.\nvar LM_SPANISH_STOPWORDS = new RegExp(\n  '\\\\b(el|la|los|las|una|unos|unas|que|del|por|para|con|sin|como|pero|' +\n  'cuando|donde|quiere|quiso|cliente|llamar|llamen|llame|llamada|' +\n  'ma[\\u00f1n]ana|hoy|ayer|gracias|favor|n[u\\u00fa]mero|dijo|pidi[o\\u00f3]|' +\n  'est[a\\u00e1]|tiene|hacer|m[a\\u00e1]s|muy|todo|nada|porque|tambi[e\\u00e9]n|' +\n  'ahora|luego)\\\\b', 'gi');\n\nfunction lmIsEnglish(text) {\n  var t = String(text === null || text === undefined ? '' : text);\n  if (LM_NON_ENGLISH_CHARS.test(t) || LM_SPANISH_WORDS.test(t)) return false;\n  var vistas = {}, n = 0, m;\n  LM_SPANISH_STOPWORDS.lastIndex = 0;\n  while ((m = LM_SPANISH_STOPWORDS.exec(t)) !== null) {\n    var w = m[0].toLowerCase();\n    if (!vistas[w]) { vistas[w] = true; n++; }\n    if (n >= 2) return false;\n  }\n  return true;\n}\n\n// ── Nada que no sea inglés entra al CRM ──────────────────────────────\n// Una version anterior adjuntaba el resumen de ElevenLabs tal cual. Eso\n// metia hindi, nepali y espanol dentro de notas del CRM. No hay excepcion.\n// Gemelo 1:1 de crm_notes.safe_summary / safe_detail / error_code_of.\n\n// lmcore.js ya declara LM_ERROR_CODES (el contrato de errores). Aqui se\n// usa esa misma lista mas los tres estados que solo aparecen en notas.\nvar LM_PUBLISHABLE_CODES = (typeof LM_ERROR_CODES !== 'undefined'\n  ? LM_ERROR_CODES : ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR',\n                      'PROVIDER_ERROR', 'CRM_ERROR', 'RETRYABLE_ERROR',\n                      'PERMANENT_ERROR'])\n  .concat(['UNKNOWN', 'TIMEOUT', 'AMBIGUOUS']);\n\n// Un token tecnico tiene que PARECER tecnico: MAYUSCULAS, con digito, o\n// con separador. Una palabra corriente en minusculas es prosa de alguien.\nfunction lmIsTechnicalToken(t) {\n  if (!t || t.length > 64) return false;\n  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+-]*$/.test(t)) return false;\n  if (t.length > 1 && t === t.toUpperCase() && /[A-Z]/.test(t)) return true;\n  if (/[0-9]/.test(t)) return true;\n  if (/[._:/+-]/.test(t)) return true;\n  return false;\n}\n\nfunction lmSafeDetail(detail) {\n  if (detail === null || detail === undefined || detail === '') return null;\n  var texto = String(detail).trim();\n  if (!texto) return null;\n  var partes = texto.split(/\\s+/);\n  if (partes.length > 4) return null;\n  for (var i = 0; i < partes.length; i++) {\n    if (!lmIsTechnicalToken(partes[i])) return null;\n  }\n  return partes.join(' ').slice(0, 64);\n}\n\nfunction lmErrorCodeOf(error) {\n  if (error === null || error === undefined || error === '') return 'UNKNOWN';\n  var t = String(error).trim().toUpperCase();\n  if (LM_PUBLISHABLE_CODES.indexOf(t) >= 0) return t;\n  var seguro = lmSafeDetail(error);\n  if (seguro && LM_PUBLISHABLE_CODES.indexOf(seguro.toUpperCase()) >= 0) {\n    return seguro.toUpperCase();\n  }\n  return 'PROVIDER_ERROR';\n}\n\n// El resumen solo entra si la fuente GARANTIZA que es ingles. Sin idioma\n// declarado se descarta, aunque \"parezca\" ingles: la heuristica existe\n// para cazar regresiones, no para autorizar contenido de idioma\n// desconocido. El original se guarda como evidencia local.\nfunction lmSafeSummary(summary, language, isEnglishFlag) {\n  if (!summary) return null;\n  var lang = String(language || '').trim().toLowerCase();\n  var declarado = !!isEnglishFlag ||\n    lang === 'en' || lang === 'en-us' || lang === 'en-gb' ||\n    lang === 'eng' || lang === 'english';\n  if (!declarado) return null;\n  var texto = String(summary).trim();\n  if (!texto) return null;\n  if (!lmIsEnglish(texto)) return null;\n  return texto;\n}\n\nfunction lmCallNote(o) {\n  o = o || {};\n  const head = lmPhrase(LM_RESULT_PHRASE[String(o.result || '').toUpperCase()] || 'CALL_UNKNOWN');\n  const tail = LM_ACTION_PHRASE[o.action] ? lmPhrase(LM_ACTION_PHRASE[o.action]) : '';\n  const meta = [];\n  if (o.attempt !== null && o.attempt !== undefined) meta.push('attempt ' + parseInt(o.attempt, 10));\n  if (o.route_key) meta.push('route ' + o.route_key);\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.sip_code) meta.push('sip ' + o.sip_code);\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.schedule_next_at) meta.push('next ' + o.schedule_next_at);\n  let note = lmJoin([head, tail, meta.length ? '[' + meta.join(' · ') + ']' : '']);\n  var __sum = lmSafeSummary(o.summary, o.summary_language, o.summary_is_english);\n  if (__sum) note = (note + ' Agent summary: ' + __sum).slice(0, LM_MAX_NOTE);\n  return note;\n}\n\nfunction lmAccountNote(o) {\n  o = o || {};\n  const key = { CREATED: 'ACCOUNT_CREATED', ALREADY_EXISTS: 'ACCOUNT_ALREADY_EXISTS',\n                FAILED: 'ACCOUNT_FAILED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de cuenta desconocido: ' + o.status);\n  const meta = [];\n  if (o.market) meta.push('market ' + o.market);\n  if (o.username) meta.push('username ' + o.username);\n  if (o.portal_url) meta.push('portal ' + o.portal_url);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmPaymentNote(o) {\n  o = o || {};\n  const key = { LINK_CREATED: 'PAYMENT_LINK_CREATED', LINK_FAILED: 'PAYMENT_LINK_FAILED',\n                CONFIRMED: 'PAYMENT_CONFIRMED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de pago desconocido: ' + o.status);\n  const meta = [];\n  if (o.amount !== null && o.amount !== undefined && o.currency) {\n    meta.push('amount ' + o.currency + ' ' + o.amount);\n  }\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.order_ref) meta.push('order ' + o.order_ref);\n  if (o.transaction_id) meta.push('txn ' + o.transaction_id);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmRecordingNote(o) {\n  o = o || {};\n  const key = { ATTACHED: 'RECORDING_ATTACHED', SKIPPED: 'RECORDING_SKIPPED',\n                MISSING: 'RECORDING_MISSING' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de grabacion desconocido: ' + o.status);\n  const meta = [];\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.min_secs !== null && o.min_secs !== undefined) {\n    meta.push('minimum ' + parseInt(o.min_secs, 10) + 's');\n  }\n  if (o.route_key) meta.push('route ' + o.route_key);\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmErrorNote(errorCode, detail) {\n  const key = { CONFIG_ERROR: 'ERR_CONFIG', COUNTRY_DISABLED: 'ERR_COUNTRY_DISABLED',\n                TOOL_DISABLED: 'ERR_TOOL_DISABLED', VALIDATION_ERROR: 'ERR_VALIDATION',\n                PROVIDER_ERROR: 'ERR_PROVIDER', AMBIGUOUS: 'ERR_AMBIGUOUS'\n              }[String(errorCode || '').toUpperCase()] || 'ERR_VALIDATION';\n  const meta = ['code ' + errorCode];\n  var __d = lmSafeDetail(detail);\n  if (__d) meta.push('detail ' + __d);\n  return lmJoin([lmPhrase(key), '[' + meta.join(' · ') + ']']);\n}\n\nfunction lmReconciliationNote(issueType, detail) {\n  const meta = ['issue ' + issueType];\n  var __d2 = lmSafeDetail(detail);\n  if (__d2) meta.push(__d2);\n  return lmJoin([lmPhrase('RECONCILIATION_OPENED'), '[' + meta.join(' · ') + ']']);\n}\n\nconst rows = $input.all();\nreturn rows.map((r, i) => {\n  const ctx = $('[CONFIG] Parse Tool Request').itemMatching(i).json;\n  const resp = r.json || {};\n  const code = Number(resp.statusCode || 0);\n  const body = resp.body || {};\n\n  let err = null, errCode = null;\n  if (code === 404) { errCode = 'CONFIG_ERROR'; err = 'country ' + ctx.country_iso + ' not configured'; }\n  else if (code < 200 || code >= 300) { errCode = 'CONFIG_ERROR'; err = 'panel HTTP ' + code; }\n  else if (!body.country_enabled) { errCode = 'COUNTRY_DISABLED'; err = ctx.country_iso + ' is disabled'; }\n  else if (!body.country_ready) { errCode = 'CONFIG_ERROR'; err = ctx.country_iso + ' is not ready'; }\n\n  const tool = (body.tools || {}).CREATE_ACCOUNT || null;\n  if (!errCode && (!tool || !tool.enabled)) {\n    errCode = 'TOOL_DISABLED'; err = 'CREATE_ACCOUNT not enabled for ' + ctx.country_iso;\n  }\n  // El market NO se inventa: si falta, es CONFIG_ERROR.\n  if (!errCode && tool.mode === 'CONFIG_ROUTER' && !String(tool.market || '').trim()) {\n    errCode = 'CONFIG_ERROR';\n    err = 'CREATE_ACCOUNT for ' + ctx.country_iso + ' has no market configured';\n  }\n  if (!errCode && tool.mode === 'CUSTOM_ENDPOINT' && !String(tool.endpoint || '').trim()) {\n    errCode = 'CONFIG_ERROR';\n    err = 'CREATE_ACCOUNT for ' + ctx.country_iso + ' has no endpoint configured';\n  }\n\n  return { json: Object.assign({}, ctx, {\n    tool_ok: !errCode, error_code: errCode,\n    // El error que se GUARDA en el CRM va en inglés (CRM_ENGLISH_RULE).\n    error_note: errCode ? lmErrorNote(errCode, err) : null,\n    user_message: errCode ? lmErrorNote(errCode, null) : null,\n    error_detail: err,\n    tool: tool, tool_mode: tool ? tool.mode : null,\n    tool_provider: tool ? (tool.provider_key || 'cashstudio') : null,\n    market: tool ? (tool.market || null) : null,\n    endpoint: tool ? (tool.endpoint || null) : null,\n    http_method: tool ? (tool.http_method || 'POST') : 'POST',\n    tool_config: tool ? (tool.config || {}) : {},\n    country_timezone: body.timezone || 'UTC'\n  })};\n});\n"
+      },
+      "id": "29627612-8126-477a-85a5-8a22b3ba4f96",
+      "name": "[CONFIG] Resolve Account Tool",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3da72f49-84f7-40be-a688-36abb7bad18a",
+              "leftValue": "={{ $json.tool_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "235ef0cf-5739-421c-8760-152589f79fa5",
+      "name": "[CONFIG] Tool Is Available",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 03 — IDEMPOTENT CLAIM\n\nEl pedido se **reserva antes** de llamar\nal proveedor: `wf_tool_requests`, clave `CREATE_ACCOUNT:{lead_id}:{request_ref}`.\n\nv1 dependía del 409 de CashStudio, que llega DESPUÉS de haber pedido la cuenta.\nCon dos reintentos simultáneos del mismo tool-call, salían los dos.\n\nPerder el claim **no es un error**: se devuelve el resultado ya registrado.",
+        "height": 360,
+        "width": 420,
+        "color": 3
+      },
+      "id": "9cf6eb1a-27aa-41a1-8350-fc56a59ee5a2",
+      "name": "NOTE 03 03 — IDEMPOTENT CLAIM",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1740,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst crypto = require('crypto');\nreturn $input.all().map(it => ({ json: Object.assign({}, it.json, {\n  claim_token: crypto.randomBytes(16).toString('hex')\n})}));\n"
+      },
+      "id": "3e81af43-fb1b-4d73-86f8-b6717c08ab61",
+      "name": "[TOOL] Build Claim Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_tool_requests\n  (request_key, tool_type, lead_id, country_iso, request_ref, conversation_id,\n   tool_provider, mode, claim_token, execution_id, state)\nVALUES (?, 'CREATE_ACCOUNT', ?, ?, ?, ?, ?, ?, ?, ?, 'CLAIMED')",
+        "options": {
+          "queryReplacement": "={{ $json.request_key }},={{ $json.lead_id }},={{ $json.country_iso }},={{ $json.request_ref }},={{ $json.conversation_id }},={{ $json.tool_provider }},={{ $json.tool_mode }},={{ $json.claim_token }},={{ $json.execution_id }}"
+        }
+      },
+      "id": "4dd87524-a353-4fa0-8718-8a23df5d74fd",
+      "name": "[DB] Claim Tool Request",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        2020,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ? AS _k, claim_token, state, result_ref\n  FROM wf_tool_requests WHERE request_key = ?",
+        "options": {
+          "queryReplacement": "={{ $('[TOOL] Build Claim Token').item.json.request_key }},={{ $('[TOOL] Build Claim Token').item.json.request_key }}"
+        }
+      },
+      "id": "1aba585a-d0b5-406d-8703-beb6d78262a9",
+      "name": "[DB] Read Tool Claim",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        2280,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nreturn $input.all().map((r, i) => {\n  const ctx = $('[TOOL] Build Claim Token').itemMatching(i).json;\n  const row = r.json || {};\n  const won = !!row.claim_token && row.claim_token === ctx.claim_token;\n  if (!won) {\n    console.log('[WF3] claim perdido para ' + ctx.request_key + ' (estado ' +\n                row.state + '): no se vuelve a crear la cuenta');\n  }\n  return { json: Object.assign({}, ctx, {\n    claim_won: won, existing_state: row.state || null, existing_ref: row.result_ref || null\n  })};\n});\n"
+      },
+      "id": "6655c530-1074-412e-8dd2-e1f3e0f7f0ce",
+      "name": "[TOOL] Check Tool Claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1ab8a051-0974-41c2-91f0-cd89eb04c723",
+              "leftValue": "={{ $json.claim_won }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7d1bc477-ff94-4387-b14a-f53eaa038aa2",
+      "name": "[TOOL] Claim Won",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, lead_id, country_iso,\n   conversation_id, provider, source_workflow, execution_id, metadata_json)\nVALUES (?, 'ACCOUNT_REQUESTED', 'TOOL', UTC_TIMESTAMP(), ?, ?, ?, ?, 'WF3', ?, ?)",
+        "options": {
+          "queryReplacement": "={{ \"ACCOUNT_REQUESTED:\" + $json.lead_id + \":\" + $json.request_ref }},={{ $json.lead_id }},={{ $json.country_iso }},={{ $json.conversation_id }},={{ $json.tool_provider }},={{ $json.execution_id }},={{ JSON.stringify({request_ref: $json.request_ref, mode: $json.tool_mode, market: $json.market}) }}"
+        }
+      },
+      "id": "dad66cfb-8d1a-470d-9d18-6d745670a434",
+      "name": "[DB] Record Event Account Requested",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        3060,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "content": "## 05 — ACCOUNT PROVIDER\n\nDos modos, elegidos por la configuración\ndel país. **Ninguna rama por país.**\n\n`CONFIG_ROUTER` → `POST /api/leads/{id}/cashstudio-account` con el `market` de\nla config.\n`CUSTOM_ENDPOINT` → el endpoint del país, autenticado con su `credential_ref`\n(la credential vive en n8n; acá solo viaja su nombre lógico).\n\nAgregar Pakistán es dar de alta el país y su tool en el panel. Cero nodos\nnuevos.",
+        "height": 400,
+        "width": 420,
+        "color": 5
+      },
+      "id": "13d35f72-2fe5-4908-b5a5-2d1aab7c0b0c",
+      "name": "NOTE 05 05 — ACCOUNT PROVIDER",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3500,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/auth/login",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth"
+      },
+      "id": "981cbd84-3e31-45d4-b92f-c9f1e7258d28",
+      "name": "[CRM] Get Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        300
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "__LEADSTUDIO_LOGIN_CREDENTIAL__",
+          "name": "LeadStudio Login"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst resp = $input.first().json || {};\nconst token = (resp.body && resp.body.accessToken) || null;\nreturn $('[TOOL] Claim Won').all().map(it => ({ json: Object.assign({}, it.json, {\n  access_token: token, token_ok: !!token\n})}));\n"
+      },
+      "id": "a801e2d5-303b-4618-80b0-f62e909858f1",
+      "name": "[CRM] Attach Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e67cf067-b409-410a-9bf4-b7fc407e65f3",
+                    "leftValue": "={{ $json.tool_mode }}",
+                    "rightValue": "CONFIG_ROUTER",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "router"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "67d0d604-0725-437f-86b7-6c056b710b52",
+                    "leftValue": "={{ $json.tool_mode }}",
+                    "rightValue": "CUSTOM_ENDPOINT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "custom"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "2dded3ab-9be2-4f63-8e67-e4eb3013befa",
+      "name": "[TOOL] Account Mode Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        4040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/leads/{{ $json.lead_id }}/cashstudio-account",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ market: $json.market }) }}"
+      },
+      "id": "9bba731a-16d4-4681-9dbb-55a50ddc766c",
+      "name": "[TOOL] Create Account Via Router",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4300,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.endpoint }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({ lead_id: $json.lead_id, full_name: $json.full_name, phone: $json.phone, country: $json.country_iso, market: $json.market }, $json.tool_config.extra_body || {})) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "101ec0a2-757f-4ba0-bd0c-571f48b015ab",
+      "name": "[TOOL] Create Account Via Custom Endpoint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4300,
+        740
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__COUNTRY_TOOL_CREDENTIAL__",
+          "name": "Country Tool API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n// ── LM CRM NOTES ────────────────────────────────────────────────────────────\n// Port 1:1 de app/crm_notes.py. TODO texto humano que se escribe o se envía a\n// LeadStudio / CRM va en INGLÉS, sin importar el país, el idioma del cliente ni\n// el del agente (docs/CRM_ENGLISH_RULE.md).\n//\n// NO se traducen: nombre del cliente, teléfono, email, IDs, URLs, route_key,\n// IDs de proveedor. Los enums técnicos siguen el contrato de LeadStudio.\n//\n// tests/test_crm_english_v2.py compara este catálogo con el de Python: si\n// alguien edita una frase en un solo lado, el test falla.\n\nconst LM_PHRASES = {\n  CALL_ANSWERED: 'Call answered.',\n  CALL_NO_ANSWER: 'Call was not answered.',\n  CALL_BUSY: 'Line was busy.',\n  CALL_VOICEMAIL: 'Call reached voicemail.',\n  CALL_CALLBACK: 'Customer requested a callback.',\n  CALL_WRONG_NUMBER: 'Wrong number.',\n  CALL_DNC: 'Customer asked not to be contacted again.',\n  CALL_FAILED: 'Call failed.',\n  CALL_UNKNOWN: 'Call result could not be determined.',\n  FOLLOWUP_RETRY: 'Next attempt scheduled.',\n  FOLLOWUP_CLOSE: 'No further attempts: retry policy exhausted.',\n  FOLLOWUP_COMPLETE: 'Contact established; no retry scheduled.',\n  FOLLOWUP_CALLBACK: 'Callback scheduled.',\n  FOLLOWUP_NONE: 'Result recorded; nothing scheduled.',\n  ACCOUNT_CREATED: 'Trading account created successfully.',\n  ACCOUNT_ALREADY_EXISTS: 'Customer already has a trading account; credentials were not resent (issued once at creation).',\n  ACCOUNT_FAILED: 'Trading account could not be created.',\n  ACCOUNT_REQUESTED: 'Customer requested a trading account.',\n  PAYMENT_LINK_CREATED: 'Payment link sent successfully.',\n  PAYMENT_LINK_FAILED: 'Payment link could not be created.',\n  PAYMENT_CONFIRMED: 'Payment confirmed.',\n  RECORDING_ATTACHED: 'Call recording attached.',\n  RECORDING_SKIPPED: 'Call recording not attached: below minimum duration.',\n  RECORDING_MISSING: 'Call recording not available.',\n  RECONCILIATION_OPENED: 'Automatic reconciliation opened a discrepancy for review.',\n  RECONCILIATION_CLOSED: 'Reconciliation discrepancy resolved.',\n  ERR_CONFIG: 'Request rejected: country configuration is incomplete.',\n  ERR_COUNTRY_DISABLED: 'Request rejected: this country is currently disabled.',\n  ERR_TOOL_DISABLED: 'Request rejected: this tool is not enabled for the country.',\n  ERR_VALIDATION: 'Request rejected: invalid or missing data.',\n  ERR_PROVIDER: 'Request failed at the provider.',\n  ERR_AMBIGUOUS: 'Result unconfirmed; flagged for manual reconciliation.'\n};\n\nconst LM_RESULT_PHRASE = {\n  ANSWERED: 'CALL_ANSWERED', NO_ANSWER: 'CALL_NO_ANSWER', BUSY: 'CALL_BUSY',\n  VOICEMAIL: 'CALL_VOICEMAIL', CALLBACK: 'CALL_CALLBACK',\n  WRONG_NUMBER: 'CALL_WRONG_NUMBER', DNC: 'CALL_DNC', FAILED: 'CALL_FAILED',\n  UNKNOWN: 'CALL_UNKNOWN'\n};\nconst LM_ACTION_PHRASE = {\n  RETRY: 'FOLLOWUP_RETRY', CLOSE: 'FOLLOWUP_CLOSE', COMPLETE: 'FOLLOWUP_COMPLETE',\n  CALLBACK: 'FOLLOWUP_CALLBACK', NONE: 'FOLLOWUP_NONE'\n};\nconst LM_MAX_NOTE = 900;\n\nfunction lmPhrase(key) {\n  if (!(key in LM_PHRASES)) throw new Error('frase desconocida: ' + key);\n  return LM_PHRASES[key];\n}\n\nfunction lmJoin(parts) {\n  return parts.filter(p => p && String(p).trim())\n              .map(p => String(p).trim()).join(' ').slice(0, LM_MAX_NOTE);\n}\n\n\n// Gemelo 1:1 de crm_notes.is_english. Heuristica conservadora: no es un\n// detector de idioma, es una red que hace fallar el caso conocido — que\n// alguien vuelva a meter \"No contesto\" o devanagari en una nota del CRM.\nvar LM_NON_ENGLISH_CHARS = /[\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00fc\\u00c1\\u00c9\\u00cd\\u00d3\\u00da\\u00d1\\u00dc\\u00bf\\u00a1\\u0900-\\u097f\\u0600-\\u06ff]/;\nvar LM_SPANISH_WORDS = new RegExp(\n  '\\\\b(no contest[o\\u00f3]|cuenta creada|llamada|intento|pr[o\\u00f3]xima|correctamente|' +\n  'usuario|contrase[n\\u00f1]a|grabaci[o\\u00f3]n|pago|enlace|fall[o\\u00f3]|d[i\\u00ed]as|h[a\\u00e1]biles|' +\n  'buz[o\\u00f3]n|ocupado|desconocido|pendiente|rechazado|creada|enviado)\\\\b', 'i');\n\n// Palabras funcionales del espanol que casi no aparecen en una nota en\n// ingles. Se exigen DOS distintas: con una habria falsos positivos\n// (\"la carte\"), con dos ya es una frase en espanol. NO incluye \"son\",\n// \"no\", \"a\", \"e\", \"o\" ni \"va\", que si son palabras inglesas.\nvar LM_SPANISH_STOPWORDS = new RegExp(\n  '\\\\b(el|la|los|las|una|unos|unas|que|del|por|para|con|sin|como|pero|' +\n  'cuando|donde|quiere|quiso|cliente|llamar|llamen|llame|llamada|' +\n  'ma[\\u00f1n]ana|hoy|ayer|gracias|favor|n[u\\u00fa]mero|dijo|pidi[o\\u00f3]|' +\n  'est[a\\u00e1]|tiene|hacer|m[a\\u00e1]s|muy|todo|nada|porque|tambi[e\\u00e9]n|' +\n  'ahora|luego)\\\\b', 'gi');\n\nfunction lmIsEnglish(text) {\n  var t = String(text === null || text === undefined ? '' : text);\n  if (LM_NON_ENGLISH_CHARS.test(t) || LM_SPANISH_WORDS.test(t)) return false;\n  var vistas = {}, n = 0, m;\n  LM_SPANISH_STOPWORDS.lastIndex = 0;\n  while ((m = LM_SPANISH_STOPWORDS.exec(t)) !== null) {\n    var w = m[0].toLowerCase();\n    if (!vistas[w]) { vistas[w] = true; n++; }\n    if (n >= 2) return false;\n  }\n  return true;\n}\n\n// ── Nada que no sea inglés entra al CRM ──────────────────────────────\n// Una version anterior adjuntaba el resumen de ElevenLabs tal cual. Eso\n// metia hindi, nepali y espanol dentro de notas del CRM. No hay excepcion.\n// Gemelo 1:1 de crm_notes.safe_summary / safe_detail / error_code_of.\n\n// lmcore.js ya declara LM_ERROR_CODES (el contrato de errores). Aqui se\n// usa esa misma lista mas los tres estados que solo aparecen en notas.\nvar LM_PUBLISHABLE_CODES = (typeof LM_ERROR_CODES !== 'undefined'\n  ? LM_ERROR_CODES : ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR',\n                      'PROVIDER_ERROR', 'CRM_ERROR', 'RETRYABLE_ERROR',\n                      'PERMANENT_ERROR'])\n  .concat(['UNKNOWN', 'TIMEOUT', 'AMBIGUOUS']);\n\n// Un token tecnico tiene que PARECER tecnico: MAYUSCULAS, con digito, o\n// con separador. Una palabra corriente en minusculas es prosa de alguien.\nfunction lmIsTechnicalToken(t) {\n  if (!t || t.length > 64) return false;\n  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+-]*$/.test(t)) return false;\n  if (t.length > 1 && t === t.toUpperCase() && /[A-Z]/.test(t)) return true;\n  if (/[0-9]/.test(t)) return true;\n  if (/[._:/+-]/.test(t)) return true;\n  return false;\n}\n\nfunction lmSafeDetail(detail) {\n  if (detail === null || detail === undefined || detail === '') return null;\n  var texto = String(detail).trim();\n  if (!texto) return null;\n  var partes = texto.split(/\\s+/);\n  if (partes.length > 4) return null;\n  for (var i = 0; i < partes.length; i++) {\n    if (!lmIsTechnicalToken(partes[i])) return null;\n  }\n  return partes.join(' ').slice(0, 64);\n}\n\nfunction lmErrorCodeOf(error) {\n  if (error === null || error === undefined || error === '') return 'UNKNOWN';\n  var t = String(error).trim().toUpperCase();\n  if (LM_PUBLISHABLE_CODES.indexOf(t) >= 0) return t;\n  var seguro = lmSafeDetail(error);\n  if (seguro && LM_PUBLISHABLE_CODES.indexOf(seguro.toUpperCase()) >= 0) {\n    return seguro.toUpperCase();\n  }\n  return 'PROVIDER_ERROR';\n}\n\n// El resumen solo entra si la fuente GARANTIZA que es ingles. Sin idioma\n// declarado se descarta, aunque \"parezca\" ingles: la heuristica existe\n// para cazar regresiones, no para autorizar contenido de idioma\n// desconocido. El original se guarda como evidencia local.\nfunction lmSafeSummary(summary, language, isEnglishFlag) {\n  if (!summary) return null;\n  var lang = String(language || '').trim().toLowerCase();\n  var declarado = !!isEnglishFlag ||\n    lang === 'en' || lang === 'en-us' || lang === 'en-gb' ||\n    lang === 'eng' || lang === 'english';\n  if (!declarado) return null;\n  var texto = String(summary).trim();\n  if (!texto) return null;\n  if (!lmIsEnglish(texto)) return null;\n  return texto;\n}\n\nfunction lmCallNote(o) {\n  o = o || {};\n  const head = lmPhrase(LM_RESULT_PHRASE[String(o.result || '').toUpperCase()] || 'CALL_UNKNOWN');\n  const tail = LM_ACTION_PHRASE[o.action] ? lmPhrase(LM_ACTION_PHRASE[o.action]) : '';\n  const meta = [];\n  if (o.attempt !== null && o.attempt !== undefined) meta.push('attempt ' + parseInt(o.attempt, 10));\n  if (o.route_key) meta.push('route ' + o.route_key);\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.sip_code) meta.push('sip ' + o.sip_code);\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.schedule_next_at) meta.push('next ' + o.schedule_next_at);\n  let note = lmJoin([head, tail, meta.length ? '[' + meta.join(' · ') + ']' : '']);\n  var __sum = lmSafeSummary(o.summary, o.summary_language, o.summary_is_english);\n  if (__sum) note = (note + ' Agent summary: ' + __sum).slice(0, LM_MAX_NOTE);\n  return note;\n}\n\nfunction lmAccountNote(o) {\n  o = o || {};\n  const key = { CREATED: 'ACCOUNT_CREATED', ALREADY_EXISTS: 'ACCOUNT_ALREADY_EXISTS',\n                FAILED: 'ACCOUNT_FAILED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de cuenta desconocido: ' + o.status);\n  const meta = [];\n  if (o.market) meta.push('market ' + o.market);\n  if (o.username) meta.push('username ' + o.username);\n  if (o.portal_url) meta.push('portal ' + o.portal_url);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmPaymentNote(o) {\n  o = o || {};\n  const key = { LINK_CREATED: 'PAYMENT_LINK_CREATED', LINK_FAILED: 'PAYMENT_LINK_FAILED',\n                CONFIRMED: 'PAYMENT_CONFIRMED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de pago desconocido: ' + o.status);\n  const meta = [];\n  if (o.amount !== null && o.amount !== undefined && o.currency) {\n    meta.push('amount ' + o.currency + ' ' + o.amount);\n  }\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.order_ref) meta.push('order ' + o.order_ref);\n  if (o.transaction_id) meta.push('txn ' + o.transaction_id);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmRecordingNote(o) {\n  o = o || {};\n  const key = { ATTACHED: 'RECORDING_ATTACHED', SKIPPED: 'RECORDING_SKIPPED',\n                MISSING: 'RECORDING_MISSING' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de grabacion desconocido: ' + o.status);\n  const meta = [];\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.min_secs !== null && o.min_secs !== undefined) {\n    meta.push('minimum ' + parseInt(o.min_secs, 10) + 's');\n  }\n  if (o.route_key) meta.push('route ' + o.route_key);\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmErrorNote(errorCode, detail) {\n  const key = { CONFIG_ERROR: 'ERR_CONFIG', COUNTRY_DISABLED: 'ERR_COUNTRY_DISABLED',\n                TOOL_DISABLED: 'ERR_TOOL_DISABLED', VALIDATION_ERROR: 'ERR_VALIDATION',\n                PROVIDER_ERROR: 'ERR_PROVIDER', AMBIGUOUS: 'ERR_AMBIGUOUS'\n              }[String(errorCode || '').toUpperCase()] || 'ERR_VALIDATION';\n  const meta = ['code ' + errorCode];\n  var __d = lmSafeDetail(detail);\n  if (__d) meta.push('detail ' + __d);\n  return lmJoin([lmPhrase(key), '[' + meta.join(' · ') + ']']);\n}\n\nfunction lmReconciliationNote(issueType, detail) {\n  const meta = ['issue ' + issueType];\n  var __d2 = lmSafeDetail(detail);\n  if (__d2) meta.push(__d2);\n  return lmJoin([lmPhrase('RECONCILIATION_OPENED'), '[' + meta.join(' · ') + ']']);\n}\n\nreturn $input.all().map(it => ({ json: Object.assign({}, it.json, {\n  account_status: 'FAILED', error_code: 'CONFIG_ERROR',\n  error_detail: 'modo de tool no soportado: ' + it.json.tool_mode,\n  crm_note: lmErrorNote('CONFIG_ERROR', 'unsupported tool mode'),\n  user_message: lmErrorNote('CONFIG_ERROR', null),\n  username: null, password: null, account_id: null, portal_url: null\n})}));\n"
+      },
+      "id": "e7f47375-d8fd-4f9b-ab01-5012f520658e",
+      "name": "[ERROR] Unsupported Tool Mode",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4300,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 07 — VALIDATE RESPONSE\n\nContrato de CashStudio, respuesta por\nrespuesta:\n\n| HTTP | significado | qué se hace |\n|---|---|---|\n| 201 | cuenta creada | `ACCOUNT_CREATED` · se entregan credenciales |\n| 409 `EMAIL_TAKEN` / `EMAIL_INVALID` | dato del lead | `ACCOUNT_FAILED` |\n| 409 sin `code` | el lead **ya tenía** cuenta | `ACCOUNT_ALREADY_EXISTS` |\n| 429 | rate limit (20/15 min) | falla y **no** reintenta: reintentar empeora |\n| 502 / timeout | **ambiguo** | `NEEDS_RECONCILIATION`, **no** se reintenta |\n| resto | error | `ACCOUNT_FAILED` |\n\nEl 409 sin `code` **no** es un fallo: el cliente ya tiene cuenta. La API entrega\nla contraseña una sola vez, en el create original, así que **no se reenvían\ncredenciales** que no tenemos — y la nota del CRM lo dice, en inglés.\n\nv1 reintentaba el 502 una vez con un nodo Wait; eso puede crear dos cuentas.",
+        "height": 520,
+        "width": 420,
+        "color": 2
+      },
+      "id": "70812301-36f6-4711-8ef0-0eee72b718a0",
+      "name": "NOTE 07 07 — VALIDATE RESPONSE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4740,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n// ── LM CRM NOTES ────────────────────────────────────────────────────────────\n// Port 1:1 de app/crm_notes.py. TODO texto humano que se escribe o se envía a\n// LeadStudio / CRM va en INGLÉS, sin importar el país, el idioma del cliente ni\n// el del agente (docs/CRM_ENGLISH_RULE.md).\n//\n// NO se traducen: nombre del cliente, teléfono, email, IDs, URLs, route_key,\n// IDs de proveedor. Los enums técnicos siguen el contrato de LeadStudio.\n//\n// tests/test_crm_english_v2.py compara este catálogo con el de Python: si\n// alguien edita una frase en un solo lado, el test falla.\n\nconst LM_PHRASES = {\n  CALL_ANSWERED: 'Call answered.',\n  CALL_NO_ANSWER: 'Call was not answered.',\n  CALL_BUSY: 'Line was busy.',\n  CALL_VOICEMAIL: 'Call reached voicemail.',\n  CALL_CALLBACK: 'Customer requested a callback.',\n  CALL_WRONG_NUMBER: 'Wrong number.',\n  CALL_DNC: 'Customer asked not to be contacted again.',\n  CALL_FAILED: 'Call failed.',\n  CALL_UNKNOWN: 'Call result could not be determined.',\n  FOLLOWUP_RETRY: 'Next attempt scheduled.',\n  FOLLOWUP_CLOSE: 'No further attempts: retry policy exhausted.',\n  FOLLOWUP_COMPLETE: 'Contact established; no retry scheduled.',\n  FOLLOWUP_CALLBACK: 'Callback scheduled.',\n  FOLLOWUP_NONE: 'Result recorded; nothing scheduled.',\n  ACCOUNT_CREATED: 'Trading account created successfully.',\n  ACCOUNT_ALREADY_EXISTS: 'Customer already has a trading account; credentials were not resent (issued once at creation).',\n  ACCOUNT_FAILED: 'Trading account could not be created.',\n  ACCOUNT_REQUESTED: 'Customer requested a trading account.',\n  PAYMENT_LINK_CREATED: 'Payment link sent successfully.',\n  PAYMENT_LINK_FAILED: 'Payment link could not be created.',\n  PAYMENT_CONFIRMED: 'Payment confirmed.',\n  RECORDING_ATTACHED: 'Call recording attached.',\n  RECORDING_SKIPPED: 'Call recording not attached: below minimum duration.',\n  RECORDING_MISSING: 'Call recording not available.',\n  RECONCILIATION_OPENED: 'Automatic reconciliation opened a discrepancy for review.',\n  RECONCILIATION_CLOSED: 'Reconciliation discrepancy resolved.',\n  ERR_CONFIG: 'Request rejected: country configuration is incomplete.',\n  ERR_COUNTRY_DISABLED: 'Request rejected: this country is currently disabled.',\n  ERR_TOOL_DISABLED: 'Request rejected: this tool is not enabled for the country.',\n  ERR_VALIDATION: 'Request rejected: invalid or missing data.',\n  ERR_PROVIDER: 'Request failed at the provider.',\n  ERR_AMBIGUOUS: 'Result unconfirmed; flagged for manual reconciliation.'\n};\n\nconst LM_RESULT_PHRASE = {\n  ANSWERED: 'CALL_ANSWERED', NO_ANSWER: 'CALL_NO_ANSWER', BUSY: 'CALL_BUSY',\n  VOICEMAIL: 'CALL_VOICEMAIL', CALLBACK: 'CALL_CALLBACK',\n  WRONG_NUMBER: 'CALL_WRONG_NUMBER', DNC: 'CALL_DNC', FAILED: 'CALL_FAILED',\n  UNKNOWN: 'CALL_UNKNOWN'\n};\nconst LM_ACTION_PHRASE = {\n  RETRY: 'FOLLOWUP_RETRY', CLOSE: 'FOLLOWUP_CLOSE', COMPLETE: 'FOLLOWUP_COMPLETE',\n  CALLBACK: 'FOLLOWUP_CALLBACK', NONE: 'FOLLOWUP_NONE'\n};\nconst LM_MAX_NOTE = 900;\n\nfunction lmPhrase(key) {\n  if (!(key in LM_PHRASES)) throw new Error('frase desconocida: ' + key);\n  return LM_PHRASES[key];\n}\n\nfunction lmJoin(parts) {\n  return parts.filter(p => p && String(p).trim())\n              .map(p => String(p).trim()).join(' ').slice(0, LM_MAX_NOTE);\n}\n\n\n// Gemelo 1:1 de crm_notes.is_english. Heuristica conservadora: no es un\n// detector de idioma, es una red que hace fallar el caso conocido — que\n// alguien vuelva a meter \"No contesto\" o devanagari en una nota del CRM.\nvar LM_NON_ENGLISH_CHARS = /[\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00fc\\u00c1\\u00c9\\u00cd\\u00d3\\u00da\\u00d1\\u00dc\\u00bf\\u00a1\\u0900-\\u097f\\u0600-\\u06ff]/;\nvar LM_SPANISH_WORDS = new RegExp(\n  '\\\\b(no contest[o\\u00f3]|cuenta creada|llamada|intento|pr[o\\u00f3]xima|correctamente|' +\n  'usuario|contrase[n\\u00f1]a|grabaci[o\\u00f3]n|pago|enlace|fall[o\\u00f3]|d[i\\u00ed]as|h[a\\u00e1]biles|' +\n  'buz[o\\u00f3]n|ocupado|desconocido|pendiente|rechazado|creada|enviado)\\\\b', 'i');\n\n// Palabras funcionales del espanol que casi no aparecen en una nota en\n// ingles. Se exigen DOS distintas: con una habria falsos positivos\n// (\"la carte\"), con dos ya es una frase en espanol. NO incluye \"son\",\n// \"no\", \"a\", \"e\", \"o\" ni \"va\", que si son palabras inglesas.\nvar LM_SPANISH_STOPWORDS = new RegExp(\n  '\\\\b(el|la|los|las|una|unos|unas|que|del|por|para|con|sin|como|pero|' +\n  'cuando|donde|quiere|quiso|cliente|llamar|llamen|llame|llamada|' +\n  'ma[\\u00f1n]ana|hoy|ayer|gracias|favor|n[u\\u00fa]mero|dijo|pidi[o\\u00f3]|' +\n  'est[a\\u00e1]|tiene|hacer|m[a\\u00e1]s|muy|todo|nada|porque|tambi[e\\u00e9]n|' +\n  'ahora|luego)\\\\b', 'gi');\n\nfunction lmIsEnglish(text) {\n  var t = String(text === null || text === undefined ? '' : text);\n  if (LM_NON_ENGLISH_CHARS.test(t) || LM_SPANISH_WORDS.test(t)) return false;\n  var vistas = {}, n = 0, m;\n  LM_SPANISH_STOPWORDS.lastIndex = 0;\n  while ((m = LM_SPANISH_STOPWORDS.exec(t)) !== null) {\n    var w = m[0].toLowerCase();\n    if (!vistas[w]) { vistas[w] = true; n++; }\n    if (n >= 2) return false;\n  }\n  return true;\n}\n\n// ── Nada que no sea inglés entra al CRM ──────────────────────────────\n// Una version anterior adjuntaba el resumen de ElevenLabs tal cual. Eso\n// metia hindi, nepali y espanol dentro de notas del CRM. No hay excepcion.\n// Gemelo 1:1 de crm_notes.safe_summary / safe_detail / error_code_of.\n\n// lmcore.js ya declara LM_ERROR_CODES (el contrato de errores). Aqui se\n// usa esa misma lista mas los tres estados que solo aparecen en notas.\nvar LM_PUBLISHABLE_CODES = (typeof LM_ERROR_CODES !== 'undefined'\n  ? LM_ERROR_CODES : ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR',\n                      'PROVIDER_ERROR', 'CRM_ERROR', 'RETRYABLE_ERROR',\n                      'PERMANENT_ERROR'])\n  .concat(['UNKNOWN', 'TIMEOUT', 'AMBIGUOUS']);\n\n// Un token tecnico tiene que PARECER tecnico: MAYUSCULAS, con digito, o\n// con separador. Una palabra corriente en minusculas es prosa de alguien.\nfunction lmIsTechnicalToken(t) {\n  if (!t || t.length > 64) return false;\n  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+-]*$/.test(t)) return false;\n  if (t.length > 1 && t === t.toUpperCase() && /[A-Z]/.test(t)) return true;\n  if (/[0-9]/.test(t)) return true;\n  if (/[._:/+-]/.test(t)) return true;\n  return false;\n}\n\nfunction lmSafeDetail(detail) {\n  if (detail === null || detail === undefined || detail === '') return null;\n  var texto = String(detail).trim();\n  if (!texto) return null;\n  var partes = texto.split(/\\s+/);\n  if (partes.length > 4) return null;\n  for (var i = 0; i < partes.length; i++) {\n    if (!lmIsTechnicalToken(partes[i])) return null;\n  }\n  return partes.join(' ').slice(0, 64);\n}\n\nfunction lmErrorCodeOf(error) {\n  if (error === null || error === undefined || error === '') return 'UNKNOWN';\n  var t = String(error).trim().toUpperCase();\n  if (LM_PUBLISHABLE_CODES.indexOf(t) >= 0) return t;\n  var seguro = lmSafeDetail(error);\n  if (seguro && LM_PUBLISHABLE_CODES.indexOf(seguro.toUpperCase()) >= 0) {\n    return seguro.toUpperCase();\n  }\n  return 'PROVIDER_ERROR';\n}\n\n// El resumen solo entra si la fuente GARANTIZA que es ingles. Sin idioma\n// declarado se descarta, aunque \"parezca\" ingles: la heuristica existe\n// para cazar regresiones, no para autorizar contenido de idioma\n// desconocido. El original se guarda como evidencia local.\nfunction lmSafeSummary(summary, language, isEnglishFlag) {\n  if (!summary) return null;\n  var lang = String(language || '').trim().toLowerCase();\n  var declarado = !!isEnglishFlag ||\n    lang === 'en' || lang === 'en-us' || lang === 'en-gb' ||\n    lang === 'eng' || lang === 'english';\n  if (!declarado) return null;\n  var texto = String(summary).trim();\n  if (!texto) return null;\n  if (!lmIsEnglish(texto)) return null;\n  return texto;\n}\n\nfunction lmCallNote(o) {\n  o = o || {};\n  const head = lmPhrase(LM_RESULT_PHRASE[String(o.result || '').toUpperCase()] || 'CALL_UNKNOWN');\n  const tail = LM_ACTION_PHRASE[o.action] ? lmPhrase(LM_ACTION_PHRASE[o.action]) : '';\n  const meta = [];\n  if (o.attempt !== null && o.attempt !== undefined) meta.push('attempt ' + parseInt(o.attempt, 10));\n  if (o.route_key) meta.push('route ' + o.route_key);\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.sip_code) meta.push('sip ' + o.sip_code);\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.schedule_next_at) meta.push('next ' + o.schedule_next_at);\n  let note = lmJoin([head, tail, meta.length ? '[' + meta.join(' · ') + ']' : '']);\n  var __sum = lmSafeSummary(o.summary, o.summary_language, o.summary_is_english);\n  if (__sum) note = (note + ' Agent summary: ' + __sum).slice(0, LM_MAX_NOTE);\n  return note;\n}\n\nfunction lmAccountNote(o) {\n  o = o || {};\n  const key = { CREATED: 'ACCOUNT_CREATED', ALREADY_EXISTS: 'ACCOUNT_ALREADY_EXISTS',\n                FAILED: 'ACCOUNT_FAILED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de cuenta desconocido: ' + o.status);\n  const meta = [];\n  if (o.market) meta.push('market ' + o.market);\n  if (o.username) meta.push('username ' + o.username);\n  if (o.portal_url) meta.push('portal ' + o.portal_url);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmPaymentNote(o) {\n  o = o || {};\n  const key = { LINK_CREATED: 'PAYMENT_LINK_CREATED', LINK_FAILED: 'PAYMENT_LINK_FAILED',\n                CONFIRMED: 'PAYMENT_CONFIRMED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de pago desconocido: ' + o.status);\n  const meta = [];\n  if (o.amount !== null && o.amount !== undefined && o.currency) {\n    meta.push('amount ' + o.currency + ' ' + o.amount);\n  }\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.order_ref) meta.push('order ' + o.order_ref);\n  if (o.transaction_id) meta.push('txn ' + o.transaction_id);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmRecordingNote(o) {\n  o = o || {};\n  const key = { ATTACHED: 'RECORDING_ATTACHED', SKIPPED: 'RECORDING_SKIPPED',\n                MISSING: 'RECORDING_MISSING' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de grabacion desconocido: ' + o.status);\n  const meta = [];\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.min_secs !== null && o.min_secs !== undefined) {\n    meta.push('minimum ' + parseInt(o.min_secs, 10) + 's');\n  }\n  if (o.route_key) meta.push('route ' + o.route_key);\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmErrorNote(errorCode, detail) {\n  const key = { CONFIG_ERROR: 'ERR_CONFIG', COUNTRY_DISABLED: 'ERR_COUNTRY_DISABLED',\n                TOOL_DISABLED: 'ERR_TOOL_DISABLED', VALIDATION_ERROR: 'ERR_VALIDATION',\n                PROVIDER_ERROR: 'ERR_PROVIDER', AMBIGUOUS: 'ERR_AMBIGUOUS'\n              }[String(errorCode || '').toUpperCase()] || 'ERR_VALIDATION';\n  const meta = ['code ' + errorCode];\n  var __d = lmSafeDetail(detail);\n  if (__d) meta.push('detail ' + __d);\n  return lmJoin([lmPhrase(key), '[' + meta.join(' · ') + ']']);\n}\n\nfunction lmReconciliationNote(issueType, detail) {\n  const meta = ['issue ' + issueType];\n  var __d2 = lmSafeDetail(detail);\n  if (__d2) meta.push(__d2);\n  return lmJoin([lmPhrase('RECONCILIATION_OPENED'), '[' + meta.join(' · ') + ']']);\n}\n\nconst rows = $input.all();\nreturn rows.map((r, i) => {\n  let ctx;\n  try { ctx = $('[TOOL] Account Mode Router').itemMatching(i).json; }\n  catch (e) { ctx = $('[TOOL] Claim Won').all()[0].json; }\n  const resp = r.json || {};\n  const code = Number(resp.statusCode || 0);\n  const body = resp.body || {};\n\n  let status, errorCode = null, detail = null;\n  let username = null, password = null, accountId = null, traderId = null, portal = null;\n\n  if (code === 201 && body.account) {\n    status = 'CREATED';\n    username = body.account.userName || body.account.username || null;\n    password = body.password || null;\n    accountId = body.account.id || null;\n    traderId = body.account.traderId || null;\n    portal = body.account.portalUrl || (ctx.tool_config || {}).portal_url || null;\n    if (body.account.market && ctx.market && body.account.market !== ctx.market) {\n      console.log('[WF3] WARN el proveedor devolvio market ' + body.account.market +\n                  ' y se pidio ' + ctx.market);\n    }\n  } else if (code === 409) {\n    const c = (body.details && body.details.code) || '';\n    if (c === 'EMAIL_TAKEN' || c === 'EMAIL_INVALID') {\n      status = 'FAILED'; errorCode = 'VALIDATION_ERROR'; detail = c;\n    } else {\n      // Ya tiene cuenta. NO es un fallo y NO se reintenta.\n      status = 'ALREADY_EXISTS'; detail = body.error || 'lead already has a trader account';\n    }\n  } else if (code === 429) {\n    status = 'FAILED'; errorCode = 'RETRYABLE_ERROR';\n    detail = 'rate limited (429) - retry manually later';\n  } else if (code === 0 || code === 408 || code >= 500) {\n    // AMBIGUO: el proveedor pudo haber creado la cuenta. Jamás se reintenta.\n    status = 'AMBIGUOUS'; errorCode = 'AMBIGUOUS';\n    detail = 'provider did not confirm (HTTP ' + code + ')';\n  } else {\n    status = 'FAILED'; errorCode = 'PROVIDER_ERROR';\n    detail = (body.error || JSON.stringify(body)).slice(0, 200);\n  }\n\n  const note = status === 'CREATED'\n    ? lmAccountNote({ status: 'CREATED', market: ctx.market, username: username, portal_url: portal })\n    : status === 'ALREADY_EXISTS'\n      ? lmAccountNote({ status: 'ALREADY_EXISTS', market: ctx.market })\n      : status === 'AMBIGUOUS'\n        ? lmErrorNote('AMBIGUOUS', detail)\n        : lmAccountNote({ status: 'FAILED', market: ctx.market, error: detail });\n\n  return { json: Object.assign({}, ctx, {\n    account_status: status, http_status: code, error_code: errorCode, error_detail: detail,\n    username: username, password: password, account_id: accountId, trader_id: traderId,\n    portal_url: portal, crm_note: note,\n    user_message: status === 'CREATED'\n      ? 'Your trading account has been created. The login details have been sent to you.'\n      : status === 'ALREADY_EXISTS'\n        ? 'You already have a trading account with us.'\n        : 'We could not open the account right now. Our team will follow up.'\n  })};\n});\n"
+      },
+      "id": "35194f5c-dacf-4417-a577-7394eebced5a",
+      "name": "[TOOL] Validate Account Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "50dbb4c5-478b-47b5-9bba-d78fa59e70ef",
+                    "leftValue": "={{ $json.account_status }}",
+                    "rightValue": "CREATED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "created"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0dd761a4-a894-4df6-9a07-997829701387",
+                    "leftValue": "={{ $json.account_status }}",
+                    "rightValue": "ALREADY_EXISTS",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "exists"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "95556ce7-93f1-4cc1-a995-15bd15262946",
+                    "leftValue": "={{ $json.account_status }}",
+                    "rightValue": "AMBIGUOUS",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ambiguous"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "6ea05d46-03b5-4417-818d-fb87a29a1907",
+      "name": "[TOOL] Account Result Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        5020,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 08 — PERSIST & CRM\n\nPrimero el evento **local** e idempotente\n(`ACCOUNT_CREATED:{provider}:{lead_id}`: una cuenta por lead y proveedor, aunque\nel pedido se repita), después LeadStudio.\n\nLa nota del CRM va **en inglés** y la genera `lmnotes.js`, el mismo catálogo que\nusan los otros seis workflows. El nombre, el teléfono, el usuario y la URL del\nportal **no** se traducen.",
+        "height": 380,
+        "width": 420,
+        "color": 3
+      },
+      "id": "3be77cd4-717a-4151-b365-03400b7428c0",
+      "name": "NOTE 08 08 — PERSIST & CRM",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        5260,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, lead_id, country_iso,\n   conversation_id, provider, source_workflow, execution_id, metadata_json)\nVALUES (?, 'ACCOUNT_CREATED', 'TOOL', UTC_TIMESTAMP(), ?, ?, ?, ?, 'WF3', ?, ?)",
+        "options": {
+          "queryReplacement": "={{ \"ACCOUNT_CREATED:\" + $json.tool_provider + \":\" + $json.lead_id }},={{ $json.lead_id }},={{ $json.country_iso }},={{ $json.conversation_id }},={{ $json.tool_provider }},={{ $json.execution_id }},={{ JSON.stringify({market: $json.market, account_id: $json.account_id, trader_id: $json.trader_id}) }}"
+        }
+      },
+      "id": "66d8e961-4987-4af8-9545-cd4e8bfc1e5d",
+      "name": "[DB] Record Event Account Created",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        5280,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, lead_id, country_iso,\n   conversation_id, provider, source_workflow, execution_id)\nVALUES (?, 'ACCOUNT_ALREADY_EXISTS', 'TOOL', UTC_TIMESTAMP(), ?, ?, ?, ?, 'WF3', ?)",
+        "options": {
+          "queryReplacement": "={{ \"ACCOUNT_ALREADY_EXISTS:\" + $json.tool_provider + \":\" + $json.lead_id }},={{ $json.lead_id }},={{ $json.country_iso }},={{ $json.conversation_id }},={{ $json.tool_provider }},={{ $json.execution_id }}"
+        }
+      },
+      "id": "aa00cc15-aa9f-4999-b6b3-1d559a13c6f0",
+      "name": "[DB] Record Event Account Exists",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        5280,
+        740
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_tool_requests\n   SET state = 'NEEDS_RECONCILIATION', error_code = 'AMBIGUOUS',\n       error_message = ?, completed_at = UTC_TIMESTAMP()\n WHERE request_key = ? AND state = 'CLAIMED'",
+        "options": {
+          "queryReplacement": "={{ $json.error_detail }},={{ $json.request_key }}"
+        }
+      },
+      "id": "6b11844c-4598-4087-b0f7-2b2e55823bbe",
+      "name": "[DB] Mark Tool Needs Reconciliation",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        5280,
+        960
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wf_reconciliation_issues\n  (issue_key, issue_type, entity_type, entity_id, lead_id, country_iso,\n   severity, state, detail_json, first_seen_at, last_seen_at)\nVALUES (?, 'CRM_ACCOUNT_MISSING', 'lead', ?, ?, ?, 'ERROR', 'OPEN', ?,\n        UTC_TIMESTAMP(), UTC_TIMESTAMP())\nON DUPLICATE KEY UPDATE occurrences = occurrences + 1,\n        last_seen_at = UTC_TIMESTAMP(), detail_json = VALUES(detail_json)",
+        "options": {
+          "queryReplacement": "={{ \"CRM_ACCOUNT_MISSING:lead:\" + $json.lead_id }},={{ $json.lead_id }},={{ $json.lead_id }},={{ $json.country_iso }},={{ JSON.stringify({http: $json.http_status, detail: $json.error_detail, request_key: $json.request_key}) }}"
+        }
+      },
+      "id": "ccf106ad-44a0-4abe-8717-f4d99b4fd440",
+      "name": "[DB] Open Account Issue",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        5540,
+        960
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, lead_id, country_iso,\n   conversation_id, provider, result, source_workflow, execution_id, metadata_json)\nVALUES (?, 'ACCOUNT_FAILED', 'TOOL', UTC_TIMESTAMP(), ?, ?, ?, ?, ?, 'WF3', ?, ?)",
+        "options": {
+          "queryReplacement": "={{ \"ACCOUNT_FAILED:\" + $json.lead_id + \":\" + $json.request_ref }},={{ $json.lead_id }},={{ $json.country_iso }},={{ $json.conversation_id }},={{ $json.tool_provider }},={{ $json.error_code }},={{ $json.execution_id }},={{ JSON.stringify({http: $json.http_status, detail: $json.error_detail}) }}"
+        }
+      },
+      "id": "e7333cd0-d0b6-4725-983c-b3da466c6a02",
+      "name": "[DB] Record Event Account Failed",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        5280,
+        1400
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_tool_requests\n   SET state = ?, result_ref = ?, error_code = ?, error_message = ?,\n       completed_at = UTC_TIMESTAMP()\n WHERE request_key = ? AND state = 'CLAIMED'",
+        "options": {
+          "queryReplacement": "={{ $json.account_status === \"CREATED\" ? \"SUCCEEDED\" : ($json.account_status === \"ALREADY_EXISTS\" ? \"ALREADY_EXISTS\" : \"FAILED\") }},={{ $json.account_id }},={{ $json.error_code }},={{ $json.error_detail }},={{ $json.request_key }}"
+        }
+      },
+      "id": "20d18cd6-1c5c-4f2c-9d42-602d15383c4c",
+      "name": "[DB] Close Tool Request",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        5800,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "__MYSQL_CREDENTIAL__",
+          "name": "Landmark MySQL"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/leads/{{ $json.lead_id }}/followups",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: \"NOTE\", notes: $json.crm_note.slice(0, 900) }) }}"
+      },
+      "id": "daeb98d1-99f4-46d0-81d3-dd7d014d602e",
+      "name": "[CRM] Post Account Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6060,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// El nodo MySQL anterior reemplazó el json; se recompone desde el validador.\nreturn $input.all().map((r, i) => ({\n  json: $('[TOOL] Validate Account Response').itemMatching(i).json\n}));\n"
+      },
+      "id": "1eeaaf7a-e452-4821-a2b6-89932c9803d2",
+      "name": "[CRM] Prepare Note Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6060,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/leads/{{ $json.lead_id }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ stage: \"INTERESTED\" }) }}"
+      },
+      "id": "b99f6bd9-4554-421c-bf9e-67e5a917a8cd",
+      "name": "[CRM] Patch Lead Stage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6580,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4459dd00-f76e-4479-a86e-54b120aaecf5",
+              "leftValue": "={{ $json.account_status === \"CREATED\" || $json.account_status === \"ALREADY_EXISTS\" }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f99d5e1d-8d7e-4952-a79c-0994f64830ba",
+      "name": "[CRM] Account Was Opened",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nreturn $input.all().map((r, i) => ({\n  json: $('[TOOL] Validate Account Response').itemMatching(i).json\n}));\n"
+      },
+      "id": "cd7a6b5b-dccf-4c74-a3f2-f8daa14a1b03",
+      "name": "[CRM] Restore Context After Note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6320,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 10 — NOTIFY\n\nLas credenciales se entregan por los canales\nconfigurados del país. **La contraseña nunca se loguea** ni se guarda en el\nevento ni en la nota del CRM.\n\nTelegram usa la credential `Landmark Telegram`; el chat sale de\n`route_telegram_targets` (propósito `account`) expuesto en la config del país.\nSi el país no tiene destino configurado, no se envía y se deja constancia —\nno se cae el workflow.",
+        "height": 380,
+        "width": 420,
+        "color": 6
+      },
+      "id": "0976428e-3704-4b77-a797-5fdc7c8076d2",
+      "name": "NOTE 10 10 — NOTIFY",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        6820,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0673e158-c32f-4d7c-b35c-3a4d2ffb2902",
+              "leftValue": "={{ $json.account_status === \"CREATED\" && !!($json.tool_config && $json.tool_config.telegram_chat_id) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0526d163-4a29-4a6b-9be6-14f512c7eb4c",
+      "name": "[TELEGRAM] Should Notify",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.tool_config.telegram_chat_id }}",
+        "text": "=<b>New trading account</b>\nClient: {{ $json.full_name }}\nLead: {{ $json.lead_id }}\nCountry: {{ $json.country_iso }}\nMarket: {{ $json.market }}\nUsername: {{ $json.username }}\nPortal: {{ $json.portal_url }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "6ccd5af8-f133-4409-be8b-38dc4881223c",
+      "name": "[TELEGRAM] Send Account Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        7100,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "__TELEGRAM_CREDENTIAL__",
+          "name": "Landmark Telegram"
+        }
+      },
+      "webhookId": "8ec2bd01-1295-41a7-9366-0169c7c9f0cc"
+    },
+    {
+      "parameters": {
+        "content": "## 11 — RESPOND TO AGENT\n\nSiempre se responde al agente con un\nmensaje de negocio legible **en inglés**, nunca con un 500 ni con un stack\ntrace. Un tool que devuelve 500 hace que el agente improvise en medio de la\nllamada.",
+        "height": 320,
+        "width": 420,
+        "color": 4
+      },
+      "id": "edeef484-9fcd-45ec-bf07-dff0cb3eff94",
+      "name": "NOTE 11 11 — RESPOND TO AGENT",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        7340,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// La contraseña NO se loguea. Solo se devuelve al canal que la entrega.\nreturn $input.all().map((r, i) => {\n  let d;\n  try { d = $('[TOOL] Validate Account Response').itemMatching(i).json; }\n  catch (e) { d = r.json; }\n  lmLog('WF3', d, { lead_id: d.lead_id, country: d.country_iso,\n                    conversation_id: d.conversation_id,\n                    result: d.account_status, error_code: d.error_code,\n                    action: 'ACCOUNT' });\n  return { json: {\n    success: d.account_status === 'CREATED',\n    already_exists: d.account_status === 'ALREADY_EXISTS',\n    status: d.account_status,\n    message_to_user: d.user_message,\n    lead_id: d.lead_id, country: d.country_iso,\n    account_id: d.account_id || null,\n    username: d.username || null,\n    portal_url: d.portal_url || null\n  }};\n});\n"
+      },
+      "id": "ea290a98-dd53-4548-9b8f-1313b39f51aa",
+      "name": "[TOOL] Build Agent Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7360,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n// ── LM CRM NOTES ────────────────────────────────────────────────────────────\n// Port 1:1 de app/crm_notes.py. TODO texto humano que se escribe o se envía a\n// LeadStudio / CRM va en INGLÉS, sin importar el país, el idioma del cliente ni\n// el del agente (docs/CRM_ENGLISH_RULE.md).\n//\n// NO se traducen: nombre del cliente, teléfono, email, IDs, URLs, route_key,\n// IDs de proveedor. Los enums técnicos siguen el contrato de LeadStudio.\n//\n// tests/test_crm_english_v2.py compara este catálogo con el de Python: si\n// alguien edita una frase en un solo lado, el test falla.\n\nconst LM_PHRASES = {\n  CALL_ANSWERED: 'Call answered.',\n  CALL_NO_ANSWER: 'Call was not answered.',\n  CALL_BUSY: 'Line was busy.',\n  CALL_VOICEMAIL: 'Call reached voicemail.',\n  CALL_CALLBACK: 'Customer requested a callback.',\n  CALL_WRONG_NUMBER: 'Wrong number.',\n  CALL_DNC: 'Customer asked not to be contacted again.',\n  CALL_FAILED: 'Call failed.',\n  CALL_UNKNOWN: 'Call result could not be determined.',\n  FOLLOWUP_RETRY: 'Next attempt scheduled.',\n  FOLLOWUP_CLOSE: 'No further attempts: retry policy exhausted.',\n  FOLLOWUP_COMPLETE: 'Contact established; no retry scheduled.',\n  FOLLOWUP_CALLBACK: 'Callback scheduled.',\n  FOLLOWUP_NONE: 'Result recorded; nothing scheduled.',\n  ACCOUNT_CREATED: 'Trading account created successfully.',\n  ACCOUNT_ALREADY_EXISTS: 'Customer already has a trading account; credentials were not resent (issued once at creation).',\n  ACCOUNT_FAILED: 'Trading account could not be created.',\n  ACCOUNT_REQUESTED: 'Customer requested a trading account.',\n  PAYMENT_LINK_CREATED: 'Payment link sent successfully.',\n  PAYMENT_LINK_FAILED: 'Payment link could not be created.',\n  PAYMENT_CONFIRMED: 'Payment confirmed.',\n  RECORDING_ATTACHED: 'Call recording attached.',\n  RECORDING_SKIPPED: 'Call recording not attached: below minimum duration.',\n  RECORDING_MISSING: 'Call recording not available.',\n  RECONCILIATION_OPENED: 'Automatic reconciliation opened a discrepancy for review.',\n  RECONCILIATION_CLOSED: 'Reconciliation discrepancy resolved.',\n  ERR_CONFIG: 'Request rejected: country configuration is incomplete.',\n  ERR_COUNTRY_DISABLED: 'Request rejected: this country is currently disabled.',\n  ERR_TOOL_DISABLED: 'Request rejected: this tool is not enabled for the country.',\n  ERR_VALIDATION: 'Request rejected: invalid or missing data.',\n  ERR_PROVIDER: 'Request failed at the provider.',\n  ERR_AMBIGUOUS: 'Result unconfirmed; flagged for manual reconciliation.'\n};\n\nconst LM_RESULT_PHRASE = {\n  ANSWERED: 'CALL_ANSWERED', NO_ANSWER: 'CALL_NO_ANSWER', BUSY: 'CALL_BUSY',\n  VOICEMAIL: 'CALL_VOICEMAIL', CALLBACK: 'CALL_CALLBACK',\n  WRONG_NUMBER: 'CALL_WRONG_NUMBER', DNC: 'CALL_DNC', FAILED: 'CALL_FAILED',\n  UNKNOWN: 'CALL_UNKNOWN'\n};\nconst LM_ACTION_PHRASE = {\n  RETRY: 'FOLLOWUP_RETRY', CLOSE: 'FOLLOWUP_CLOSE', COMPLETE: 'FOLLOWUP_COMPLETE',\n  CALLBACK: 'FOLLOWUP_CALLBACK', NONE: 'FOLLOWUP_NONE'\n};\nconst LM_MAX_NOTE = 900;\n\nfunction lmPhrase(key) {\n  if (!(key in LM_PHRASES)) throw new Error('frase desconocida: ' + key);\n  return LM_PHRASES[key];\n}\n\nfunction lmJoin(parts) {\n  return parts.filter(p => p && String(p).trim())\n              .map(p => String(p).trim()).join(' ').slice(0, LM_MAX_NOTE);\n}\n\n\n// Gemelo 1:1 de crm_notes.is_english. Heuristica conservadora: no es un\n// detector de idioma, es una red que hace fallar el caso conocido — que\n// alguien vuelva a meter \"No contesto\" o devanagari en una nota del CRM.\nvar LM_NON_ENGLISH_CHARS = /[\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00fc\\u00c1\\u00c9\\u00cd\\u00d3\\u00da\\u00d1\\u00dc\\u00bf\\u00a1\\u0900-\\u097f\\u0600-\\u06ff]/;\nvar LM_SPANISH_WORDS = new RegExp(\n  '\\\\b(no contest[o\\u00f3]|cuenta creada|llamada|intento|pr[o\\u00f3]xima|correctamente|' +\n  'usuario|contrase[n\\u00f1]a|grabaci[o\\u00f3]n|pago|enlace|fall[o\\u00f3]|d[i\\u00ed]as|h[a\\u00e1]biles|' +\n  'buz[o\\u00f3]n|ocupado|desconocido|pendiente|rechazado|creada|enviado)\\\\b', 'i');\n\n// Palabras funcionales del espanol que casi no aparecen en una nota en\n// ingles. Se exigen DOS distintas: con una habria falsos positivos\n// (\"la carte\"), con dos ya es una frase en espanol. NO incluye \"son\",\n// \"no\", \"a\", \"e\", \"o\" ni \"va\", que si son palabras inglesas.\nvar LM_SPANISH_STOPWORDS = new RegExp(\n  '\\\\b(el|la|los|las|una|unos|unas|que|del|por|para|con|sin|como|pero|' +\n  'cuando|donde|quiere|quiso|cliente|llamar|llamen|llame|llamada|' +\n  'ma[\\u00f1n]ana|hoy|ayer|gracias|favor|n[u\\u00fa]mero|dijo|pidi[o\\u00f3]|' +\n  'est[a\\u00e1]|tiene|hacer|m[a\\u00e1]s|muy|todo|nada|porque|tambi[e\\u00e9]n|' +\n  'ahora|luego)\\\\b', 'gi');\n\nfunction lmIsEnglish(text) {\n  var t = String(text === null || text === undefined ? '' : text);\n  if (LM_NON_ENGLISH_CHARS.test(t) || LM_SPANISH_WORDS.test(t)) return false;\n  var vistas = {}, n = 0, m;\n  LM_SPANISH_STOPWORDS.lastIndex = 0;\n  while ((m = LM_SPANISH_STOPWORDS.exec(t)) !== null) {\n    var w = m[0].toLowerCase();\n    if (!vistas[w]) { vistas[w] = true; n++; }\n    if (n >= 2) return false;\n  }\n  return true;\n}\n\n// ── Nada que no sea inglés entra al CRM ──────────────────────────────\n// Una version anterior adjuntaba el resumen de ElevenLabs tal cual. Eso\n// metia hindi, nepali y espanol dentro de notas del CRM. No hay excepcion.\n// Gemelo 1:1 de crm_notes.safe_summary / safe_detail / error_code_of.\n\n// lmcore.js ya declara LM_ERROR_CODES (el contrato de errores). Aqui se\n// usa esa misma lista mas los tres estados que solo aparecen en notas.\nvar LM_PUBLISHABLE_CODES = (typeof LM_ERROR_CODES !== 'undefined'\n  ? LM_ERROR_CODES : ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR',\n                      'PROVIDER_ERROR', 'CRM_ERROR', 'RETRYABLE_ERROR',\n                      'PERMANENT_ERROR'])\n  .concat(['UNKNOWN', 'TIMEOUT', 'AMBIGUOUS']);\n\n// Un token tecnico tiene que PARECER tecnico: MAYUSCULAS, con digito, o\n// con separador. Una palabra corriente en minusculas es prosa de alguien.\nfunction lmIsTechnicalToken(t) {\n  if (!t || t.length > 64) return false;\n  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+-]*$/.test(t)) return false;\n  if (t.length > 1 && t === t.toUpperCase() && /[A-Z]/.test(t)) return true;\n  if (/[0-9]/.test(t)) return true;\n  if (/[._:/+-]/.test(t)) return true;\n  return false;\n}\n\nfunction lmSafeDetail(detail) {\n  if (detail === null || detail === undefined || detail === '') return null;\n  var texto = String(detail).trim();\n  if (!texto) return null;\n  var partes = texto.split(/\\s+/);\n  if (partes.length > 4) return null;\n  for (var i = 0; i < partes.length; i++) {\n    if (!lmIsTechnicalToken(partes[i])) return null;\n  }\n  return partes.join(' ').slice(0, 64);\n}\n\nfunction lmErrorCodeOf(error) {\n  if (error === null || error === undefined || error === '') return 'UNKNOWN';\n  var t = String(error).trim().toUpperCase();\n  if (LM_PUBLISHABLE_CODES.indexOf(t) >= 0) return t;\n  var seguro = lmSafeDetail(error);\n  if (seguro && LM_PUBLISHABLE_CODES.indexOf(seguro.toUpperCase()) >= 0) {\n    return seguro.toUpperCase();\n  }\n  return 'PROVIDER_ERROR';\n}\n\n// El resumen solo entra si la fuente GARANTIZA que es ingles. Sin idioma\n// declarado se descarta, aunque \"parezca\" ingles: la heuristica existe\n// para cazar regresiones, no para autorizar contenido de idioma\n// desconocido. El original se guarda como evidencia local.\nfunction lmSafeSummary(summary, language, isEnglishFlag) {\n  if (!summary) return null;\n  var lang = String(language || '').trim().toLowerCase();\n  var declarado = !!isEnglishFlag ||\n    lang === 'en' || lang === 'en-us' || lang === 'en-gb' ||\n    lang === 'eng' || lang === 'english';\n  if (!declarado) return null;\n  var texto = String(summary).trim();\n  if (!texto) return null;\n  if (!lmIsEnglish(texto)) return null;\n  return texto;\n}\n\nfunction lmCallNote(o) {\n  o = o || {};\n  const head = lmPhrase(LM_RESULT_PHRASE[String(o.result || '').toUpperCase()] || 'CALL_UNKNOWN');\n  const tail = LM_ACTION_PHRASE[o.action] ? lmPhrase(LM_ACTION_PHRASE[o.action]) : '';\n  const meta = [];\n  if (o.attempt !== null && o.attempt !== undefined) meta.push('attempt ' + parseInt(o.attempt, 10));\n  if (o.route_key) meta.push('route ' + o.route_key);\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.sip_code) meta.push('sip ' + o.sip_code);\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.schedule_next_at) meta.push('next ' + o.schedule_next_at);\n  let note = lmJoin([head, tail, meta.length ? '[' + meta.join(' · ') + ']' : '']);\n  var __sum = lmSafeSummary(o.summary, o.summary_language, o.summary_is_english);\n  if (__sum) note = (note + ' Agent summary: ' + __sum).slice(0, LM_MAX_NOTE);\n  return note;\n}\n\nfunction lmAccountNote(o) {\n  o = o || {};\n  const key = { CREATED: 'ACCOUNT_CREATED', ALREADY_EXISTS: 'ACCOUNT_ALREADY_EXISTS',\n                FAILED: 'ACCOUNT_FAILED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de cuenta desconocido: ' + o.status);\n  const meta = [];\n  if (o.market) meta.push('market ' + o.market);\n  if (o.username) meta.push('username ' + o.username);\n  if (o.portal_url) meta.push('portal ' + o.portal_url);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmPaymentNote(o) {\n  o = o || {};\n  const key = { LINK_CREATED: 'PAYMENT_LINK_CREATED', LINK_FAILED: 'PAYMENT_LINK_FAILED',\n                CONFIRMED: 'PAYMENT_CONFIRMED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de pago desconocido: ' + o.status);\n  const meta = [];\n  if (o.amount !== null && o.amount !== undefined && o.currency) {\n    meta.push('amount ' + o.currency + ' ' + o.amount);\n  }\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.order_ref) meta.push('order ' + o.order_ref);\n  if (o.transaction_id) meta.push('txn ' + o.transaction_id);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmRecordingNote(o) {\n  o = o || {};\n  const key = { ATTACHED: 'RECORDING_ATTACHED', SKIPPED: 'RECORDING_SKIPPED',\n                MISSING: 'RECORDING_MISSING' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de grabacion desconocido: ' + o.status);\n  const meta = [];\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.min_secs !== null && o.min_secs !== undefined) {\n    meta.push('minimum ' + parseInt(o.min_secs, 10) + 's');\n  }\n  if (o.route_key) meta.push('route ' + o.route_key);\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmErrorNote(errorCode, detail) {\n  const key = { CONFIG_ERROR: 'ERR_CONFIG', COUNTRY_DISABLED: 'ERR_COUNTRY_DISABLED',\n                TOOL_DISABLED: 'ERR_TOOL_DISABLED', VALIDATION_ERROR: 'ERR_VALIDATION',\n                PROVIDER_ERROR: 'ERR_PROVIDER', AMBIGUOUS: 'ERR_AMBIGUOUS'\n              }[String(errorCode || '').toUpperCase()] || 'ERR_VALIDATION';\n  const meta = ['code ' + errorCode];\n  var __d = lmSafeDetail(detail);\n  if (__d) meta.push('detail ' + __d);\n  return lmJoin([lmPhrase(key), '[' + meta.join(' · ') + ']']);\n}\n\nfunction lmReconciliationNote(issueType, detail) {\n  const meta = ['issue ' + issueType];\n  var __d2 = lmSafeDetail(detail);\n  if (__d2) meta.push(__d2);\n  return lmJoin([lmPhrase('RECONCILIATION_OPENED'), '[' + meta.join(' · ') + ']']);\n}\n\n// Rechazo de negocio (país apagado, tool deshabilitada, config incompleta,\n// datos inválidos). Mensaje en inglés, sin filtrar detalles internos al agente.\nreturn $input.all().map(it => {\n  const d = it.json;\n  const code = d.error_code || 'VALIDATION_ERROR';\n  console.log('[WF3][exec=' + (d.execution_id || $execution.id) + '] action=refuse code=' +\n              code + ' lead=' + (d.lead_id || '-') + ' country=' + (d.country_iso || '-') +\n              ' detail=' + (d.error_detail || d.error_detail === '' ? d.error_detail : '-'));\n  return { json: {\n    success: false, status: 'REFUSED', error_code: code,\n    message_to_user: d.user_message || lmErrorNote(code, null),\n    lead_id: d.lead_id || null, country: d.country_iso || null\n  }};\n});\n"
+      },
+      "id": "101f9def-c979-45ad-97e2-f5ec39b2d431",
+      "name": "[TOOL] Build Refusal Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7360,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// El claim lo tiene otra ejecución del MISMO pedido: se responde con lo que ya\n// quedó registrado en vez de crear una segunda cuenta.\nreturn $input.all().map(it => {\n  const d = it.json;\n  console.log('[WF3] pedido duplicado ' + d.request_key + ' (estado ' +\n              d.existing_state + '): no se crea otra cuenta');\n  return { json: {\n    success: d.existing_state === 'SUCCEEDED',\n    already_exists: d.existing_state === 'ALREADY_EXISTS',\n    status: 'DUPLICATE_REQUEST', duplicate: true,\n    message_to_user: 'Your request is already being processed.',\n    lead_id: d.lead_id, country: d.country_iso,\n    account_id: d.existing_ref || null\n  }};\n});\n"
+      },
+      "id": "16eefae9-a614-498c-a2ab-7f4bcc320e00",
+      "name": "[TOOL] Build Duplicate Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7360,
+        1400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "e4a4fe46-d4a1-45c0-b377-c33e38bd704c",
+      "name": "[TOOL] Respond To Agent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        7820,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "[TRIGGER] Account Tool Webhook": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Parse Tool Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TRIGGER] Called By Bot": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Parse Tool Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Parse Tool Request": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Request Is Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Request Is Valid": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Load Country Tools",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[TOOL] Build Refusal Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Load Country Tools": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Resolve Account Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Resolve Account Tool": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Tool Is Available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Tool Is Available": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Build Claim Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[TOOL] Build Refusal Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Build Claim Token": {
+      "main": [
+        [
+          {
+            "node": "[DB] Claim Tool Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Claim Tool Request": {
+      "main": [
+        [
+          {
+            "node": "[DB] Read Tool Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Read Tool Claim": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Check Tool Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Check Tool Claim": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Claim Won",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Claim Won": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record Event Account Requested",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[TOOL] Build Duplicate Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Account Requested": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Get Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Get Token": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Attach Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Attach Token": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Account Mode Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Account Mode Router": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Create Account Via Router",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[TOOL] Create Account Via Custom Endpoint",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[ERROR] Unsupported Tool Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Create Account Via Router": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Validate Account Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Create Account Via Custom Endpoint": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Validate Account Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[ERROR] Unsupported Tool Mode": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Validate Account Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Validate Account Response": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Account Result Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Account Result Router": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record Event Account Created",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Record Event Account Exists",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Mark Tool Needs Reconciliation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Record Event Account Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Mark Tool Needs Reconciliation": {
+      "main": [
+        [
+          {
+            "node": "[DB] Open Account Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Account Created": {
+      "main": [
+        [
+          {
+            "node": "[DB] Close Tool Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Account Exists": {
+      "main": [
+        [
+          {
+            "node": "[DB] Close Tool Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Account Failed": {
+      "main": [
+        [
+          {
+            "node": "[DB] Close Tool Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Open Account Issue": {
+      "main": [
+        [
+          {
+            "node": "[DB] Close Tool Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Close Tool Request": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Prepare Note Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Post Account Note": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Restore Context After Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Prepare Note Context": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Post Account Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Restore Context After Note": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Account Was Opened",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Account Was Opened": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Patch Lead Stage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[TELEGRAM] Should Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Patch Lead Stage": {
+      "main": [
+        [
+          {
+            "node": "[TELEGRAM] Should Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TELEGRAM] Should Notify": {
+      "main": [
+        [
+          {
+            "node": "[TELEGRAM] Send Account Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[TOOL] Build Agent Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TELEGRAM] Send Account Notification": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Build Agent Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Build Agent Response": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Respond To Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Build Refusal Response": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Respond To Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TOOL] Build Duplicate Response": {
+      "main": [
+        [
+          {
+            "node": "[TOOL] Respond To Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "versionId": "177f1318-a19f-4b3c-aca5-06de267f7fb5",
+  "meta": {
+    "templateVersion": "2.0.0"
+  },
+  "tags": [
+    {
+      "name": "landmark"
+    },
+    {
+      "name": "callcenter-v2"
+    }
+  ]
+}

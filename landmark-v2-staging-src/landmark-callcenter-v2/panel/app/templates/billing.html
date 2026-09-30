@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+{% block title %}Panel · Provider Billing{% endblock %}
+
+{#  Solo master (§54). Esta pantalla NO sustituye a SIP Balance: SIP Balance
+    sigue siendo el dueño de depósitos, precios históricos y saldo. Aquí se
+    configura el MODELO de facturación del proveedor V2 y la tarifa por ruta,
+    y se muestra el vínculo entre las dos fichas para que Provider1 no haya
+    que darlo de alta dos veces (§34). #}
+
+{% block content %}
+
+<nav class="countries" aria-label="Call Center">
+  <a class="chip" href="/callcenter">Switches</a>
+  <a class="chip" href="/callcenter/routes">Countries &amp; Routes</a>
+  <a class="chip on" href="/callcenter/billing">Billing</a>
+  <a class="chip" href="/callcenter/legacy">Legacy Backup</a>
+  <a class="chip" href="/callcenter/analytics">Analytics</a>
+  <a class="chip" href="/callcenter/issues">Reconciliation</a>
+  <a class="chip" href="/callcenter/settings">Settings</a>
+</nav>
+
+{% if err %}<p class="notice stale-warn">{{ err }}</p>{% endif %}
+{% if ok %}<p class="notice">{{ ok }}</p>{% endif %}
+
+<p class="cap" style="margin:0 0 12px">
+  One provider, one identity. A provider configured here is the same one that
+  appears in <a href="/sip">SIP Balance</a> — deposits, historical pricing and
+  balance stay there and are never modified from this page.
+  <b>Contract rate</b> is what the contract says a unit costs.
+  <b>Effective cost</b> is a calculation we make (fixed fee ÷ usage) and is
+  never a rate.
+</p>
+
+{% for p in providers %}
+<section class="panel">
+  <header class="panel-head">
+    <h2>{{ p.display_name }} <span class="cap">({{ p.code }})</span></h2>
+    <span class="pill {{ 'on' if p.enabled else '' }}">
+      {{ 'OPERATIONAL ON' if p.enabled else 'OPERATIONAL OFF' }}</span>
+    {% if not p.billing_supported %}
+      <span class="pill warn">UNSUPPORTED BILLING MODEL</span>
+    {% endif %}
+  </header>
+
+  <table class="grid">
+    <tbody>
+      <tr><th>Adapter</th><td><code>{{ p.adapter_key }}</code></td></tr>
+      <tr><th>Billing model</th><td>{{ p.billing_model_label }}</td></tr>
+      <tr><th>Usage</th><td>{{ p.usage_label }}</td></tr>
+      <tr>
+        <th>Price/min</th>
+        <td>
+          {% if p.shows_price_per_minute %}
+            set per route, below
+          {% else %}
+            <b>N/A</b>
+            <span class="cap">— this contract is not measured in minutes.
+            It is not zero.</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% if p.billing_model == 'MONTHLY_FLAT' %}
+      <tr><th>Monthly fee</th>
+          <td>{{ p.monthly_fee or 'not set' }} {{ p.billing_currency }}</td></tr>
+      {% endif %}
+      <tr><th>Billing starts</th><td>{{ p.billing_start_date or '—' }}</td></tr>
+      <tr><th>Routes</th><td>{{ p.route_count }}</td></tr>
+      <tr>
+        <th>SIP Balance</th>
+        <td>
+          {% if not p.needs_sip %}
+            <span class="cap">not applicable — this provider does not bill
+            against a SIP trunk, so it will never have a SIP Balance record</span>
+          {% else %}
+            {% if p.legacy %}
+              linked to <b>{{ p.legacy.name }}</b>
+              <span class="cap">(id {{ p.legacy_sip_provider_id }})</span>
+            {% else %}
+              <span class="pill warn">NOT LINKED</span>
+              <span class="cap">— this provider bills per minute against a SIP
+              trunk. Link it so you do not end up with the same provider
+              recorded twice.</span>
+            {% endif %}
+            <form method="post" action="/callcenter/billing/{{ p.code }}/link"
+                  class="row" style="margin-top:6px">
+              <select name="legacy_sip_provider_id" style="max-width:280px">
+                <option value="">— not linked —</option>
+                {% for sp in p.link_options %}
+                <option value="{{ sp.id }}"
+                        {% if sp.id == p.legacy_sip_provider_id %}selected{% endif %}>
+                  {{ sp.name }}
+                  ({{ sp.pricing_rows }} price row{{ '' if sp.pricing_rows == 1 else 's' }},
+                   {{ sp.deposits }} deposit{{ '' if sp.deposits == 1 else 's' }})
+                </option>
+                {% endfor %}
+              </select>
+              <input name="reason" placeholder="why" size="16">
+              <button class="btn small">Link</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  {% if p.issues %}
+  <ul class="issues">
+    {% for i in p.issues %}<li><code>{{ i.field }}</code> — {{ i.message }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  <form method="post" action="/callcenter/billing/{{ p.code }}/save" class="row">
+    <label>Billing model
+      <select name="billing_model">
+        {% for key, meta in models.items() %}
+        <option value="{{ key }}" {% if key == p.billing_model %}selected{% endif %}>
+          {{ meta.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Currency
+      <input name="billing_currency" value="{{ p.billing_currency }}"
+             maxlength="3" size="4"></label>
+    {# UI condicional (§42): la cuota sólo aparece donde significa algo. #}
+    <label data-only-for="MONTHLY_FLAT">Monthly fee
+      <input name="monthly_fee" value="{{ p.monthly_fee or '' }}"
+             placeholder="only for monthly flat"></label>
+    <label>Billing starts
+      <input type="date" name="billing_start_date"
+             value="{{ p.billing_start_date or '' }}"></label>
+    <label>Reason <input name="reason" placeholder="why this change"></label>
+    <button class="btn">Save billing</button>
+  </form>
+
+  {% if p.routes %}
+  <h3 class="cap">Routes</h3>
+  <table class="grid">
+    <thead>
+      <tr><th>Route</th><th>Country</th>
+        {% if p.shows_price_per_minute %}<th>Price/min</th>{% endif %}
+        {% if p.billing_model == 'PER_CALL' %}<th>Price/call</th>{% endif %}
+        <th>Trunk</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for r in p.routes %}
+      <tr>
+        <td><code>{{ r.route_key }}</code>
+            {% if r.archived_at %}<span class="pill">archived</span>{% endif %}</td>
+        <td>{{ r.iso }}</td>
+        <form method="post" action="/callcenter/billing/route/{{ r.route_key }}/save">
+        {% if p.shows_price_per_minute %}
+        <td><input name="price_per_minute" size="8"
+                   value="{{ r.price_per_minute or '' }}"></td>
+        {% endif %}
+        {% if p.billing_model == 'PER_CALL' %}
+        <td><input name="price_per_call" size="8"
+                   value="{{ r.price_per_call or '' }}"></td>
+        {% endif %}
+        <td><code>{{ r.trunk_name or '—' }}</code></td>
+        <td>
+          {% if p.shows_price_per_minute or p.billing_model == 'PER_CALL' %}
+            <button class="btn small">Save</button>
+          {% else %}
+            <span class="cap">no unit rate for this model</span>
+          {% endif %}
+        </td>
+        </form>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="cap">
+    Two routes in the same country can carry different rates — that is why the
+    rate lives on the route and not on (provider, country).
+  </p>
+  {% endif %}
+
+  {% if p.effective and p.effective.applicable %}
+  <h3 class="cap">Effective cost <span class="pill warn">NOT A CONTRACT RATE</span></h3>
+  <table class="grid">
+    <tbody>
+      {% for k, item in p.effective['items'].items() %}
+      <tr><th>{{ k.replace('_',' ') }}</th>
+          <td>{{ '%.4f'|format(item.value) if item.value is not none else '—' }}
+              {{ item.unit }}
+              <span class="cap">— {{ item.basis }}</span></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="cap">{{ p.effective.disclaimer }}</p>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% if orphans %}
+<section class="panel">
+  <header class="panel-head">
+    <h2>SIP Balance records not linked to Call Center</h2>
+    <span class="pill warn">BILLING-ONLY</span>
+  </header>
+  <p class="cap">
+    These exist in SIP Balance but no Call Center provider points at them.
+    That is legitimate — a provider can be tracked for billing without
+    anyone calling through it. If one of them <i>is</i> a calling provider,
+    link it from its Call Center provider above instead of creating a
+    second record. Nothing here is created or changed automatically.
+  </p>
+  <table class="grid">
+    <thead><tr><th>Name</th><th>Price rows</th><th>Deposits</th>
+      <th>Billing since</th><th></th></tr></thead>
+    <tbody>
+      {% for o in orphans %}
+      <tr>
+        <td><b>{{ o.name }}</b> <span class="cap">(id {{ o.id }})</span></td>
+        <td>{{ o.pricing_rows }}</td>
+        <td>{{ o.deposits }}</td>
+        <td>{{ o.billing_start_date or '—' }}</td>
+        <td class="cap">link it from the provider above</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section class="panel">
+  <header class="panel-head"><h2>Add provider</h2></header>
+  <p class="cap">
+    One flow. If the adapter bills against a SIP trunk, resolve its SIP
+    Balance identity here — link an existing record or create one — so the
+    same provider never has to be entered twice.
+    <b>A new provider is created disabled.</b> Creating it is not turning it on.
+  </p>
+  <form method="post" action="/callcenter/billing/new">
+    <div class="row">
+      <label>Code <input name="code" placeholder="proveedor2" required></label>
+      <label>Display name <input name="display_name" placeholder="Provider 2"></label>
+      <label>Adapter
+        <select name="adapter_key">
+          {% for a in adapters %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+        </select></label>
+      <label>Endpoint <input name="endpoint" placeholder="only if the adapter needs one"></label>
+    </div>
+    <div class="row">
+      <label>Billing model
+        <select name="billing_model">
+          {% for key, meta in models.items() %}
+          <option value="{{ key }}">{{ meta.label }}</option>
+          {% endfor %}
+        </select></label>
+      <label>Currency <input name="billing_currency" value="USD" maxlength="3" size="4"></label>
+      <label>Monthly fee <input name="monthly_fee" placeholder="only for monthly flat"></label>
+    </div>
+    <div class="row">
+      <label>Link existing SIP Balance record
+        <select name="legacy_sip_provider_id" style="max-width:280px">
+          <option value="">— none —</option>
+          {% for o in orphans %}
+          <option value="{{ o.id }}">{{ o.name }}</option>
+          {% endfor %}
+        </select></label>
+      <span class="cap" style="align-self:center">or</span>
+      <label>Create a new SIP Balance record named
+        <input name="create_legacy_name" placeholder="leave empty if not needed"></label>
+    </div>
+    <div class="row">
+      <label>Reason <input name="reason" placeholder="why"></label>
+      <button class="btn">Create provider</button>
+    </div>
+  </form>
+</section>
+
+<section class="panel">
+  <header class="panel-head"><h2>Recent billing changes</h2></header>
+  <table class="grid">
+    <thead><tr><th>When</th><th>Scope</th><th>What</th><th>From</th><th>To</th>
+      <th>Reason</th><th>By</th></tr></thead>
+    <tbody>
+      {% for a in audit %}
+      <tr><td>{{ a.changed_at }}</td><td>{{ a.scope }} {{ a.scope_ref }}</td>
+        <td><code>{{ a.field }}</code></td><td>{{ a.old_value or '—' }}</td>
+        <td>{{ a.new_value or '—' }}</td><td>{{ a.reason or '—' }}</td>
+        <td>{{ a.actor }}</td></tr>
+      {% else %}
+      <tr><td colspan="7" class="cap">No billing changes recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% endblock %}

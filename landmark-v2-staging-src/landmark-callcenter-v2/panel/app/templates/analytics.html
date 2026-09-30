@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{% block title %}Panel · Call Center Analytics{% endblock %}
+
+{#  Solo rol master (@auth_master en v2_suite.register).
+    TODO lo que se ve acá sale de MySQL local: wf_call_jobs (hecho de cada
+    llamada) y wf_events (eventos de negocio). Cero llamadas a LeadStudio. #}
+
+{% macro pct(v) %}{% if v is none %}—{% else %}{{ (v * 100)|p }}%{% endif %}{% endmacro %}
+{% macro num(v) %}{{ (v or 0)|n }}{% endmacro %}
+
+{% block content %}
+
+<nav class="countries" aria-label="Call Center">
+  <a class="chip" href="/callcenter">Switches</a>
+  <a class="chip" href="/callcenter/routes">Countries &amp; Routes</a>
+  <a class="chip" href="/callcenter/billing">Billing</a>
+  <a class="chip" href="/callcenter/legacy">Legacy Backup</a>
+  <a class="chip on" href="/callcenter/analytics">Analytics</a>
+  <a class="chip" href="/callcenter/issues">Reconciliation</a>
+  <a class="chip" href="/callcenter/settings">Settings</a>
+</nav>
+
+{#  BARRA DE FILTROS
+    Todo lo que se elige aquí viaja en la query string, y el MISMO recorte
+    alimenta los KPI, los desgloses, el desglose por hora y el CSV. Los
+    enlaces de descarga se construyen con `a.query`, que serializa ese
+    recorte: así es imposible generar una URL de CSV que pierda un filtro. #}
+<form method="get" class="range" style="margin-bottom:8px">
+  <span class="cap" style="align-self:center">Period</span>
+  {% for key, pr in a.presets.items() %}
+    <button class="btn {% if a.cut.period == key %}{% else %}ghost{% endif %}"
+            type="submit" name="period" value="{{ key }}">{{ pr.label }}</button>
+  {% endfor %}
+</form>
+
+<form method="get" class="range" style="margin-bottom:12px">
+  <label class="cap">From
+    <input name="start" type="date" value="{{ a.cut.start_date or '' }}"
+           style="max-width:150px"></label>
+  <label class="cap">To
+    <input name="end" type="date" value="{{ a.cut.end_date or '' }}"
+           style="max-width:150px"></label>
+
+  <label class="cap">Country
+    <select name="country" style="max-width:120px">
+      <option value="">All</option>
+      {% for c in a.options.country %}
+      <option value="{{ c }}" {% if a.filters.country == c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select></label>
+
+  <label class="cap">Provider
+    <select name="provider" style="max-width:150px">
+      <option value="">All</option>
+      {% for pv in a.options.provider %}
+      <option value="{{ pv }}" {% if a.filters.provider == pv %}selected{% endif %}>{{ pv }}</option>
+      {% endfor %}
+    </select></label>
+
+  <label class="cap">Route
+    <select name="route" style="max-width:190px">
+      <option value="">All</option>
+      {% for r in a.options.route %}
+      <option value="{{ r }}" {% if a.filters.route == r %}selected{% endif %}>{{ r }}</option>
+      {% endfor %}
+    </select></label>
+
+  <label class="cap">Timezone
+    <input name="tz" value="{{ tz }}" style="max-width:170px" placeholder="Asia/Kolkata">
+  </label>
+  <button class="btn" type="submit">Apply</button>
+</form>
+
+<p class="cap" style="margin:0 0 12px">
+  <b>Showing:</b> {{ a.filters_label }} ·
+  {{ a.days }} day{{ '' if a.days == 1 else 's' }}
+  (UTC {{ a.range_utc[0] }} → {{ a.range_utc[1] }}, timezone {{ tz }}) ·
+  buckets by {{ a.bucket_unit }}
+  {% if a.filters %}<span class="pill">FILTERED</span>{% endif %}
+  <br>
+  Download the cut you are looking at:
+  <a class="btn ghost small" href="/callcenter/analytics.csv?{{ a.query }}&group_by=route">CSV by route</a>
+  <a class="btn ghost small" href="/callcenter/analytics.csv?{{ a.query }}&group_by=country">CSV by country</a>
+  <a class="btn ghost small" href="/callcenter/analytics.csv?{{ a.query }}&group_by=provider">CSV by provider</a>
+  <a class="btn ghost small" href="/callcenter/analytics.csv?{{ a.query }}&group_by=hour">CSV by hour</a>
+</p>
+
+<p class="cap" style="margin:0 0 12px">
+  Source: <b>local MySQL</b> ({{ a.source }}) · generated {{ a.generated_at }}.
+  This screen <b>never queries LeadStudio</b>: if the CRM is down, these
+  numbers are still correct.
+  {% if a.filters %}
+  KPI cards, breakdowns, the hourly breakdown and every CSV above use the
+  same cut shown in <b>Showing</b>.
+  {% endif %}
+</p>
+
+<!-- ══ SALUD OPERATIVA ═══════════════════════════════════════════════ -->
+{% set h = a.health %}
+{% if h.jobs_needs_reconciliation or h.issues_open or h.recordings_orphan or h.tool_requests_stuck %}
+<p class="notice stale-warn">
+  <b>Pendiente de revisión:</b>
+  {{ h.jobs_needs_reconciliation }} llamada(s) a reconciliar ·
+  {{ h.issues_open }} issue(s) abiertos ·
+  {{ h.recordings_orphan }} grabación(es) sin correlacionar ·
+  {{ h.tool_requests_stuck }} pedido(s) de tool sin cerrar.
+  <a href="/callcenter/issues">Ver reconciliación →</a>
+</p>
+{% endif %}
+
+<!-- ══ INDICADORES ═══════════════════════════════════════════════════ -->
+{% set o = a.overview %}
+{% set c = o.calls_detail %}
+{% set b = o.business_detail %}
+<section class="kpis">
+  <article class="kpi">
+    <span class="k-label">Calls attempted</span>
+    <strong class="k-val mono">{{ num(c.attempted) }}</strong>
+    <span class="k-foot">{{ num(c.dispatched) }} dispatched · {{ num(c.in_flight) }} in flight</span>
+  </article>
+
+  <article class="kpi accent-ok">
+    <span class="k-label">Answered</span>
+    <strong class="k-val mono">{{ num(c.answered) }}</strong>
+    <span class="k-foot"><b class="mono">{{ pct(c.answer_rate) }}</b> answer rate
+      · {{ num(c.with_result) }} with result</span>
+  </article>
+
+  <article class="kpi">
+    <span class="k-label">No answer</span>
+    <strong class="k-val mono">{{ num(c.no_answer) }}</strong>
+    <span class="k-foot">{{ num(c.busy) }} busy · {{ num(c.voicemail) }} voicemail</span>
+  </article>
+
+  <article class="kpi">
+    <span class="k-label">Talk minutes</span>
+    <strong class="k-val mono">{{ (c.talk_minutes or 0)|m }}</strong>
+    <span class="k-foot">avg {{ (c.avg_talk_seconds or 0)|sec }}s per answered call</span>
+  </article>
+
+  <article class="kpi accent-ok">
+    <span class="k-label">Accounts opened</span>
+    <strong class="k-val mono">{{ num(b.accounts_opened) }}</strong>
+    <span class="k-foot"><b class="mono">{{ pct(o.conversion_rate) }}</b> of answered calls</span>
+  </article>
+
+  <article class="kpi {{ 'accent-bad' if c.failed_technical }}">
+    <span class="k-label">Technical failures</span>
+    <strong class="k-val mono">{{ num(c.failed_technical) }}</strong>
+    <span class="k-foot">no consumen intento de negocio · {{ num(c.needs_reconciliation) }} a reconciliar</span>
+  </article>
+</section>
+
+<p class="cap" style="margin:8px 0 16px">
+  <b>Definiciones (contrato):</b> <code>attempted</code> = la llamada pudo salir
+  (DISPATCHING/DISPATCHED/UNKNOWN/COMPLETED/NEEDS_RECONCILIATION; excluye RELEASED y CLAIMED) ·
+  <code>answered</code> = resultado ANSWERED o CALLBACK ·
+  <code>answer_rate</code> = answered / with_result (las pendientes no bajan la tasa) ·
+  <code>conversion_rate</code> = accounts_opened / answered del mismo rango
+  (<span class="muted">PENDING_PRODUCT_DECISION</span>) ·
+  <code>failed_technical</code> = eventos CALL_TECH_FAILED.
+</p>
+
+<!-- ══ NEGOCIO ═══════════════════════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head"><div><span class="eyebrow">Business</span><h2>Follow-ups, callbacks y tools</h2></div></header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>Follow-ups created</th><th>Callbacks scheduled</th><th>Leads closed</th>
+        <th>Account requests</th><th>Accounts opened</th><th>Already existed</th><th>Account failures</th>
+        <th>Payment links</th><th>Payments confirmed</th>
+        <th>Recordings attached</th><th>Below minimum</th>
+      </tr></thead>
+      <tbody><tr class="mono">
+        <td>{{ num(b.followups_created) }}</td>
+        <td>{{ num(b.callbacks_scheduled) }}</td>
+        <td>{{ num(b.leads_closed) }}</td>
+        <td>{{ num(b.account_requests) }}</td>
+        <td>{{ num(b.accounts_opened) }}</td>
+        <td>{{ num(b.account_already_existed) }}</td>
+        <td>{{ num(b.account_failures) }}</td>
+        <td>{{ num(b.payment_links_created) }}</td>
+        <td>{{ num(b.payments_confirmed) }}</td>
+        <td>{{ num(b.recordings_attached) }}</td>
+        <td>{{ num(b.recordings_below_min) }}</td>
+      </tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══ DESGLOSES ═════════════════════════════════════════════════════ -->
+{% for g in groups %}
+<section class="panel">
+  <header class="panel-head">
+    <div><span class="eyebrow">Breakdown</span><h2>By {{ g }}</h2></div>
+  </header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{{ g|capitalize }}</th><th>Attempted</th><th>Dispatched</th><th>With result</th>
+        <th>Answered</th><th>No answer</th><th>Busy</th><th>Voicemail</th><th>Callbacks</th>
+        <th>Answer rate</th><th>Talk min</th><th>Avg s</th>
+        <th>Tech fail</th><th>To reconcile</th><th>Accounts</th>
+      </tr></thead>
+      <tbody>
+      {% set acc = {} %}
+      {% for r in a.accounts_by[g] %}{% if acc.update({r[g]: r.accounts_opened}) %}{% endif %}{% endfor %}
+      {% for r in a.by[g] %}
+        <tr>
+          <td class="mono"><b>{{ r[g] or '—' }}</b></td>
+          <td class="mono">{{ num(r.attempted) }}</td>
+          <td class="mono">{{ num(r.dispatched) }}</td>
+          <td class="mono">{{ num(r.with_result) }}</td>
+          <td class="mono">{{ num(r.answered) }}</td>
+          <td class="mono">{{ num(r.no_answer) }}</td>
+          <td class="mono">{{ num(r.busy) }}</td>
+          <td class="mono">{{ num(r.voicemail) }}</td>
+          <td class="mono">{{ num(r.callbacks) }}</td>
+          <td class="mono">{{ pct(r.answer_rate) }}</td>
+          <td class="mono">{{ (r.talk_minutes or 0)|m }}</td>
+          <td class="mono">{{ (r.avg_talk_seconds or 0)|sec }}</td>
+          <td class="mono">{{ num(r.failed_technical) }}</td>
+          <td class="mono">{{ num(r.needs_reconciliation) }}</td>
+          <td class="mono">{{ num(acc.get(r[g], 0)) }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="15" class="empty">Sin datos en el rango.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if g == 'route' %}
+  <p class="cap">Las cuentas se atribuyen con el modelo <b>{{ a.attribution_model }}</b>
+     (última llamada contestada del mismo lead, ventana de 30 días). Es una convención de
+     reporting, no un hecho: una cuenta sin llamada previa aparece como UNATTRIBUTED.</p>
+  {% endif %}
+</section>
+{% endfor %}
+
+<!-- ══ SERIE TEMPORAL ════════════════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div><span class="eyebrow">Timeseries</span><h2>Por {{ a.bucket_unit }}</h2></div>
+  </header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Bucket (UTC)</th><th>Calls</th><th>Answered</th><th>Talk minutes</th><th>Accounts</th></tr></thead>
+      <tbody>
+      {% set ans = {} %}{% set talk = {} %}{% set accs = {} %}
+      {% for p in a.timeseries.answered %}{% if ans.update({p.bucket: p.value}) %}{% endif %}{% endfor %}
+      {% for p in a.timeseries.talk_minutes %}{% if talk.update({p.bucket: p.value}) %}{% endif %}{% endfor %}
+      {% for p in a.timeseries.accounts %}{% if accs.update({p.bucket: p.value}) %}{% endif %}{% endfor %}
+      {% for p in a.timeseries.calls %}
+        <tr class="mono">
+          <td>{{ p.bucket }}</td>
+          <td>{{ p.value|round|int }}</td>
+          <td>{{ (ans.get(p.bucket, 0))|round|int }}</td>
+          <td>{{ talk.get(p.bucket, 0)|m }}</td>
+          <td>{{ (accs.get(p.bucket, 0))|round|int }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">Sin datos en el rango.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% endblock %}

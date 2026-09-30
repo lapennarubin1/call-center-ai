@@ -1,0 +1,299 @@
+{
+  "$contract": "FOLLOWUP_ENGINE_CONTRACT",
+  "$version": "2.2",
+  "$status": "FUNDACIÓN — el sub-workflow n8n TEMPLATE_FOLLOWUP_ENGINE_V2 aún NO está construido",
+  "$reference_implementation": "app/followup_engine.py (oráculo ejecutable; 30+ tests lo cubren)",
+  "principle": [
+    "Un ÚNICO motor de follow-up para todo el sistema.",
+    "No conoce proveedores: recibe un CALL RESULT normalizado. No existe 'if stringee', 'if India', ni aritmética modular.",
+    "WF2 y WF9 llaman al mismo motor. La diferencia entre proveedores es CUÁNDO se conoce el resultado, no CÓMO se decide el seguimiento.",
+    "Agregar un proveedor no toca el motor. Agregar un país no toca el motor.",
+    "Los errores TÉCNICOS (AUTH_ERROR, CONFIG_ERROR, 401/403, endpoint caído antes de enviar, credencial inválida) NUNCA llegan al motor: no son NO_ANSWER y no consumen intento de negocio. Los maneja WF2 como RELEASED con backoff.",
+    "El motor ve solo el intento de NEGOCIO (attempt). tech_retry_count no existe para él."
+  ],
+  "who_calls_the_engine": {
+    "WF2_dispatch": {
+      "when": "el dispatch termina con un resultado final conocido y SIN conversation_id",
+      "examples": [
+        "SIP 603/408/486 devuelto por ElevenLabs outbound",
+        "SIP 404/484 número inválido",
+        "4xx de negocio del adapter"
+      ],
+      "why": "no va a llegar ningún evento post-call: si WF2 no registra, el intento se pierde"
+    },
+    "WF9_post_call": {
+      "when": "llega el post-call de ElevenLabs (webhook o polling) con conversation_id",
+      "examples": [
+        "cualquier llamada SIP que conectó",
+        "TODA llamada Stringee"
+      ],
+      "why": "solo acá se conocen duración, outcome, callback y notas reales"
+    },
+    "never": [
+      "WF2 NUNCA llama al motor con result=DISPATCHED (el motor lo rechaza con VALIDATION_ERROR)",
+      "WF2 NUNCA crea un followup 'CONNECTED duration=0' cuando hay conversation_id",
+      "Un adapter NUNCA llama al motor directamente",
+      "Un error técnico de dispatch NUNCA llama al motor (queda RELEASED en wf_call_jobs)"
+    ]
+  },
+  "input": {
+    "$comment": "El CALL RESULT CONTRACT universal. Idéntico venga de WF2 o de WF9.",
+    "call_job_id": "IN_STRINGEE-20260918T140312Z-7f3a9c",
+    "lead_id": "8f2c1a55-4e2b-4a90-9d11-1c77aa03be21",
+    "route_id": 2,
+    "route_key": "IN_STRINGEE",
+    "country_iso": "IN",
+    "provider": "stringee",
+    "adapter_key": "STRINGEE_WORKER",
+    "attempt": 2,
+    "conversation_id": "conv_01k5x8y2z3abcdef",
+    "provider_job_id": "job_77a1",
+    "provider_call_id": null,
+    "sip_code": null,
+    "result": "NO_ANSWER",
+    "call_status": "NO_ANSWER",
+    "duration_seconds": 0,
+    "callback_requested": false,
+    "callback_at": null,
+    "notes": "No contestó",
+    "source": "webhook",
+    "execution_id": "n8n-exec-88213",
+    "$required": [
+      "lead_id",
+      "route_key",
+      "attempt",
+      "result",
+      "execution_id"
+    ],
+    "$required_one_of": [
+      [
+        "conversation_id",
+        "call_job_id"
+      ]
+    ],
+    "$idempotency_key": "conversation_id cuando existe; si no (resultado en WF2 sin conversación), call_job_id",
+    "$correlation": "call_job_id viene en dynamic_variables si el adapter lo propaga. Si no, WF9 lo obtiene con find_inflight_job(lead_id): el UNIQUE(inflight_lead) garantiza una sola llamada en vuelo por lead. Sin call_job_id ni lead_id → issue ORPHAN_POSTCALL, sin followup."
+  },
+  "result_enum": {
+    "DISPATCHED": "NO FINAL. Solo para estado de wf_call_jobs. El motor lo rechaza.",
+    "ANSWERED": "contestó y la conversación ocurrió",
+    "NO_ANSWER": "no contestó",
+    "BUSY": "ocupado",
+    "FAILED": "falló sin que sepamos que fue no-respuesta (con sip_code, la política puede reclasificarlo)",
+    "VOICEMAIL": "buzón de voz",
+    "CALLBACK": "pidió que lo llamen en otro momento",
+    "WRONG_NUMBER": "número equivocado / inexistente",
+    "DNC": "pidió no ser llamado",
+    "UNKNOWN": "no hay forma de saber qué pasó"
+  },
+  "sip_classification": {
+    "$rule": "Qué códigos SIP significan 'no contestó' es POLÍTICA, no del adapter.",
+    "adapter_emits": {
+      "result": "FAILED",
+      "sip_code": "603"
+    },
+    "engine_does": "si sip_code ∈ policy.no_answer_sip_codes y result ∈ {FAILED, UNKNOWN} → result efectivo NO_ANSWER",
+    "reference": "followup_engine.resolve(..., sip_code=...)"
+  },
+  "policy_resolution": {
+    "order": [
+      "1 · effective_result = policy.result_aliases.get(result, result)",
+      "2 · regla con (effective_result, attempt exacto)",
+      "3 · regla con (effective_result, attempt '*')",
+      "4 · policy.unmatched_action (NONE por defecto; solo admite NONE o CLOSE)"
+    ],
+    "actions": {
+      "RETRY": "programa el próximo intento en now + delay",
+      "CLOSE": "no más intentos",
+      "COMPLETE": "contacto logrado, sin reintento",
+      "CALLBACK": "programa en callback_at si es futuro, si no en now + callback_default",
+      "NONE": "registra el followup sin programar nada"
+    },
+    "delay_units": {
+      "+Nm": "N minutos (absoluto)",
+      "+Nh": "N horas (absoluto)",
+      "+Nd": "N días de calendario, misma hora de reloj LOCAL del país (DST-safe)",
+      "+Nbd": "N días hábiles lun-vie en el huso del país, misma hora local. Feriados: NO (PENDING_VERIFICATION)"
+    },
+    "important": "Una política de 9 reglas NO programa 9 llamadas. Se hace UNA llamada; si resulta NO_ANSWER se programa la siguiente; cuando llega ese momento se hace el siguiente intento."
+  },
+  "policy_STANDARD_CALL_RETRY": {
+    "$source": "WF2 v1 '🔍 Classify Dial Result (Asterisk)1', regla por regla, sin módulo",
+    "table": [
+      {
+        "attempt": 1,
+        "NO_ANSWER": "RETRY +2h"
+      },
+      {
+        "attempt": 2,
+        "NO_ANSWER": "RETRY +3h"
+      },
+      {
+        "attempt": 3,
+        "NO_ANSWER": "RETRY +2bd"
+      },
+      {
+        "attempt": 4,
+        "NO_ANSWER": "RETRY +2h"
+      },
+      {
+        "attempt": 5,
+        "NO_ANSWER": "RETRY +3h"
+      },
+      {
+        "attempt": 6,
+        "NO_ANSWER": "RETRY +3bd"
+      },
+      {
+        "attempt": 7,
+        "NO_ANSWER": "RETRY +2h"
+      },
+      {
+        "attempt": 8,
+        "NO_ANSWER": "RETRY +3h"
+      },
+      {
+        "attempt": 9,
+        "NO_ANSWER": "CLOSE"
+      },
+      {
+        "attempt": "*",
+        "NO_ANSWER": "CLOSE (≥10, red de seguridad)"
+      }
+    ],
+    "other_results": {
+      "BUSY": "alias → NO_ANSWER",
+      "VOICEMAIL": "alias → NO_ANSWER (WF9 v1 ya lo mapeaba así)",
+      "ANSWERED": "COMPLETE",
+      "CALLBACK": "CALLBACK (default +24h)",
+      "WRONG_NUMBER": "CLOSE",
+      "DNC": "CLOSE",
+      "FAILED": "NONE — DECISIÓN PENDIENTE D-1 (v1 se contradecía: WF2 lo trataba sin reintento, WF9 como NO_ANSWER)",
+      "UNKNOWN": "NONE — DECISIÓN PENDIENTE D-1"
+    },
+    "verified_example": {
+      "now": "2026-09-18T04:30:00Z (viernes 10:00 Asia/Kolkata)",
+      "attempt_3_NO_ANSWER": "2026-09-22T04:30:00Z (martes 10:00 local: salta sáb y dom)",
+      "attempt_6_NO_ANSWER": "2026-09-23T04:30:00Z (miércoles 10:00 local)"
+    }
+  },
+  "steps": [
+    {
+      "n": 1,
+      "name": "[ENGINE] Validate Input",
+      "does": "contrato completo; result final; attempt >= 1",
+      "error": "VALIDATION_ERROR"
+    },
+    {
+      "n": 2,
+      "name": "[ENGINE] Resolve Job",
+      "does": "call_job_id de la entrada, o find_inflight_job(lead_id)",
+      "on_missing": "issue ORPHAN_POSTCALL y fin"
+    },
+    {
+      "n": 3,
+      "name": "[DB] Record Call Result",
+      "does": "record_call_result(): hecho en wf_call_jobs + evento CALL_RESULT. ANTES del CRM: el panel ve el resultado en segundos aunque LeadStudio falle",
+      "on_duplicate": "DUPLICATE → fin sin error (otro proceso lo registró)",
+      "on_conflict": "CONFLICT → issue RESULT_CONFLICT y fin: no se crea un segundo followup"
+    },
+    {
+      "n": 4,
+      "name": "[ENGINE] Claim Idempotency",
+      "does": "conversation_id → wf_conversation_ledger (INSERT IGNORE + relectura de claim_token). Sin conversation_id → clave call_job_id",
+      "on_lost": "terminar SIN error"
+    },
+    {
+      "n": 5,
+      "name": "[ENGINE] Resolve Route",
+      "does": "GET /api/routes/by-key/{route_key} — resuelve AUNQUE esté archivada o apagada",
+      "error": "CONFIG_ERROR si 404"
+    },
+    {
+      "n": 6,
+      "name": "[ENGINE] Resolve Policy",
+      "does": "route.followup_policy + reclasificación SIP + regla (result, attempt)"
+    },
+    {
+      "n": 7,
+      "name": "[ENGINE] Compute Schedule",
+      "does": "scheduleNextAt en el huso del PAÍS (días hábiles incluidos)"
+    },
+    {
+      "n": 8,
+      "name": "[CRM] Create Followup",
+      "does": "POST /api/leads/{lead_id}/followups",
+      "on_ambiguous": "timeout/5xx tras enviar → NEEDS_RECONCILIATION, NUNCA reintento"
+    },
+    {
+      "n": 9,
+      "name": "[DB] Persist Followup",
+      "does": "ledger → PROCESSED + followup_id; attach_followup(call_job_id); eventos FOLLOWUP_CREATED y, si aplica, CALLBACK_SCHEDULED o LEAD_CLOSED (result = MAX_ATTEMPTS | WRONG_NUMBER | DNC)"
+    },
+    {
+      "n": 10,
+      "name": "[CRM] Patch Lead (si aplica)",
+      "does": "según action y crm_status_hint",
+      "status": "PENDING_VERIFICATION PV-1"
+    },
+    {
+      "n": 11,
+      "name": "[LOG] Emit Decision",
+      "does": "línea de log estándar + salida normalizada"
+    }
+  ],
+  "output": {
+    "ok": true,
+    "call_job_id": "IN_STRINGEE-20260918T140312Z-7f3a9c",
+    "conversation_id": "conv_01k5x8y2z3abcdef",
+    "lead_id": "8f2c1a55-4e2b-4a90-9d11-1c77aa03be21",
+    "route_key": "IN_STRINGEE",
+    "attempt": 2,
+    "decision": {
+      "result": "NO_ANSWER",
+      "sip_code": null,
+      "effective_result": "NO_ANSWER",
+      "attempt": 2,
+      "action": "RETRY",
+      "delay": "+3h",
+      "schedule_next_at": "2026-09-18T07:30:00Z",
+      "rule_matched": {
+        "result": "NO_ANSWER",
+        "attempt": 2
+      },
+      "crm_status_hint": "NO_ANSWER"
+    },
+    "followup_id": "fu_7c1d9e4a",
+    "idempotency": {
+      "key": "conversation_id",
+      "claimed": true,
+      "ledger_state": "PROCESSED"
+    },
+    "error": null
+  },
+  "output_when_lost_claim": {
+    "ok": true,
+    "skipped": true,
+    "reason": "ALREADY_CLAIMED",
+    "conversation_id": "conv_01k5x8y2z3abcdef",
+    "$comment": "Perder el claim NO es un error. Es el camino normal cuando webhook y polling llegan juntos."
+  },
+  "crm_mapping": {
+    "$status": "PENDING_VERIFICATION (PV-1, PV-11)",
+    "followup_body": {
+      "type": "CALL",
+      "outcome": "CONNECTED | NO_ANSWER | CALLBACK | WRONG_NUMBER | FAILED — enum exacto de LeadStudio sin confirmar",
+      "callStatus": "ANSWERED | NO_ANSWER | FAILED",
+      "durationSeconds": "duration_seconds",
+      "notes": "notes (<= 900 chars)",
+      "scheduleNextAt": "decision.schedule_next_at, omitido si null"
+    },
+    "idempotency_in_leadstudio": "PENDING_VERIFICATION: LeadStudio no documenta idempotency key ni lookup de followup por conversation_id. Si lo ofrece, se integra en el paso 6 y NEEDS_RECONCILIATION pasa a auto-resolverse."
+  },
+  "reconciliation": {
+    "NEEDS_RECONCILIATION": "Se crea cuando el POST /followups pudo haberse ejecutado pero no hay followup_id guardado. NUNCA se reintenta a ciegas.",
+    "today": "revisión manual o asistida desde el panel (no construido)",
+    "future": "si LeadStudio ofrece lookup verificable → reconciliador automático"
+  },
+  "near_real_time": "El paso 3 escribe localmente el resultado en el mismo instante en que llega el post-call. El dashboard lo muestra en el próximo refresh, sin esperar a WF14 ni consultar LeadStudio."
+}

@@ -1,0 +1,95 @@
+"""Interfaces de adapters de proveedores (punto Q del bloque).
+
+SKELETON UNICAMENTE: ninguna clase de este archivo hace requests HTTP
+reales. ConversationProviderAdapter / VoiceProviderAdapter definen el
+contrato que un adapter real va a implementar en un bloque futuro
+(cuando exista credencial real y se autorice conectar).
+
+ElevenLabsVoiceAdapter.normalize_voice() SI esta implementado — es una
+funcion pura (dict externo -> dict interno), no hace ningun request. Se
+prueba contra fixtures en este mismo bloque.
+"""
+from abc import ABC, abstractmethod
+
+
+class ConversationProviderAdapter(ABC):
+    """Contrato para un motor de conversacion (ElevenLabs Agents, OpenAI
+    Realtime, ...). Ninguna implementacion real todavia."""
+
+    @abstractmethod
+    def list_agents(self, provider_account) -> list[dict]: ...
+
+    @abstractmethod
+    def create_agent(self, provider_account, config: dict) -> dict: ...
+
+    @abstractmethod
+    def update_agent(self, provider_account, external_agent_id: str, config: dict) -> dict: ...
+
+    @abstractmethod
+    def get_agent(self, provider_account, external_agent_id: str) -> dict: ...
+
+    @abstractmethod
+    def capabilities(self) -> dict: ...
+
+
+class VoiceProviderAdapter(ABC):
+    """Contrato para un motor de voz (ElevenLabs Voice Library, Fish
+    Audio, ...). Ninguna implementacion real todavia."""
+
+    @abstractmethod
+    def list_voices(self, provider_account, filters: dict | None = None) -> list[dict]: ...
+
+    @abstractmethod
+    def get_voice(self, provider_account, provider_voice_id: str) -> dict: ...
+
+    @abstractmethod
+    def normalize_voice(self, raw: dict) -> dict:
+        """Convierte el dict crudo del proveedor a la forma normalizada de
+        voice_catalog. DEBE tolerar campos NULL/ausentes — el proveedor no
+        garantiza que toda la metadata este siempre presente."""
+        ...
+
+    @abstractmethod
+    def get_preview(self, provider_account, provider_voice_id: str) -> str | None: ...
+
+    @abstractmethod
+    def capabilities(self) -> dict: ...
+
+
+class ElevenLabsVoiceAdapter(VoiceProviderAdapter):
+    """Skeleton: normalize_voice() es real (funcion pura). El resto lanza
+    NotImplementedError a proposito — se implementa en el bloque de
+    sincronizacion real, cuando exista credencial autorizada."""
+
+    def list_voices(self, provider_account, filters=None):
+        raise NotImplementedError("sincronizacion real fuera de alcance de este bloque")
+
+    def get_voice(self, provider_account, provider_voice_id):
+        raise NotImplementedError("sincronizacion real fuera de alcance de este bloque")
+
+    def get_preview(self, provider_account, provider_voice_id):
+        raise NotImplementedError("sincronizacion real fuera de alcance de este bloque")
+
+    def capabilities(self) -> dict:
+        return {"list_voices": True, "preview": True, "credit_multiplier": True, "pagination": True}
+
+    def normalize_voice(self, raw: dict) -> dict:
+        """raw: forma aproximada de un elemento de ElevenLabs Voice
+        Library (segun documentacion publica del proveedor — NO
+        confirmado contra una respuesta real en este bloque). Tolera
+        cualquier campo ausente devolviendo None en su lugar; nunca
+        inventa un valor para un campo que no vino."""
+        return {
+            "provider_voice_id": raw.get("voice_id"),
+            "name": raw.get("name"),
+            "language": (raw.get("language") or raw.get("labels", {}).get("language")),
+            "accent": raw.get("labels", {}).get("accent"),
+            "gender": raw.get("labels", {}).get("gender"),
+            "age": raw.get("labels", {}).get("age"),
+            "category": raw.get("category"),
+            "use_case": raw.get("labels", {}).get("use_case"),
+            "description": raw.get("description"),
+            "preview_url": raw.get("preview_url"),
+            "provider_cost_multiplier": raw.get("credit_multiplier", 1.0) or 1.0,
+            "available": raw.get("available_for_tiers") is None or bool(raw.get("available_for_tiers")),
+        }

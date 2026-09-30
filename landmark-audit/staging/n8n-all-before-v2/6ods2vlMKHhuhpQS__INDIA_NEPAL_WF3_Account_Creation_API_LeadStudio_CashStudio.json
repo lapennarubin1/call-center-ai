@@ -1,0 +1,2479 @@
+{
+  "id": "6ods2vlMKHhuhpQS",
+  "name": "INDIA + NEPAL WF3 — Account Creation (API LeadStudio + CashStudio)",
+  "description": null,
+  "active": true,
+  "activeVersionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+  "createdAt": "2026-09-15T14:29:44.600Z",
+  "updatedAt": "2026-09-16T11:43:41.330Z",
+  "isArchived": false,
+  "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+  "versionCounter": 123,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }",
+        "options": {}
+      },
+      "id": "9beb7cb1-503c-4469-a985-358c9995f550",
+      "name": "✅ Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -2176,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phone"
+            },
+            {
+              "name": "full_name"
+            },
+            {
+              "name": "country"
+            },
+            {
+              "name": "lead_id"
+            }
+          ]
+        }
+      },
+      "id": "ed08c0fd-b45f-4448-a4d3-9f184267cfbc",
+      "name": "🔁 When Called by WhatsApp Bot",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2384,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MULTI-PAIS: India + Nepal reconocidos. Account creation sigue protegido\n// hasta confirmar market/backend de Nepal.\nfunction canonicalCountry(rawCountry, rawPhone='') {\n  const c = String(rawCountry || '').trim().toLowerCase();\n  if (['india','in'].includes(c)) return 'india';\n  if (['nepal','np'].includes(c)) return 'nepal';\n  const p = String(rawPhone || '').replace(/[^0-9+]/g,'');\n  if (p.startsWith('+977') || p.startsWith('977')) return 'nepal';\n  if (p.startsWith('+91') || p.startsWith('91')) return 'india';\n  return '';\n}\n\n// === Universal normalizer ===\nconst raw = $input.first().json || {};\n\nfunction sourceSheetFor(country) {\n  const c=String(country||'').trim().toLowerCase();\n  return ({india:'leads', nepal:'leads nepal', slot3:'leads slot3', slot4:'leads slot4'})[c] || '';\n}\n\n// CASO 0: Tool call de ElevenLabs durante la llamada\nconst isToolCall = (raw.body?.event === 'account_requested' || raw.body?.intent === 'OPEN_FREE_ACCOUNT' ||\n                    raw.event === 'account_requested' || raw.intent === 'OPEN_FREE_ACCOUNT');\nif (isToolCall) {\n  const b = raw.body || raw;\n  const cleanPhone = String(b.phone || '').replace(/[^0-9]/g, '');\n  const waNumber = String(b.whatsapp_number || b.phone || '').replace(/[^0-9]/g, '') || cleanPhone;\n  console.log('🟡 Tool call ElevenLabs | phone:', cleanPhone, '| whatsapp:', waNumber, '| name:', b.full_name);\n  return [{ json: {\n    source: 'elevenlabs_tool',\n    lead_id: String(b.lead_id || `CALL-${cleanPhone}`).trim(),\n    full_name: String(b.full_name || '').trim(),\n    phone: cleanPhone,\n    whatsapp_number: waNumber,\n    email: cleanPhone + '@leads.landmarkmarkets.io',\n    country: canonicalCountry(b.country, b.phone),\n    _source_sheet: sourceSheetFor(canonicalCountry(b.country, b.phone)),\n    elevenlabs_call_id: b.conversation_id || '',\n    status_raw: '',\n    duration_secs: 0,\n    transcript: '',\n    sentiment: '',\n    intent: '',\n    classification: 'INTERESTED',\n    callback_requested: false,\n    callback_date: '',\n    interested: true,\n    account_opened: 'PENDING',\n    conversation_summary: 'Account requested during call'\n  }}];\n}\n\n// CASO 1: Sub-workflow desde WhatsApp bot\nconst isSubworkflow = !!(raw.phone && raw.full_name && !raw.body && !raw.data && !raw.transcript);\nif (isSubworkflow) {\n  console.log('🟦 Sub-workflow path (WhatsApp bot)', JSON.stringify(raw));\n  const cleanPhone = String(raw.phone || '').replace(/[^0-9]/g, '');\n  return [{ json: {\n    source: 'subworkflow',\n    lead_id: String(raw.lead_id || `WA-${cleanPhone}`).trim(),\n    full_name: String(raw.full_name || '').trim(),\n    phone: cleanPhone,\n    country: canonicalCountry(raw.country, raw.phone),\n    _source_sheet: sourceSheetFor(canonicalCountry(raw.country, raw.phone)),\n    elevenlabs_call_id: '',\n    status_raw: '',\n    duration_secs: 0,\n    transcript: '',\n    sentiment: '',\n    intent: '',\n    classification: 'INTERESTED',\n    callback_requested: false,\n    callback_date: '',\n    interested: true,\n    account_opened: 'PENDING',\n    conversation_summary: 'Account creation from WhatsApp bot'\n  }}];\n}\n\n// CASO 2: ElevenLabs post-call webhook (código original sin cambios)\nconsole.log('🟪 ElevenLabs webhook path');\nconst body = raw.body || raw;\nconst data = body.data || body;\nconst lead = (data.conversation_initiation_client_data && data.conversation_initiation_client_data.dynamic_variables) || data.dynamic_variables || {};\nconst transcriptArr = data.transcript || data.transcripts || [];\nconst transcriptText = Array.isArray(transcriptArr)\n  ? transcriptArr.map(t => `${t.role || t.speaker || 'agent'}: ${t.message || t.text || ''}`).join('\\n')\n  : (typeof transcriptArr === 'string' ? transcriptArr : '');\nconst analysis = data.analysis || {};\nconst duration = data.metadata?.call_duration_secs || data.call_duration_secs || data.duration || 0;\nconst statusRaw = data.status || data.call_status || analysis.call_successful || '';\nconst callId = data.conversation_id || data.call_sid || data.conversationId || '';\nlet classification = 'NO_ANSWER';\nif (statusRaw && /failed|no.?answer|busy|noanswer|no_answer/i.test(statusRaw)) {\n  classification = 'NO_ANSWER';\n} else if (/wrong number|galat number|गलत नंबर/i.test(transcriptText)) {\n  classification = 'WRONG_NUMBER';\n} else if (/do not call|dnc|mat karo|call mat/i.test(transcriptText)) {\n  classification = 'DO_NOT_CALL';\n} else if (/callback|baad mein|बाद में|kal call/i.test(transcriptText)) {\n  classification = 'CALLBACK_REQUESTED';\n} else if (/not interested|nahin chahiye|interest nahi/i.test(transcriptText)) {\n  classification = 'NOT_INTERESTED';\n} else if (/yes|haan|हाँ|interested|account khol|deposit|ready/i.test(transcriptText)) {\n  classification = 'INTERESTED';\n} else if (analysis.intent === 'interested' || analysis.outcome === 'interested') {\n  classification = 'INTERESTED';\n}\nlet fullName = lead.full_name || '';\nconst m = transcriptText.match(/(?:naam|name|नाम)[^a-zA-Z\\u0900-\\u097F]{0,8}([a-zA-Z\\u0900-\\u097F][a-zA-Z\\u0900-\\u097F .]{1,60})/i);\nif (m && m[1] && !fullName) fullName = m[1].trim();\nconst callbackDate = classification === 'CALLBACK_REQUESTED'\n  ? new Date(Date.now() + 24*60*60*1000).toISOString()\n  : '';\nconst cleanPhone = String(lead.phone || data.to_number || '').replace(/[^0-9]/g, '');\nreturn [{ json: {\n  source: 'webhook',\n  lead_id: String(lead.lead_id || data.lead_id || `EL-${callId}`).trim(),\n  full_name: fullName,\n  phone: cleanPhone,\n  country: canonicalCountry(lead.country, lead.phone),\n  _source_sheet: sourceSheetFor(canonicalCountry(lead.country, lead.phone)),\n  elevenlabs_call_id: callId,\n  status_raw: statusRaw,\n  duration_secs: duration,\n  transcript: transcriptText,\n  sentiment: analysis.sentiment || '',\n  intent: analysis.intent || analysis.user_intent || '',\n  classification,\n  callback_requested: classification === 'CALLBACK_REQUESTED',\n  callback_date: callbackDate,\n  interested: classification === 'INTERESTED',\n  account_opened: classification === 'INTERESTED' ? 'PENDING' : '',\n  conversation_summary: (analysis.transcript_summary || analysis.summary || transcriptText.slice(0, 800))\n}}];"
+      },
+      "id": "b5384ade-1b3d-438a-b5e5-573dad3f14b2",
+      "name": "⚙️ Normalize Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2176,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-interested",
+              "leftValue": "={{ $json.classification }}",
+              "rightValue": "INTERESTED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "295b94a9-e57f-4619-903a-56dcb38edef3",
+      "name": "❓ Is INTERESTED?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1952,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "console.log('⏩ Not INTERESTED — skipping Atlantis. classification:', $json.classification);\nreturn $input.all();"
+      },
+      "id": "0d0849ac-ca26-43bc-9399-42cd9c7ac4c2",
+      "name": "⏩ Skip (not interested)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1728,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "elevenlabs-call-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2432,
+        752
+      ],
+      "id": "cf79a4d9-54f8-4e3f-86de-efc4f0bf0656",
+      "name": "Webhook",
+      "webhookId": "e73b2ccb-4c35-4aba-ac35-fbea3963b054"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\n\nconsole.log('🆕 New account credentials ready | user:', d.username, '| country:', d.country);\n\nreturn [{\n  json: {\n    success: true,\n    duplicate: false,\n    is_existing: false,\n    username: d.username,\n    password: d.password,\n    account_id: d.account_id || '',\n    trader_id: d.trader_id || '',\n    portal_url: d.portal_url || '',\n    full_name: d.full_name,\n    lead_id: d.lead_id,\n    phone: d.phone,\n    whatsapp_number: d.whatsapp_number || d.phone,\n    country: String(d.country || 'india').toLowerCase(),\n    market: d.market,\n    http_status: d.http_status\n  }\n}];\n"
+      },
+      "id": "f5da42ce-70cf-43b8-a2f3-8c5532a83629",
+      "name": "✨ Build New Credentials",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nfunction canonicalCountry(rawCountry, rawPhone='') {\n  const c=String(rawCountry||'').trim().toLowerCase();\n  if (['india','in'].includes(c)) return 'india';\n  if (['nepal','np'].includes(c)) return 'nepal';\n  const p=String(rawPhone||'').replace(/[^0-9+]/g,'');\n  if (p.startsWith('+977')||p.startsWith('977')) return 'nepal';\n  if (p.startsWith('+91')||p.startsWith('91')) return 'india';\n  return '';\n}\nconst country = canonicalCountry(d.country, d.phone);\nconst missing = [];\nif (!d.full_name || d.full_name.length < 2) missing.push('full_name');\nif (!d.phone || d.phone.length < 6) missing.push('phone');\nif (!country) missing.push('supported country');\nif (missing.length > 0) throw new Error('Missing/invalid fields for account creation: ' + missing.join(', '));\n\nconst cleanPhone = String(d.phone || '').replace(/[^0-9]/g, '');\nconst waPhone = String(d.whatsapp_number || d.phone || '').replace(/[^0-9]/g, '') || cleanPhone;\nreturn [{ json: {\n  lead_id: String(d.lead_id || `WA-${cleanPhone}`).trim(),\n  full_name: String(d.full_name || '').trim(),\n  phone: cleanPhone,\n  whatsapp_number: waPhone,\n  country,\n  _source_sheet: ({india:'leads',nepal:'leads nepal',slot3:'leads slot3',slot4:'leads slot4'})[country] || '',\n  email: String(d.email || '').trim()\n}}];"
+      },
+      "id": "9ec53592-7cca-46bc-8d02-15b203d30d36",
+      "name": "🛂 Pre-flight Check1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1696,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "success",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "02c9e5e1-3164-4be9-9ca4-b9f53f680c7a",
+      "name": "❓ Account Created OK?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2736,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\n\nconsole.log('✅ SUCCESS — user:', d.username, '| account_id:', d.account_id, '| trader_id:', d.trader_id);\n\nreturn [{ json: {\n  status: 'SUCCESS',\n  is_existing: false,\n  username: d.username,\n  password: d.password,\n  account_id: d.account_id,\n  trader_id: d.trader_id,\n  portal_url: d.portal_url,\n  phone: d.phone,\n  whatsapp_number: d.whatsapp_number,\n  full_name: d.full_name,\n  lead_id: d.lead_id,\n  country: d.country\n}}];"
+      },
+      "id": "e8b11739-36f6-45a4-86bd-69ff77e79e3a",
+      "name": "📝 Log SUCCESS1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4512,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconsole.error('🔴 FAILURE — lead_id:', d.lead_id, '| http:', d.http_status, '| error:', d.error_message);\nreturn [{ json: {\n  status: 'FAILURE',\n  error_message: d.error_message || 'unknown',\n  http_status: d.http_status,\n  rate_limited: d.rate_limited || false,\n  email_issue: d.email_issue || '',\n  phone: d.phone,\n  full_name: d.full_name,\n  lead_id: d.lead_id,\n  duplicate: d.duplicate || false\n}}];\n"
+      },
+      "id": "076186e3-53a6-471b-b331-47cc0aa166a2",
+      "name": "📝 Log FAILURE1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3472,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-1004454561082",
+        "text": "=✅ *New Account Landmark Markets Created*\n\n👤 *Client:* {{ $('✨ Build New Credentials').item.json.full_name }}\n📱 *Phone:* {{ $('✨ Build New Credentials').item.json.phone }}\n🆔 *Lead ID:* {{ $('✨ Build New Credentials').item.json.lead_id }}\n🔐 *Username:* {{ $('✨ Build New Credentials').item.json.username }}\n🔑 *Password:* {{ $('✨ Build New Credentials').item.json.password }}\n💼 *Account ID:* {{ $json.account_id || 'N/A' }}\n🌐 *Portal:* {{ $json.portal_url || 'N/A' }}\n🕐 {{ $now.setZone('Asia/Kolkata').toFormat('dd/MM/yyyy HH:mm') }} IST",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "7a971aaf-fa83-4612-a29b-fd612cf8db54",
+      "name": "📢 Telegram Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4816,
+        368
+      ],
+      "webhookId": "0f4a0b75-9d55-4089-a894-b23ea4542f54",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://api2.santo.cc/submit",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "command",
+              "value": "MT_REQUEST"
+            },
+            {
+              "name": "cpid",
+              "value": "zUg8Dhgb"
+            },
+            {
+              "name": "cppwd",
+              "value": "vduAtccg"
+            },
+            {
+              "name": "da",
+              "value": "={{ $json.whatsapp_number || $json.phone }}"
+            },
+            {
+              "name": "sm",
+              "value": "=Landmark Markets User: {{ $json.username }} \nPass: {{ $json.password }} \nWeb: {{ $json.country === 'nepal' ? 'https://crm.lmtradermarkets.com/' : 'https://crm.landmarkmarkets.in/' }}"
+            }
+          ]
+        },
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "dd02269c-bda8-4249-a334-59d915d70cc0",
+      "name": "📲 Send SMS Credentials1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4176,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⚠️ ANTES DE ACTIVAR\n\nEste WF3 ahora usa la API de LeadStudio (no Sheets, no Atlantis directo):\n\n- Login: POST /api/auth/login (mismo patron que WF2)\n- Crear cuenta: POST /api/leads/{leadId}/cashstudio-account -- body con market: IND o NPL\n- lead_id debe ser el UUID real del lead en LeadStudio. Si viene de un tool-call en vivo o del bot de WhatsApp sin lead respaldado, el nodo \"Lead ID Valido?\" lo detiene automaticamente (no intenta crear cuenta con un id inventado).\n\nSin confirmar todavia (avisar si la API los rechaza):\n- stage: INTERESTED en el PATCH -- no confirmado como valor exacto valido\n- type: NOTE en el POST followups -- no confirmado, el doc no cubre ese endpoint\n\nImportado como inactive a proposito. Probar cada nodo manualmente antes de activar, igual que se hizo con WF2.",
+        "height": 320,
+        "width": 420,
+        "color": 5
+      },
+      "id": "a6d1f1ed-2284-4f81-9fee-4bb5cfe54682",
+      "name": "📌 READ BEFORE GO-LIVE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -800,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-1003984044945",
+        "text": "=✅ *New Account Landmark Markets Created*\n\n👤 *Client:* {{ $('✨ Build New Credentials').item.json.full_name }}\n📱 *Phone:* {{ $('✨ Build New Credentials').item.json.phone }}\n🆔 *Lead ID:* {{ $('✨ Build New Credentials').item.json.lead_id }}\n🔐 *Username:* {{ $('✨ Build New Credentials').item.json.username }}\n🔑 *Password:* {{ $('✨ Build New Credentials').item.json.password }}\n💼 *Account ID:* {{ $json.account_id || 'N/A' }}\n🌐 *Portal:* {{ $json.portal_url || 'N/A' }}\n🕐 {{ $now.setZone('Asia/Kolkata').toFormat('dd/MM/yyyy HH:mm') }} IST",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "cc492512-b167-4a16-b235-38a42e55f9f5",
+      "name": "📢 Telegram Notification1",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4992,
+        512
+      ],
+      "webhookId": "0f4a0b75-9d55-4089-a894-b23ea4542f54",
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "India → market **IND** (Landmark India)\nNepal → market **NPL** (Landmark Nepal)\n\nCualquier otro país: el nodo \"🧱 Build CashStudio Payload\" lanza error explícito (fail-safe, no se manda un market inventado). Slots 3/4 reservados hasta definir.",
+        "height": 280,
+        "width": 620,
+        "color": 5
+      },
+      "id": "28221b0c-a8fb-4b7e-b9ce-5f09f9f8acec",
+      "name": "🌍 Account Creation Country Rules",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3360,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://lead-studio-9gnl.onrender.com/api/auth/login",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"email\": \"ai@leadstudio.com\",\n  \"password\": \"Admin@123\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "278096f0-5ccd-4821-bc54-d9ee62d16d3e",
+      "name": "🔐 Login LeadStudio (WF3)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -880,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "20058ccf-a7e4-4b41-9474-d63964c947e3",
+      "name": "✅ Token OK? (WF3)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -512,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $('🔐 Login LeadStudio (WF3)').item.json;\nconsole.error('❌ WF3: Login a LeadStudio falló', JSON.stringify(resp));\nreturn [{ json: { error: true, message: 'LeadStudio auth failed', response: resp } }];\n"
+      },
+      "id": "297b6e05-0bd7-4dd4-90e7-ad4e9821818c",
+      "name": "❌ Log Auth Error (WF3)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test($input.first().json.lead_id) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a40dbe30-1f70-4607-bbf1-207a758bd6e0",
+      "name": "🆔 Lead ID Válido? (UUID CRM)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        1152
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Este lead_id no es un UUID real de LeadStudio (viene de un origen sin lead\n// respaldado en el CRM: tool-call en vivo o bot de WhatsApp sin lead previo).\n// No se puede crear cuenta sin un lead real — se detiene acá, sin error falso.\nconst d = $input.first().json;\nconsole.warn('⚠️ WF3: lead_id no es UUID CRM, se omite creación de cuenta:', d.lead_id);\nreturn [{ json: { skipped: true, reason: 'lead_id no es UUID CRM', lead_id: d.lead_id } }];\n"
+      },
+      "id": "f5b2086a-72bf-4e10-857d-c65bd565c4f0",
+      "name": "⏩ Skip (lead_id no es UUID CRM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Solo India (IND) y Nepal (NPL) confirmados. Slots 3/4 reservados hasta\n// definir market real para otros países (mismo criterio fail-safe de antes).\nconst leadData = $input.first().json;\nconst lead = {\n  lead_id: String(leadData.lead_id || ''),\n  full_name: String(leadData.full_name || ''),\n  phone: String(leadData.phone || ''),\n  whatsapp_number: String(leadData.whatsapp_number || leadData.phone || ''),\n  country: String(leadData.country || 'india').toLowerCase()\n};\nconst MARKET_BY_COUNTRY = { india: 'IND', nepal: 'NPL' };\nconst market = MARKET_BY_COUNTRY[lead.country];\nif (!market) {\n  throw new Error('País sin market soportado para creación de cuenta: ' + lead.country);\n}\nconsole.log('🧱 CashStudio account payload | lead_id:', lead.lead_id, '| market:', market);\nreturn [{ json: {\n  lead_id: $('🛂 Pre-flight Check1').first().json.lead_id.replace(/^S/, ''),\n  full_name: $('🛂 Pre-flight Check1').first().json.full_name,\n  phone: $('🛂 Pre-flight Check1').first().json.phone,\n  whatsapp_number: $('🛂 Pre-flight Check1').first().json.whatsapp_number,\n  country: $('🛂 Pre-flight Check1').first().json.country,\n  market: market\n}}];"
+      },
+      "id": "1ae18f1f-9005-423a-8c92-542b5a683454",
+      "name": "🧱 Build CashStudio Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=   https://lead-studio-9gnl.onrender.com/api/leads/{{ $input.first().json.lead_id }}/cashstudio-account",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('✅ Token OK? (WF3)').item.json.body.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"market\": \"{{ $input.first().json.market }}\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "e20ad749-eb41-4489-a845-316f6c1cb4ae",
+      "name": "👤 POST CashStudio Account",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Valida la respuesta del endpoint de creación de cuenta CashStudio.\n// Contrato completo documentado: 201 éxito; 400/401/403/404 error directo;\n// 409 con 4 variantes (solo 2 traen details.code, las otras 2 no);\n// 429 rate limit (NO reintentar); 502 ambiguo (reintentar UNA vez, ver más abajo).\n\nconst resp = $input.first().json || {};\nconst status = resp.statusCode || resp.status || 0;\nconst body = resp.body || resp;\nconst ctx = $('🧱 Build CashStudio Payload').first().json;\n\nconsole.log('👤 CashStudio account create — HTTP:', status);\nconsole.log('👤 Response preview:', JSON.stringify(body).slice(0, 600));\n\nfunction baseResult(extra) {\n  return { json: {\n    lead_id: ctx.lead_id,\n    full_name: ctx.full_name,\n    phone: ctx.phone,\n    whatsapp_number: ctx.whatsapp_number,\n    country: ctx.country,\n    market: ctx.market,\n    http_status: status,\n    ...extra\n  }};\n}\n\n// 201 — éxito\nif (status === 201 && body?.account) {\n  if (body.account.market !== ctx.market) {\n    console.error('🔴 CashStudio devolvió market distinto al enviado:', body.account.market, 'vs', ctx.market);\n  }\n  return [baseResult({\n    success: true,\n    duplicate: false,\n    gateway_timeout: false,\n    username: body.account.userName || '',\n    password: body.password || '',\n    account_id: body.account.id || '',\n    trader_id: body.account.traderId || '',\n    portal_url: body.account.portalUrl || '',\n    raw_response: body\n  })];\n}\n\n// 409 — cuatro variantes\nif (status === 409) {\n  const code = body?.details?.code || '';\n  if (code === 'EMAIL_TAKEN' || code === 'EMAIL_INVALID') {\n    return [baseResult({\n      success: false,\n      duplicate: false,\n      gateway_timeout: false,\n      email_issue: code,\n      error_message: body?.error || code,\n      raw_response: body\n    })];\n  }\n  // Sin code = ya tiene cuenta, o trader accounts no configurados en el server.\n  // Tratamos ambos como \"ya existe\" (fail-safe: no reintentar, no crear duplicado).\n  console.log('♻️ CashStudio: lead ya tiene cuenta (409 sin code) — no se reintenta.');\n  return [baseResult({\n    success: false,\n    duplicate: true,\n    gateway_timeout: false,\n    error_message: body?.error || 'Lead already has a trader account',\n    raw_response: body\n  })];\n}\n\n// 429 — rate limited. NO reintentar automático (empeora el problema).\nif (status === 429) {\n  console.error('🔴 CashStudio: rate limited (429) — 20 req/15min excedido.');\n  return [baseResult({\n    success: false,\n    duplicate: false,\n    gateway_timeout: false,\n    rate_limited: true,\n    error_message: 'Rate limited (429) — reintentar manualmente más tarde',\n    raw_response: body\n  })];\n}\n\n// 502 — ambiguo. Se marca para reintento único (lo maneja el IF siguiente).\nif (status === 502) {\n  console.warn('🟡 CashStudio: 502 (ambiguo) — se reintentará una vez');\n  return [baseResult({\n    success: false,\n    duplicate: false,\n    gateway_timeout: true,\n    error_message: 'Gateway timeout (502)',\n    raw_response: body\n  })];\n}\n\n// 400 / 401 / 403 / 404 / 500 / cualquier otro\nconst errorMsg = body?.error || JSON.stringify(body).slice(0, 300);\nconsole.error('🔴 CashStudio account create FAILED. HTTP', status, '—', errorMsg);\nreturn [baseResult({\n  success: false,\n  duplicate: false,\n  gateway_timeout: false,\n  error_message: errorMsg,\n  raw_response: body\n})];"
+      },
+      "id": "4c74a1f7-ce22-4037-be2b-1f4dc186991b",
+      "name": "🔍 Validate CashStudio Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.gateway_timeout }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8033ee91-9f8b-463d-a9fe-af924877dcb8",
+      "name": "🔁 502 Gateway Timeout?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1392,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "id": "5fb158ed-4dcf-4263-b090-44167839ca95",
+      "name": "⏳ Wait 3s (antes de reintentar)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1840,
+        256
+      ],
+      "webhookId": "2d827e6f-1d6b-430d-a2b9-ecb6272bc24e"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $('🧱 Build CashStudio Payload').first().json.lead_id }}/cashstudio-account",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('✅ Token OK? (WF3)').item.json.body.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"market\": \"{{ $('🧱 Build CashStudio Payload').first().json.market }}\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "b9dcd981-c1bc-4f24-95b8-d3c004a06eef",
+      "name": "👤 POST CashStudio Account (Retry)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Valida la respuesta del endpoint de creación de cuenta CashStudio.\n// Contrato completo documentado: 201 éxito; 400/401/403/404 error directo;\n// 409 con 4 variantes (solo 2 traen details.code, las otras 2 no);\n// 429 rate limit (NO reintentar); 502 ambiguo (reintentar UNA vez, ver más abajo).\nconst resp = $input.first().json || {};\nconst status = resp.statusCode || resp.status || 0;\nconst body = resp.body || resp;\nconst ctx = $('🧱 Build CashStudio Payload').first().json;\n\nconsole.log('👤 CashStudio account create — HTTP:', status);\nconsole.log('👤 Response preview:', JSON.stringify(body).slice(0, 600));\n\nfunction baseResult(extra) {\n  return { json: {\n    lead_id: ctx.lead_id,\n    full_name: ctx.full_name,\n    phone: ctx.phone,\n    whatsapp_number: ctx.whatsapp_number,\n    country: ctx.country,\n    market: ctx.market,\n    http_status: status,\n    true,\n    ...extra\n  }};\n}\n\n// 201 — éxito\nif (status === 201 && body?.account) {\n  if (body.account.market !== ctx.market) {\n    console.error('🔴 CashStudio devolvió market distinto al enviado:', body.account.market, 'vs', ctx.market);\n  }\n  return [baseResult({\n    success: true,\n    duplicate: false,\n    gateway_timeout: false,\n    username: body.account.userName || '',\n    password: body.password || '',\n    account_id: body.account.id || '',\n    trader_id: body.account.traderId || '',\n    portal_url: body.account.portalUrl || '',\n    raw_response: body\n  })];\n}\n\n// 409 — cuatro variantes\nif (status === 409) {\n  const code = body?.details?.code || '';\n  if (code === 'EMAIL_TAKEN' || code === 'EMAIL_INVALID') {\n    return [baseResult({\n      success: false,\n      duplicate: false,\n      gateway_timeout: false,\n      email_issue: code,\n      error_message: body?.error || code,\n      raw_response: body\n    })];\n  }\n  // Sin code = ya tiene cuenta, o trader accounts no configurados en el server.\n  // Tratamos ambos como \"ya existe\" (fail-safe: no reintentar, no crear duplicado).\n  console.log('♻️ CashStudio: lead ya tiene cuenta (409 sin code) — no se reintenta.');\n  return [baseResult({\n    success: false,\n    duplicate: true,\n    gateway_timeout: false,\n    error_message: body?.error || 'Lead already has a trader account',\n    raw_response: body\n  })];\n}\n\n// 429 — rate limited. NO reintentar automático (empeora el problema).\nif (status === 429) {\n  console.error('🔴 CashStudio: rate limited (429) — 20 req/15min excedido.');\n  return [baseResult({\n    success: false,\n    duplicate: false,\n    gateway_timeout: false,\n    rate_limited: true,\n    error_message: 'Rate limited (429) — reintentar manualmente más tarde',\n    raw_response: body\n  })];\n}\n\n// 502 — ambiguo. Se marca para reintento único (lo maneja el IF siguiente).\nif (status === 502) {\n  console.warn('🟡 CashStudio: 502 (ambiguo) — ' + (true ? 'ya era reintento, se trata como fallo' : 'se reintentará una vez'));\n  return [baseResult({\n    success: false,\n    duplicate: false,\n    gateway_timeout: !true,\n    error_message: 'Gateway timeout (502)' + (true ? ' tras reintento' : ''),\n    raw_response: body\n  })];\n}\n\n// 400 / 401 / 403 / 404 / 500 / cualquier otro\nconst errorMsg = body?.error || JSON.stringify(body).slice(0, 300);\nconsole.error('🔴 CashStudio account create FAILED. HTTP', status, '—', errorMsg);\nreturn [baseResult({\n  success: false,\n  duplicate: false,\n  gateway_timeout: false,\n  error_message: errorMsg,\n  raw_response: body\n})];\n"
+      },
+      "id": "911e7218-ea98-4d18-9333-6915c289fb13",
+      "name": "🔍 Validate CashStudio Response (Retry)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ad25735c-19e7-4557-bd8f-2e43f94cade1",
+      "name": "❓ Ya Tenía Cuenta? (409)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3104,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 409 sin details.code = el lead ya tenía cuenta creada antes. La API solo\n// devuelve el password UNA vez (en el create original) — no lo tenemos acá.\n// No se puede reenviar por SMS/WhatsApp lo que no se tiene: se notifica\n// internamente y se marca el lead como interesado igual.\nconst d = $input.first().json;\nconsole.log('♻️ Cuenta ya existía, sin credenciales para reenviar | lead:', d.lead_id);\nreturn [{ json: {\n  status: 'DUPLICATE_NO_CREDS',\n  lead_id: d.lead_id,\n  full_name: d.full_name,\n  phone: d.phone,\n  whatsapp_number: d.whatsapp_number,\n  country: d.country,\n  error_message: d.error_message\n}}];\n"
+      },
+      "id": "7731fdd2-333c-4e08-bc01-683ff451c10e",
+      "name": "♻️ Cuenta Ya Existía (sin credenciales)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3344,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $json.lead_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('🔐 Login LeadStudio (WF3)').item.json.body.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"stage\": \"INTERESTED\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "747bb681-7f2b-405a-bac3-3672181a87e3",
+      "name": "📈 PATCH Lead Stage (INTERESTED)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3632,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $json.lead_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('✅ Token OK? (WF3)').item.json.body.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"stage\": \"INTERESTED\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "cfe1000e-9598-4c62-ac1a-17c085b23c8d",
+      "name": "📈 PATCH Lead Stage (INTERESTED, dup)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3584,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $('✨ Build New Credentials').item.json.lead_id }}/followups",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('🔐 Login LeadStudio (WF3)').item.json.body.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"NOTE\",\n  \"notes\": \"Cuenta CashStudio creada | market: {{ $('✨ Build New Credentials').item.json.market }} | user: {{ $('✨ Build New Credentials').item.json.username }} | portal: {{ $('✨ Build New Credentials').item.json.portal_url }}\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "f77c9322-dd1a-4dc9-94a1-1a9ca9861e96",
+      "name": "📊 POST Followup (Cuenta Creada)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3872,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $('♻️ Cuenta Ya Existía (sin credenciales)').item.json.lead_id }}/followups",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('✅ Token OK? (WF3)').item.json.body.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"NOTE\",\n  \"notes\": \"Intento de creación de cuenta CashStudio: el lead ya tenía cuenta creada previamente (409). No se reenviaron credenciales porque la API solo las entrega una vez, en el create original.\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "a4519a25-68a8-404b-8808-e139ce518856",
+      "name": "📊 POST Followup (Ya Tenía Cuenta)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3824,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('♻️ Cuenta Ya Existía (sin credenciales)').item.json;\nconsole.log('♻️ DUPLICATE (ya tenía cuenta) — lead_id:', d.lead_id, '| phone:', d.phone);\nreturn [{ json: {\n  status: 'DUPLICATE_NO_CREDS',\n  lead_id: d.lead_id,\n  full_name: d.full_name,\n  phone: d.phone,\n  whatsapp_number: d.whatsapp_number,\n  country: d.country,\n  error_message: d.error_message\n}}];\n"
+      },
+      "id": "9ebb7854-cde6-4fad-9979-6f2458fefea7",
+      "name": "📝 Log DUPLICATE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4064,
+        832
+      ]
+    }
+  ],
+  "connections": {
+    "🔁 When Called by WhatsApp Bot": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalize Payload": {
+      "main": [
+        [
+          {
+            "node": "❓ Is INTERESTED?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Is INTERESTED?": {
+      "main": [
+        [
+          {
+            "node": "🛂 Pre-flight Check1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⏩ Skip (not interested)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond 200",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⚙️ Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✨ Build New Credentials": {
+      "main": [
+        [
+          {
+            "node": "📲 Send SMS Credentials1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📈 PATCH Lead Stage (INTERESTED)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🛂 Pre-flight Check1": {
+      "main": [
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Account Created OK?1": {
+      "main": [
+        [
+          {
+            "node": "✨ Build New Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❓ Ya Tenía Cuenta? (409)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📲 Send SMS Credentials1": {
+      "main": [
+        [
+          {
+            "node": "📝 Log SUCCESS1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF3)": {
+      "main": [
+        [
+          {
+            "node": "✅ Token OK? (WF3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ Token OK? (WF3)": {
+      "main": [
+        [
+          {
+            "node": "🧱 Build CashStudio Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Log Auth Error (WF3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🆔 Lead ID Válido? (UUID CRM)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "⏩ Skip (lead_id no es UUID CRM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧱 Build CashStudio Payload": {
+      "main": [
+        [
+          {
+            "node": "👤 POST CashStudio Account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "👤 POST CashStudio Account": {
+      "main": [
+        [
+          {
+            "node": "🔍 Validate CashStudio Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Validate CashStudio Response": {
+      "main": [
+        [
+          {
+            "node": "🔁 502 Gateway Timeout?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔁 502 Gateway Timeout?": {
+      "main": [
+        [
+          {
+            "node": "⏳ Wait 3s (antes de reintentar)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❓ Account Created OK?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏳ Wait 3s (antes de reintentar)": {
+      "main": [
+        [
+          {
+            "node": "👤 POST CashStudio Account (Retry)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "👤 POST CashStudio Account (Retry)": {
+      "main": [
+        [
+          {
+            "node": "🔍 Validate CashStudio Response (Retry)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Validate CashStudio Response (Retry)": {
+      "main": [
+        [
+          {
+            "node": "❓ Account Created OK?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Ya Tenía Cuenta? (409)": {
+      "main": [
+        [
+          {
+            "node": "♻️ Cuenta Ya Existía (sin credenciales)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📝 Log FAILURE1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📈 PATCH Lead Stage (INTERESTED)": {
+      "main": [
+        [
+          {
+            "node": "📊 POST Followup (Cuenta Creada)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 POST Followup (Cuenta Creada)": {
+      "main": [
+        [
+          {
+            "node": "📲 Send SMS Credentials1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Log SUCCESS1": {
+      "main": [
+        [
+          {
+            "node": "📢 Telegram Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📢 Telegram Notification1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "♻️ Cuenta Ya Existía (sin credenciales)": {
+      "main": [
+        [
+          {
+            "node": "📈 PATCH Lead Stage (INTERESTED, dup)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📈 PATCH Lead Stage (INTERESTED, dup)": {
+      "main": [
+        [
+          {
+            "node": "📊 POST Followup (Ya Tenía Cuenta)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 POST Followup (Ya Tenía Cuenta)": {
+      "main": [
+        [
+          {
+            "node": "📝 Log DUPLICATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "landmarket-n8n.dhsoig.easypanel.host",
+            "user-agent": "ElevenLabs/1.0",
+            "content-length": "226",
+            "accept": "*/*",
+            "accept-encoding": "gzip",
+            "content-type": "application/json",
+            "x-forwarded-for": "34.59.11.47",
+            "x-forwarded-host": "landmarket-n8n.dhsoig.easypanel.host",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "b248a70a7af0",
+            "x-real-ip": "34.59.11.47"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "event": "account_requested",
+            "intent": "OPEN_FREE_ACCOUNT",
+            "lead_id": "85d4286f-2366-49f0-af2d-d8bfbb7fc870",
+            "full_name": "vivek",
+            "phone": "+919872163680",
+            "country": "india",
+            "conversation_id": "",
+            "whatsapp_number": ""
+          },
+          "webhookUrl": "https://landmarket-n8n.dhsoig.easypanel.host/webhook/elevenlabs-call-webhook",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "meta": null,
+  "tags": [
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "O5XbU2xsNsK3wWYo",
+      "name": "wf3-atlantis",
+      "createdAt": "2026-07-27T11:58:53.683Z",
+      "updatedAt": "2026-07-27T11:58:53.683Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "6ods2vlMKHhuhpQS",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-15T14:29:44.600Z",
+      "updatedAt": "2026-09-15T14:29:44.600Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+    "workflowId": "6ods2vlMKHhuhpQS",
+    "nodes": [
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={ \"ok\": true }",
+          "options": {}
+        },
+        "id": "9beb7cb1-503c-4469-a985-358c9995f550",
+        "name": "✅ Respond 200",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          -2176,
+          608
+        ]
+      },
+      {
+        "parameters": {
+          "workflowInputs": {
+            "values": [
+              {
+                "name": "phone"
+              },
+              {
+                "name": "full_name"
+              },
+              {
+                "name": "country"
+              },
+              {
+                "name": "lead_id"
+              }
+            ]
+          }
+        },
+        "id": "ed08c0fd-b45f-4448-a4d3-9f184267cfbc",
+        "name": "🔁 When Called by WhatsApp Bot",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -2384,
+          976
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// MULTI-PAIS: India + Nepal reconocidos. Account creation sigue protegido\n// hasta confirmar market/backend de Nepal.\nfunction canonicalCountry(rawCountry, rawPhone='') {\n  const c = String(rawCountry || '').trim().toLowerCase();\n  if (['india','in'].includes(c)) return 'india';\n  if (['nepal','np'].includes(c)) return 'nepal';\n  const p = String(rawPhone || '').replace(/[^0-9+]/g,'');\n  if (p.startsWith('+977') || p.startsWith('977')) return 'nepal';\n  if (p.startsWith('+91') || p.startsWith('91')) return 'india';\n  return '';\n}\n\n// === Universal normalizer ===\nconst raw = $input.first().json || {};\n\nfunction sourceSheetFor(country) {\n  const c=String(country||'').trim().toLowerCase();\n  return ({india:'leads', nepal:'leads nepal', slot3:'leads slot3', slot4:'leads slot4'})[c] || '';\n}\n\n// CASO 0: Tool call de ElevenLabs durante la llamada\nconst isToolCall = (raw.body?.event === 'account_requested' || raw.body?.intent === 'OPEN_FREE_ACCOUNT' ||\n                    raw.event === 'account_requested' || raw.intent === 'OPEN_FREE_ACCOUNT');\nif (isToolCall) {\n  const b = raw.body || raw;\n  const cleanPhone = String(b.phone || '').replace(/[^0-9]/g, '');\n  const waNumber = String(b.whatsapp_number || b.phone || '').replace(/[^0-9]/g, '') || cleanPhone;\n  console.log('🟡 Tool call ElevenLabs | phone:', cleanPhone, '| whatsapp:', waNumber, '| name:', b.full_name);\n  return [{ json: {\n    source: 'elevenlabs_tool',\n    lead_id: String(b.lead_id || `CALL-${cleanPhone}`).trim(),\n    full_name: String(b.full_name || '').trim(),\n    phone: cleanPhone,\n    whatsapp_number: waNumber,\n    email: cleanPhone + '@leads.landmarkmarkets.io',\n    country: canonicalCountry(b.country, b.phone),\n    _source_sheet: sourceSheetFor(canonicalCountry(b.country, b.phone)),\n    elevenlabs_call_id: b.conversation_id || '',\n    status_raw: '',\n    duration_secs: 0,\n    transcript: '',\n    sentiment: '',\n    intent: '',\n    classification: 'INTERESTED',\n    callback_requested: false,\n    callback_date: '',\n    interested: true,\n    account_opened: 'PENDING',\n    conversation_summary: 'Account requested during call'\n  }}];\n}\n\n// CASO 1: Sub-workflow desde WhatsApp bot\nconst isSubworkflow = !!(raw.phone && raw.full_name && !raw.body && !raw.data && !raw.transcript);\nif (isSubworkflow) {\n  console.log('🟦 Sub-workflow path (WhatsApp bot)', JSON.stringify(raw));\n  const cleanPhone = String(raw.phone || '').replace(/[^0-9]/g, '');\n  return [{ json: {\n    source: 'subworkflow',\n    lead_id: String(raw.lead_id || `WA-${cleanPhone}`).trim(),\n    full_name: String(raw.full_name || '').trim(),\n    phone: cleanPhone,\n    country: canonicalCountry(raw.country, raw.phone),\n    _source_sheet: sourceSheetFor(canonicalCountry(raw.country, raw.phone)),\n    elevenlabs_call_id: '',\n    status_raw: '',\n    duration_secs: 0,\n    transcript: '',\n    sentiment: '',\n    intent: '',\n    classification: 'INTERESTED',\n    callback_requested: false,\n    callback_date: '',\n    interested: true,\n    account_opened: 'PENDING',\n    conversation_summary: 'Account creation from WhatsApp bot'\n  }}];\n}\n\n// CASO 2: ElevenLabs post-call webhook (código original sin cambios)\nconsole.log('🟪 ElevenLabs webhook path');\nconst body = raw.body || raw;\nconst data = body.data || body;\nconst lead = (data.conversation_initiation_client_data && data.conversation_initiation_client_data.dynamic_variables) || data.dynamic_variables || {};\nconst transcriptArr = data.transcript || data.transcripts || [];\nconst transcriptText = Array.isArray(transcriptArr)\n  ? transcriptArr.map(t => `${t.role || t.speaker || 'agent'}: ${t.message || t.text || ''}`).join('\\n')\n  : (typeof transcriptArr === 'string' ? transcriptArr : '');\nconst analysis = data.analysis || {};\nconst duration = data.metadata?.call_duration_secs || data.call_duration_secs || data.duration || 0;\nconst statusRaw = data.status || data.call_status || analysis.call_successful || '';\nconst callId = data.conversation_id || data.call_sid || data.conversationId || '';\nlet classification = 'NO_ANSWER';\nif (statusRaw && /failed|no.?answer|busy|noanswer|no_answer/i.test(statusRaw)) {\n  classification = 'NO_ANSWER';\n} else if (/wrong number|galat number|गलत नंबर/i.test(transcriptText)) {\n  classification = 'WRONG_NUMBER';\n} else if (/do not call|dnc|mat karo|call mat/i.test(transcriptText)) {\n  classification = 'DO_NOT_CALL';\n} else if (/callback|baad mein|बाद में|kal call/i.test(transcriptText)) {\n  classification = 'CALLBACK_REQUESTED';\n} else if (/not interested|nahin chahiye|interest nahi/i.test(transcriptText)) {\n  classification = 'NOT_INTERESTED';\n} else if (/yes|haan|हाँ|interested|account khol|deposit|ready/i.test(transcriptText)) {\n  classification = 'INTERESTED';\n} else if (analysis.intent === 'interested' || analysis.outcome === 'interested') {\n  classification = 'INTERESTED';\n}\nlet fullName = lead.full_name || '';\nconst m = transcriptText.match(/(?:naam|name|नाम)[^a-zA-Z\\u0900-\\u097F]{0,8}([a-zA-Z\\u0900-\\u097F][a-zA-Z\\u0900-\\u097F .]{1,60})/i);\nif (m && m[1] && !fullName) fullName = m[1].trim();\nconst callbackDate = classification === 'CALLBACK_REQUESTED'\n  ? new Date(Date.now() + 24*60*60*1000).toISOString()\n  : '';\nconst cleanPhone = String(lead.phone || data.to_number || '').replace(/[^0-9]/g, '');\nreturn [{ json: {\n  source: 'webhook',\n  lead_id: String(lead.lead_id || data.lead_id || `EL-${callId}`).trim(),\n  full_name: fullName,\n  phone: cleanPhone,\n  country: canonicalCountry(lead.country, lead.phone),\n  _source_sheet: sourceSheetFor(canonicalCountry(lead.country, lead.phone)),\n  elevenlabs_call_id: callId,\n  status_raw: statusRaw,\n  duration_secs: duration,\n  transcript: transcriptText,\n  sentiment: analysis.sentiment || '',\n  intent: analysis.intent || analysis.user_intent || '',\n  classification,\n  callback_requested: classification === 'CALLBACK_REQUESTED',\n  callback_date: callbackDate,\n  interested: classification === 'INTERESTED',\n  account_opened: classification === 'INTERESTED' ? 'PENDING' : '',\n  conversation_summary: (analysis.transcript_summary || analysis.summary || transcriptText.slice(0, 800))\n}}];"
+        },
+        "id": "b5384ade-1b3d-438a-b5e5-573dad3f14b2",
+        "name": "⚙️ Normalize Payload",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -2176,
+          880
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "is-interested",
+                "leftValue": "={{ $json.classification }}",
+                "rightValue": "INTERESTED",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "295b94a9-e57f-4619-903a-56dcb38edef3",
+        "name": "❓ Is INTERESTED?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -1952,
+          880
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "console.log('⏩ Not INTERESTED — skipping Atlantis. classification:', $json.classification);\nreturn $input.all();"
+        },
+        "id": "0d0849ac-ca26-43bc-9399-42cd9c7ac4c2",
+        "name": "⏩ Skip (not interested)",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -1728,
+          1088
+        ]
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "elevenlabs-call-webhook",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          -2432,
+          752
+        ],
+        "id": "cf79a4d9-54f8-4e3f-86de-efc4f0bf0656",
+        "name": "Webhook",
+        "webhookId": "e73b2ccb-4c35-4aba-ac35-fbea3963b054"
+      },
+      {
+        "parameters": {
+          "jsCode": "const d = $input.first().json;\n\nconsole.log('🆕 New account credentials ready | user:', d.username, '| country:', d.country);\n\nreturn [{\n  json: {\n    success: true,\n    duplicate: false,\n    is_existing: false,\n    username: d.username,\n    password: d.password,\n    account_id: d.account_id || '',\n    trader_id: d.trader_id || '',\n    portal_url: d.portal_url || '',\n    full_name: d.full_name,\n    lead_id: d.lead_id,\n    phone: d.phone,\n    whatsapp_number: d.whatsapp_number || d.phone,\n    country: String(d.country || 'india').toLowerCase(),\n    market: d.market,\n    http_status: d.http_status\n  }\n}];\n"
+        },
+        "id": "f5da42ce-70cf-43b8-a2f3-8c5532a83629",
+        "name": "✨ Build New Credentials",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3264,
+          496
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const d = $input.first().json;\nfunction canonicalCountry(rawCountry, rawPhone='') {\n  const c=String(rawCountry||'').trim().toLowerCase();\n  if (['india','in'].includes(c)) return 'india';\n  if (['nepal','np'].includes(c)) return 'nepal';\n  const p=String(rawPhone||'').replace(/[^0-9+]/g,'');\n  if (p.startsWith('+977')||p.startsWith('977')) return 'nepal';\n  if (p.startsWith('+91')||p.startsWith('91')) return 'india';\n  return '';\n}\nconst country = canonicalCountry(d.country, d.phone);\nconst missing = [];\nif (!d.full_name || d.full_name.length < 2) missing.push('full_name');\nif (!d.phone || d.phone.length < 6) missing.push('phone');\nif (!country) missing.push('supported country');\nif (missing.length > 0) throw new Error('Missing/invalid fields for account creation: ' + missing.join(', '));\n\nconst cleanPhone = String(d.phone || '').replace(/[^0-9]/g, '');\nconst waPhone = String(d.whatsapp_number || d.phone || '').replace(/[^0-9]/g, '') || cleanPhone;\nreturn [{ json: {\n  lead_id: String(d.lead_id || `WA-${cleanPhone}`).trim(),\n  full_name: String(d.full_name || '').trim(),\n  phone: cleanPhone,\n  whatsapp_number: waPhone,\n  country,\n  _source_sheet: ({india:'leads',nepal:'leads nepal',slot3:'leads slot3',slot4:'leads slot4'})[country] || '',\n  email: String(d.email || '').trim()\n}}];"
+        },
+        "id": "9ec53592-7cca-46bc-8d02-15b203d30d36",
+        "name": "🛂 Pre-flight Check1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -1696,
+          816
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "id": "success",
+                "leftValue": "={{ $json.success }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "02c9e5e1-3164-4be9-9ca4-b9f53f680c7a",
+        "name": "❓ Account Created OK?1",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2736,
+          544
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const d = $input.first().json;\n\nconsole.log('✅ SUCCESS — user:', d.username, '| account_id:', d.account_id, '| trader_id:', d.trader_id);\n\nreturn [{ json: {\n  status: 'SUCCESS',\n  is_existing: false,\n  username: d.username,\n  password: d.password,\n  account_id: d.account_id,\n  trader_id: d.trader_id,\n  portal_url: d.portal_url,\n  phone: d.phone,\n  whatsapp_number: d.whatsapp_number,\n  full_name: d.full_name,\n  lead_id: d.lead_id,\n  country: d.country\n}}];"
+        },
+        "id": "e8b11739-36f6-45a4-86bd-69ff77e79e3a",
+        "name": "📝 Log SUCCESS1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4512,
+          480
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const d = $input.first().json;\nconsole.error('🔴 FAILURE — lead_id:', d.lead_id, '| http:', d.http_status, '| error:', d.error_message);\nreturn [{ json: {\n  status: 'FAILURE',\n  error_message: d.error_message || 'unknown',\n  http_status: d.http_status,\n  rate_limited: d.rate_limited || false,\n  email_issue: d.email_issue || '',\n  phone: d.phone,\n  full_name: d.full_name,\n  lead_id: d.lead_id,\n  duplicate: d.duplicate || false\n}}];\n"
+        },
+        "id": "076186e3-53a6-471b-b331-47cc0aa166a2",
+        "name": "📝 Log FAILURE1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3472,
+          1088
+        ]
+      },
+      {
+        "parameters": {
+          "chatId": "-1004454561082",
+          "text": "=✅ *New Account Landmark Markets Created*\n\n👤 *Client:* {{ $('✨ Build New Credentials').item.json.full_name }}\n📱 *Phone:* {{ $('✨ Build New Credentials').item.json.phone }}\n🆔 *Lead ID:* {{ $('✨ Build New Credentials').item.json.lead_id }}\n🔐 *Username:* {{ $('✨ Build New Credentials').item.json.username }}\n🔑 *Password:* {{ $('✨ Build New Credentials').item.json.password }}\n💼 *Account ID:* {{ $json.account_id || 'N/A' }}\n🌐 *Portal:* {{ $json.portal_url || 'N/A' }}\n🕐 {{ $now.setZone('Asia/Kolkata').toFormat('dd/MM/yyyy HH:mm') }} IST",
+          "additionalFields": {
+            "appendAttribution": false,
+            "parse_mode": "Markdown"
+          }
+        },
+        "id": "7a971aaf-fa83-4612-a29b-fd612cf8db54",
+        "name": "📢 Telegram Notification",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          4816,
+          368
+        ],
+        "webhookId": "0f4a0b75-9d55-4089-a894-b23ea4542f54",
+        "credentials": {
+          "telegramApi": {
+            "id": "aZWABzEfC4SEy3oC",
+            "name": "Telegram account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "http://api2.santo.cc/submit",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "command",
+                "value": "MT_REQUEST"
+              },
+              {
+                "name": "cpid",
+                "value": "zUg8Dhgb"
+              },
+              {
+                "name": "cppwd",
+                "value": "vduAtccg"
+              },
+              {
+                "name": "da",
+                "value": "={{ $json.whatsapp_number || $json.phone }}"
+              },
+              {
+                "name": "sm",
+                "value": "=Landmark Markets User: {{ $json.username }} \nPass: {{ $json.password }} \nWeb: {{ $json.country === 'nepal' ? 'https://crm.lmtradermarkets.com/' : 'https://crm.landmarkmarkets.in/' }}"
+              }
+            ]
+          },
+          "options": {
+            "allowUnauthorizedCerts": true,
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "text"
+              }
+            },
+            "timeout": 20000
+          }
+        },
+        "id": "dd02269c-bda8-4249-a334-59d915d70cc0",
+        "name": "📲 Send SMS Credentials1",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          4176,
+          480
+        ]
+      },
+      {
+        "parameters": {
+          "content": "## ⚠️ ANTES DE ACTIVAR\n\nEste WF3 ahora usa la API de LeadStudio (no Sheets, no Atlantis directo):\n\n- Login: POST /api/auth/login (mismo patron que WF2)\n- Crear cuenta: POST /api/leads/{leadId}/cashstudio-account -- body con market: IND o NPL\n- lead_id debe ser el UUID real del lead en LeadStudio. Si viene de un tool-call en vivo o del bot de WhatsApp sin lead respaldado, el nodo \"Lead ID Valido?\" lo detiene automaticamente (no intenta crear cuenta con un id inventado).\n\nSin confirmar todavia (avisar si la API los rechaza):\n- stage: INTERESTED en el PATCH -- no confirmado como valor exacto valido\n- type: NOTE en el POST followups -- no confirmado, el doc no cubre ese endpoint\n\nImportado como inactive a proposito. Probar cada nodo manualmente antes de activar, igual que se hizo con WF2.",
+          "height": 320,
+          "width": 420,
+          "color": 5
+        },
+        "id": "a6d1f1ed-2284-4f81-9fee-4bb5cfe54682",
+        "name": "📌 READ BEFORE GO-LIVE",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -800,
+          1424
+        ]
+      },
+      {
+        "parameters": {
+          "chatId": "-1003984044945",
+          "text": "=✅ *New Account Landmark Markets Created*\n\n👤 *Client:* {{ $('✨ Build New Credentials').item.json.full_name }}\n📱 *Phone:* {{ $('✨ Build New Credentials').item.json.phone }}\n🆔 *Lead ID:* {{ $('✨ Build New Credentials').item.json.lead_id }}\n🔐 *Username:* {{ $('✨ Build New Credentials').item.json.username }}\n🔑 *Password:* {{ $('✨ Build New Credentials').item.json.password }}\n💼 *Account ID:* {{ $json.account_id || 'N/A' }}\n🌐 *Portal:* {{ $json.portal_url || 'N/A' }}\n🕐 {{ $now.setZone('Asia/Kolkata').toFormat('dd/MM/yyyy HH:mm') }} IST",
+          "additionalFields": {
+            "appendAttribution": false,
+            "parse_mode": "Markdown"
+          }
+        },
+        "id": "cc492512-b167-4a16-b235-38a42e55f9f5",
+        "name": "📢 Telegram Notification1",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          4992,
+          512
+        ],
+        "webhookId": "0f4a0b75-9d55-4089-a894-b23ea4542f54",
+        "credentials": {
+          "telegramApi": {
+            "id": "aZWABzEfC4SEy3oC",
+            "name": "Telegram account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "India → market **IND** (Landmark India)\nNepal → market **NPL** (Landmark Nepal)\n\nCualquier otro país: el nodo \"🧱 Build CashStudio Payload\" lanza error explícito (fail-safe, no se manda un market inventado). Slots 3/4 reservados hasta definir.",
+          "height": 280,
+          "width": 620,
+          "color": 5
+        },
+        "id": "28221b0c-a8fb-4b7e-b9ce-5f09f9f8acec",
+        "name": "🌍 Account Creation Country Rules",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          3360,
+          -320
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://lead-studio-9gnl.onrender.com/api/auth/login",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": []
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"email\": \"ai@leadstudio.com\",\n  \"password\": \"Admin@123\"\n}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "278096f0-5ccd-4821-bc54-d9ee62d16d3e",
+        "name": "🔐 Login LeadStudio (WF3)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -880,
+          608
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "cond1",
+                "leftValue": "={{ $json.statusCode === 200 }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "20058ccf-a7e4-4b41-9474-d63964c947e3",
+        "name": "✅ Token OK? (WF3)",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -512,
+          624
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const resp = $('🔐 Login LeadStudio (WF3)').item.json;\nconsole.error('❌ WF3: Login a LeadStudio falló', JSON.stringify(resp));\nreturn [{ json: { error: true, message: 'LeadStudio auth failed', response: resp } }];\n"
+        },
+        "id": "297b6e05-0bd7-4dd4-90e7-ad4e9821818c",
+        "name": "❌ Log Auth Error (WF3)",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -256,
+          736
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "cond1",
+                "leftValue": "={{ /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test($input.first().json.lead_id) }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "a40dbe30-1f70-4607-bbf1-207a758bd6e0",
+        "name": "🆔 Lead ID Válido? (UUID CRM)",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          224,
+          1152
+        ],
+        "alwaysOutputData": false
+      },
+      {
+        "parameters": {
+          "jsCode": "// Este lead_id no es un UUID real de LeadStudio (viene de un origen sin lead\n// respaldado en el CRM: tool-call en vivo o bot de WhatsApp sin lead previo).\n// No se puede crear cuenta sin un lead real — se detiene acá, sin error falso.\nconst d = $input.first().json;\nconsole.warn('⚠️ WF3: lead_id no es UUID CRM, se omite creación de cuenta:', d.lead_id);\nreturn [{ json: { skipped: true, reason: 'lead_id no es UUID CRM', lead_id: d.lead_id } }];\n"
+        },
+        "id": "f5b2086a-72bf-4e10-857d-c65bd565c4f0",
+        "name": "⏩ Skip (lead_id no es UUID CRM)",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          432,
+          1200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Solo India (IND) y Nepal (NPL) confirmados. Slots 3/4 reservados hasta\n// definir market real para otros países (mismo criterio fail-safe de antes).\nconst leadData = $input.first().json;\nconst lead = {\n  lead_id: String(leadData.lead_id || ''),\n  full_name: String(leadData.full_name || ''),\n  phone: String(leadData.phone || ''),\n  whatsapp_number: String(leadData.whatsapp_number || leadData.phone || ''),\n  country: String(leadData.country || 'india').toLowerCase()\n};\nconst MARKET_BY_COUNTRY = { india: 'IND', nepal: 'NPL' };\nconst market = MARKET_BY_COUNTRY[lead.country];\nif (!market) {\n  throw new Error('País sin market soportado para creación de cuenta: ' + lead.country);\n}\nconsole.log('🧱 CashStudio account payload | lead_id:', lead.lead_id, '| market:', market);\nreturn [{ json: {\n  lead_id: $('🛂 Pre-flight Check1').first().json.lead_id.replace(/^S/, ''),\n  full_name: $('🛂 Pre-flight Check1').first().json.full_name,\n  phone: $('🛂 Pre-flight Check1').first().json.phone,\n  whatsapp_number: $('🛂 Pre-flight Check1').first().json.whatsapp_number,\n  country: $('🛂 Pre-flight Check1').first().json.country,\n  market: market\n}}];"
+        },
+        "id": "1ae18f1f-9005-423a-8c92-542b5a683454",
+        "name": "🧱 Build CashStudio Payload",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          368,
+          448
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=   https://lead-studio-9gnl.onrender.com/api/leads/{{ $input.first().json.lead_id }}/cashstudio-account",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('✅ Token OK? (WF3)').item.json.body.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"market\": \"{{ $input.first().json.market }}\"\n}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "e20ad749-eb41-4489-a845-316f6c1cb4ae",
+        "name": "👤 POST CashStudio Account",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          720,
+          448
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Valida la respuesta del endpoint de creación de cuenta CashStudio.\n// Contrato completo documentado: 201 éxito; 400/401/403/404 error directo;\n// 409 con 4 variantes (solo 2 traen details.code, las otras 2 no);\n// 429 rate limit (NO reintentar); 502 ambiguo (reintentar UNA vez, ver más abajo).\n\nconst resp = $input.first().json || {};\nconst status = resp.statusCode || resp.status || 0;\nconst body = resp.body || resp;\nconst ctx = $('🧱 Build CashStudio Payload').first().json;\n\nconsole.log('👤 CashStudio account create — HTTP:', status);\nconsole.log('👤 Response preview:', JSON.stringify(body).slice(0, 600));\n\nfunction baseResult(extra) {\n  return { json: {\n    lead_id: ctx.lead_id,\n    full_name: ctx.full_name,\n    phone: ctx.phone,\n    whatsapp_number: ctx.whatsapp_number,\n    country: ctx.country,\n    market: ctx.market,\n    http_status: status,\n    ...extra\n  }};\n}\n\n// 201 — éxito\nif (status === 201 && body?.account) {\n  if (body.account.market !== ctx.market) {\n    console.error('🔴 CashStudio devolvió market distinto al enviado:', body.account.market, 'vs', ctx.market);\n  }\n  return [baseResult({\n    success: true,\n    duplicate: false,\n    gateway_timeout: false,\n    username: body.account.userName || '',\n    password: body.password || '',\n    account_id: body.account.id || '',\n    trader_id: body.account.traderId || '',\n    portal_url: body.account.portalUrl || '',\n    raw_response: body\n  })];\n}\n\n// 409 — cuatro variantes\nif (status === 409) {\n  const code = body?.details?.code || '';\n  if (code === 'EMAIL_TAKEN' || code === 'EMAIL_INVALID') {\n    return [baseResult({\n      success: false,\n      duplicate: false,\n      gateway_timeout: false,\n      email_issue: code,\n      error_message: body?.error || code,\n      raw_response: body\n    })];\n  }\n  // Sin code = ya tiene cuenta, o trader accounts no configurados en el server.\n  // Tratamos ambos como \"ya existe\" (fail-safe: no reintentar, no crear duplicado).\n  console.log('♻️ CashStudio: lead ya tiene cuenta (409 sin code) — no se reintenta.');\n  return [baseResult({\n    success: false,\n    duplicate: true,\n    gateway_timeout: false,\n    error_message: body?.error || 'Lead already has a trader account',\n    raw_response: body\n  })];\n}\n\n// 429 — rate limited. NO reintentar automático (empeora el problema).\nif (status === 429) {\n  console.error('🔴 CashStudio: rate limited (429) — 20 req/15min excedido.');\n  return [baseResult({\n    success: false,\n    duplicate: false,\n    gateway_timeout: false,\n    rate_limited: true,\n    error_message: 'Rate limited (429) — reintentar manualmente más tarde',\n    raw_response: body\n  })];\n}\n\n// 502 — ambiguo. Se marca para reintento único (lo maneja el IF siguiente).\nif (status === 502) {\n  console.warn('🟡 CashStudio: 502 (ambiguo) — se reintentará una vez');\n  return [baseResult({\n    success: false,\n    duplicate: false,\n    gateway_timeout: true,\n    error_message: 'Gateway timeout (502)',\n    raw_response: body\n  })];\n}\n\n// 400 / 401 / 403 / 404 / 500 / cualquier otro\nconst errorMsg = body?.error || JSON.stringify(body).slice(0, 300);\nconsole.error('🔴 CashStudio account create FAILED. HTTP', status, '—', errorMsg);\nreturn [baseResult({\n  success: false,\n  duplicate: false,\n  gateway_timeout: false,\n  error_message: errorMsg,\n  raw_response: body\n})];"
+        },
+        "id": "4c74a1f7-ce22-4037-be2b-1f4dc186991b",
+        "name": "🔍 Validate CashStudio Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1136,
+          432
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "id": "cond1",
+                "leftValue": "={{ $json.gateway_timeout }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "8033ee91-9f8b-463d-a9fe-af924877dcb8",
+        "name": "🔁 502 Gateway Timeout?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1392,
+          448
+        ]
+      },
+      {
+        "parameters": {
+          "amount": 3
+        },
+        "id": "5fb158ed-4dcf-4263-b090-44167839ca95",
+        "name": "⏳ Wait 3s (antes de reintentar)",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          1840,
+          256
+        ],
+        "webhookId": "2d827e6f-1d6b-430d-a2b9-ecb6272bc24e"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $('🧱 Build CashStudio Payload').first().json.lead_id }}/cashstudio-account",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('✅ Token OK? (WF3)').item.json.body.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"market\": \"{{ $('🧱 Build CashStudio Payload').first().json.market }}\"\n}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "b9dcd981-c1bc-4f24-95b8-d3c004a06eef",
+        "name": "👤 POST CashStudio Account (Retry)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2160,
+          256
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Valida la respuesta del endpoint de creación de cuenta CashStudio.\n// Contrato completo documentado: 201 éxito; 400/401/403/404 error directo;\n// 409 con 4 variantes (solo 2 traen details.code, las otras 2 no);\n// 429 rate limit (NO reintentar); 502 ambiguo (reintentar UNA vez, ver más abajo).\nconst resp = $input.first().json || {};\nconst status = resp.statusCode || resp.status || 0;\nconst body = resp.body || resp;\nconst ctx = $('🧱 Build CashStudio Payload').first().json;\n\nconsole.log('👤 CashStudio account create — HTTP:', status);\nconsole.log('👤 Response preview:', JSON.stringify(body).slice(0, 600));\n\nfunction baseResult(extra) {\n  return { json: {\n    lead_id: ctx.lead_id,\n    full_name: ctx.full_name,\n    phone: ctx.phone,\n    whatsapp_number: ctx.whatsapp_number,\n    country: ctx.country,\n    market: ctx.market,\n    http_status: status,\n    true,\n    ...extra\n  }};\n}\n\n// 201 — éxito\nif (status === 201 && body?.account) {\n  if (body.account.market !== ctx.market) {\n    console.error('🔴 CashStudio devolvió market distinto al enviado:', body.account.market, 'vs', ctx.market);\n  }\n  return [baseResult({\n    success: true,\n    duplicate: false,\n    gateway_timeout: false,\n    username: body.account.userName || '',\n    password: body.password || '',\n    account_id: body.account.id || '',\n    trader_id: body.account.traderId || '',\n    portal_url: body.account.portalUrl || '',\n    raw_response: body\n  })];\n}\n\n// 409 — cuatro variantes\nif (status === 409) {\n  const code = body?.details?.code || '';\n  if (code === 'EMAIL_TAKEN' || code === 'EMAIL_INVALID') {\n    return [baseResult({\n      success: false,\n      duplicate: false,\n      gateway_timeout: false,\n      email_issue: code,\n      error_message: body?.error || code,\n      raw_response: body\n    })];\n  }\n  // Sin code = ya tiene cuenta, o trader accounts no configurados en el server.\n  // Tratamos ambos como \"ya existe\" (fail-safe: no reintentar, no crear duplicado).\n  console.log('♻️ CashStudio: lead ya tiene cuenta (409 sin code) — no se reintenta.');\n  return [baseResult({\n    success: false,\n    duplicate: true,\n    gateway_timeout: false,\n    error_message: body?.error || 'Lead already has a trader account',\n    raw_response: body\n  })];\n}\n\n// 429 — rate limited. NO reintentar automático (empeora el problema).\nif (status === 429) {\n  console.error('🔴 CashStudio: rate limited (429) — 20 req/15min excedido.');\n  return [baseResult({\n    success: false,\n    duplicate: false,\n    gateway_timeout: false,\n    rate_limited: true,\n    error_message: 'Rate limited (429) — reintentar manualmente más tarde',\n    raw_response: body\n  })];\n}\n\n// 502 — ambiguo. Se marca para reintento único (lo maneja el IF siguiente).\nif (status === 502) {\n  console.warn('🟡 CashStudio: 502 (ambiguo) — ' + (true ? 'ya era reintento, se trata como fallo' : 'se reintentará una vez'));\n  return [baseResult({\n    success: false,\n    duplicate: false,\n    gateway_timeout: !true,\n    error_message: 'Gateway timeout (502)' + (true ? ' tras reintento' : ''),\n    raw_response: body\n  })];\n}\n\n// 400 / 401 / 403 / 404 / 500 / cualquier otro\nconst errorMsg = body?.error || JSON.stringify(body).slice(0, 300);\nconsole.error('🔴 CashStudio account create FAILED. HTTP', status, '—', errorMsg);\nreturn [baseResult({\n  success: false,\n  duplicate: false,\n  gateway_timeout: false,\n  error_message: errorMsg,\n  raw_response: body\n})];\n"
+        },
+        "id": "911e7218-ea98-4d18-9333-6915c289fb13",
+        "name": "🔍 Validate CashStudio Response (Retry)",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2464,
+          256
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 1
+            },
+            "conditions": [
+              {
+                "id": "cond1",
+                "leftValue": "={{ $json.duplicate }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "ad25735c-19e7-4557-bd8f-2e43f94cade1",
+        "name": "❓ Ya Tenía Cuenta? (409)",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3104,
+          832
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// 409 sin details.code = el lead ya tenía cuenta creada antes. La API solo\n// devuelve el password UNA vez (en el create original) — no lo tenemos acá.\n// No se puede reenviar por SMS/WhatsApp lo que no se tiene: se notifica\n// internamente y se marca el lead como interesado igual.\nconst d = $input.first().json;\nconsole.log('♻️ Cuenta ya existía, sin credenciales para reenviar | lead:', d.lead_id);\nreturn [{ json: {\n  status: 'DUPLICATE_NO_CREDS',\n  lead_id: d.lead_id,\n  full_name: d.full_name,\n  phone: d.phone,\n  whatsapp_number: d.whatsapp_number,\n  country: d.country,\n  error_message: d.error_message\n}}];\n"
+        },
+        "id": "7731fdd2-333c-4e08-bc01-683ff451c10e",
+        "name": "♻️ Cuenta Ya Existía (sin credenciales)",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3344,
+          832
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $json.lead_id }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('🔐 Login LeadStudio (WF3)').item.json.body.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"stage\": \"INTERESTED\"\n}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "747bb681-7f2b-405a-bac3-3672181a87e3",
+        "name": "📈 PATCH Lead Stage (INTERESTED)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3632,
+          320
+        ]
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $json.lead_id }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('✅ Token OK? (WF3)').item.json.body.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"stage\": \"INTERESTED\"\n}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "cfe1000e-9598-4c62-ac1a-17c085b23c8d",
+        "name": "📈 PATCH Lead Stage (INTERESTED, dup)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3584,
+          832
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $('✨ Build New Credentials').item.json.lead_id }}/followups",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('🔐 Login LeadStudio (WF3)').item.json.body.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"type\": \"NOTE\",\n  \"notes\": \"Cuenta CashStudio creada | market: {{ $('✨ Build New Credentials').item.json.market }} | user: {{ $('✨ Build New Credentials').item.json.username }} | portal: {{ $('✨ Build New Credentials').item.json.portal_url }}\"\n}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "f77c9322-dd1a-4dc9-94a1-1a9ca9861e96",
+        "name": "📊 POST Followup (Cuenta Creada)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3872,
+          320
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $('♻️ Cuenta Ya Existía (sin credenciales)').item.json.lead_id }}/followups",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('✅ Token OK? (WF3)').item.json.body.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"type\": \"NOTE\",\n  \"notes\": \"Intento de creación de cuenta CashStudio: el lead ya tenía cuenta creada previamente (409). No se reenviaron credenciales porque la API solo las entrega una vez, en el create original.\"\n}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true,
+                "responseFormat": "json"
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "a4519a25-68a8-404b-8808-e139ce518856",
+        "name": "📊 POST Followup (Ya Tenía Cuenta)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3824,
+          832
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const d = $('♻️ Cuenta Ya Existía (sin credenciales)').item.json;\nconsole.log('♻️ DUPLICATE (ya tenía cuenta) — lead_id:', d.lead_id, '| phone:', d.phone);\nreturn [{ json: {\n  status: 'DUPLICATE_NO_CREDS',\n  lead_id: d.lead_id,\n  full_name: d.full_name,\n  phone: d.phone,\n  whatsapp_number: d.whatsapp_number,\n  country: d.country,\n  error_message: d.error_message\n}}];\n"
+        },
+        "id": "9ebb7854-cde6-4fad-9979-6f2458fefea7",
+        "name": "📝 Log DUPLICATE",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4064,
+          832
+        ]
+      }
+    ],
+    "connections": {
+      "🔁 When Called by WhatsApp Bot": {
+        "main": [
+          [
+            {
+              "node": "⚙️ Normalize Payload",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "⚙️ Normalize Payload": {
+        "main": [
+          [
+            {
+              "node": "❓ Is INTERESTED?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "❓ Is INTERESTED?": {
+        "main": [
+          [
+            {
+              "node": "🛂 Pre-flight Check1",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "⏩ Skip (not interested)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "✅ Respond 200",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "⚙️ Normalize Payload",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "✨ Build New Credentials": {
+        "main": [
+          [
+            {
+              "node": "📲 Send SMS Credentials1",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "📈 PATCH Lead Stage (INTERESTED)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🛂 Pre-flight Check1": {
+        "main": [
+          [
+            {
+              "node": "🔐 Login LeadStudio (WF3)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "❓ Account Created OK?1": {
+        "main": [
+          [
+            {
+              "node": "✨ Build New Credentials",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "❓ Ya Tenía Cuenta? (409)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📲 Send SMS Credentials1": {
+        "main": [
+          [
+            {
+              "node": "📝 Log SUCCESS1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔐 Login LeadStudio (WF3)": {
+        "main": [
+          [
+            {
+              "node": "✅ Token OK? (WF3)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "✅ Token OK? (WF3)": {
+        "main": [
+          [
+            {
+              "node": "🧱 Build CashStudio Payload",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "❌ Log Auth Error (WF3)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🆔 Lead ID Válido? (UUID CRM)": {
+        "main": [
+          [],
+          [
+            {
+              "node": "⏩ Skip (lead_id no es UUID CRM)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🧱 Build CashStudio Payload": {
+        "main": [
+          [
+            {
+              "node": "👤 POST CashStudio Account",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "👤 POST CashStudio Account": {
+        "main": [
+          [
+            {
+              "node": "🔍 Validate CashStudio Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔍 Validate CashStudio Response": {
+        "main": [
+          [
+            {
+              "node": "🔁 502 Gateway Timeout?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔁 502 Gateway Timeout?": {
+        "main": [
+          [
+            {
+              "node": "⏳ Wait 3s (antes de reintentar)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "❓ Account Created OK?1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "⏳ Wait 3s (antes de reintentar)": {
+        "main": [
+          [
+            {
+              "node": "👤 POST CashStudio Account (Retry)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "👤 POST CashStudio Account (Retry)": {
+        "main": [
+          [
+            {
+              "node": "🔍 Validate CashStudio Response (Retry)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔍 Validate CashStudio Response (Retry)": {
+        "main": [
+          [
+            {
+              "node": "❓ Account Created OK?1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "❓ Ya Tenía Cuenta? (409)": {
+        "main": [
+          [
+            {
+              "node": "♻️ Cuenta Ya Existía (sin credenciales)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "📝 Log FAILURE1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📈 PATCH Lead Stage (INTERESTED)": {
+        "main": [
+          [
+            {
+              "node": "📊 POST Followup (Cuenta Creada)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📊 POST Followup (Cuenta Creada)": {
+        "main": [
+          [
+            {
+              "node": "📲 Send SMS Credentials1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📝 Log SUCCESS1": {
+        "main": [
+          [
+            {
+              "node": "📢 Telegram Notification",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "📢 Telegram Notification1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "♻️ Cuenta Ya Existía (sin credenciales)": {
+        "main": [
+          [
+            {
+              "node": "📈 PATCH Lead Stage (INTERESTED, dup)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📈 PATCH Lead Stage (INTERESTED, dup)": {
+        "main": [
+          [
+            {
+              "node": "📊 POST Followup (Ya Tenía Cuenta)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "📊 POST Followup (Ya Tenía Cuenta)": {
+        "main": [
+          [
+            {
+              "node": "📝 Log DUPLICATE",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Land Market",
+    "name": "Version ac0ded7f",
+    "description": "",
+    "autosaved": true,
+    "createdAt": "2026-09-16T11:43:41.332Z",
+    "updatedAt": "2026-09-17T08:33:26.481Z",
+    "workflowPublishHistory": [
+      {
+        "id": 1857,
+        "workflowId": "6ods2vlMKHhuhpQS",
+        "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-18T08:23:12.931Z"
+      },
+      {
+        "id": 1971,
+        "workflowId": "6ods2vlMKHhuhpQS",
+        "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-22T06:33:50.066Z"
+      },
+      {
+        "id": 1880,
+        "workflowId": "6ods2vlMKHhuhpQS",
+        "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+        "event": "deactivated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-18T13:30:10.835Z"
+      },
+      {
+        "id": 1720,
+        "workflowId": "6ods2vlMKHhuhpQS",
+        "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-16T11:43:54.757Z"
+      },
+      {
+        "id": 1779,
+        "workflowId": "6ods2vlMKHhuhpQS",
+        "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-17T08:33:26.477Z"
+      },
+      {
+        "id": 1782,
+        "workflowId": "6ods2vlMKHhuhpQS",
+        "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+        "event": "deactivated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-17T08:49:50.943Z"
+      },
+      {
+        "id": 1721,
+        "workflowId": "6ods2vlMKHhuhpQS",
+        "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+        "event": "deactivated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-16T11:44:03.770Z"
+      },
+      {
+        "id": 1921,
+        "workflowId": "6ods2vlMKHhuhpQS",
+        "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+        "event": "activated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-21T08:13:48.801Z"
+      },
+      {
+        "id": 1930,
+        "workflowId": "6ods2vlMKHhuhpQS",
+        "versionId": "ac0ded7f-9634-4f96-8e14-04f8e69412c0",
+        "event": "deactivated",
+        "userId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-09-21T13:30:12.770Z"
+      }
+    ]
+  }
+}

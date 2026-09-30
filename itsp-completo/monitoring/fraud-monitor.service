@@ -1,0 +1,18 @@
+# =====================================================================
+#  MODULO 2: ejecucion periodica del monitor (systemd)
+#  Copia estos dos archivos a /etc/systemd/system/ y luego:
+#     systemctl daemon-reload
+#     systemctl enable --now fraud-monitor.timer
+#  Alternativa con cron (cada minuto):
+#     * * * * * /usr/bin/python3 /opt/itsp/fraud-monitor.py >> /var/log/fraud-monitor.log 2>&1
+# =====================================================================
+
+# ---------- /etc/systemd/system/fraud-monitor.service ----------
+[Unit]
+Description=ITSP fraud monitor (analiza CDR y corta clientes)
+After=network.target mariadb.service asterisk.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/itsp/fraud-monitor.py
+User=root

@@ -1,0 +1,398 @@
+[
+  {
+    "id": "PRE",
+    "name": "candidato WF2 con 66 nodos y WF9 con 27 (2 nodos nuevos cada uno)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "BUG-REPRO",
+    "name": "reproducción: el WF2 anterior crea la Activity CONNECTED/ANSWERED al contestar con durationSeconds = 0 (causa raíz)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-0",
+    "name": "al contestar, WF2 NO crea la Activity (0 POST) y deja el lead ATTEMPTING; el ledger queda confirmado",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-1",
+    "name": "Asterisk ANSWERED: durationSeconds del CRM == CDR.billsec (88) > 0; NO cdr.duration (126) ni EL (90)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-2",
+    "name": "una sola Activity para esa llamada física (1 POST /followups en total)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-3",
+    "name": "attempts incrementa exactamente +1 (0 -> 1), sólo cuando WF9 hace el POST",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-3b",
+    "name": "ciclo de vida final: CONNECTED/ANSWERED, lead CONTACTED, sin stage de cierre, sin nextActionAt",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-4",
+    "name": "followup_id guardado en wf_call_followups == id de la Activity (una fila, provider asterisk, recording_synced=0)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-4b",
+    "name": "la fila lleva created_at = inicio de la llamada (uniqueid del CDR), para que WF10 la empareje por UNIQUEID",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-1b",
+    "name": "providerCallId = elevenlabs:<conversation> y la nota no está en español",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-5",
+    "name": "WF10 (nodo real Decidir Match) empareja la grabación con el followup_id de la Activity de WF9 -> el PUT va a ese id",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-5b",
+    "name": "PUT recording usa {{followup_id}} de esa decisión (URL del nodo WF10 real, sin cambios)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-5c",
+    "name": "recording_synced=1 tras el PUT: un reenvío del mismo WAV -> not_pending (no se vuelve a subir)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-5d",
+    "name": "grabación que llega ANTES de la Activity -> WF10 responde 503 followup_not_found (el worker reintenta), sin adjuntar a nada",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6",
+    "name": "CDR no disponible (sin filas) -> durationSeconds = ElevenLabs (84), una Activity, attempts 3->4, sigue el flujo",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6",
+    "name": "CDR no disponible (tabla inexistente / sin permiso) -> durationSeconds = ElevenLabs (84), una Activity, attempts 3->4, sigue el flujo",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6b",
+    "name": "con error del nodo CDR se avisa con 🚨 pero el procesador no se detiene",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6c",
+    "name": "dos CDR igual de plausibles (ambiguo) -> se usa ElevenLabs (84) y no se adivina",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6d",
+    "name": "otra llamada CDR anterior al mismo número no se confunde: se usa la alineada con la conversación (80)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6e",
+    "name": "registro CDR duplicado (mismo uniqueid y duración) no se toma por ambiguo: durationSeconds = billsec (80)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6f",
+    "name": "dos CDR del mismo tramo (otro uniqueid, ±2 s / ±3 s) no son ambiguos: durationSeconds = billsec del mejor alineado (80)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6g",
+    "name": "uniqueid \"pbx.example.com-<epoch>.<seq>\" -> se usa el billsec (80), no la duración de ElevenLabs (84)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6h",
+    "name": "CDR tardío: 1ª pasada espera (WAITING_CDR, 0 Activities, lead ATTEMPTING); al aparecer el CDR -> 1 Activity con billsec (36), no ElevenLabs (40)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-6i",
+    "name": "conversación inexistente + CDR de otra llamada (30 min antes del despacho): 1 Activity, durationSeconds 0 (no se roba ese billsec de 300)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-7",
+    "name": "NO_ANSWER (SIP 408): WF2 crea su Activity de inmediato, durationSeconds 0, callStatus NO_ANSWER (sin duración conectada)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-7b",
+    "name": "NO_ANSWER: no se registra nada en wf_call_events (no hay diferido) y sí la fila en wf_call_followups con recording_synced=1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-7c",
+    "name": "NO_ANSWER intento 5 -> ciclo 2, nota en inglés y nextActionAt (único mecanismo de nextFollowUpAt)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-7d",
+    "name": "error del proveedor (HTTP 503): sin Activity, sin intento consumido, lead vuelve a NOT_CONTACTED",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-7e",
+    "name": "tras correr WF9 (polling+processor) sigue habiendo 1 Activity por NO_ANSWER (sin duplicados)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-7f",
+    "name": "contestada pero sin conversación (EL 0 s, sin voz): Activity NO_ANSWER, durationSeconds 0 (no se inventa tiempo conectado), attempts +1, 3x3",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-8",
+    "name": "buzón de voz: la Activity nace NO_ANSWER (sin CONNECTED temporal), 1 sola, attempts 4, lead NO_ANSWER",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-8b",
+    "name": "buzón de voz: el lead nunca pasó por CONTACTED (ningún PATCH status=CONTACTED) y al contestar no hubo POST",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-8c",
+    "name": "buzón de voz: la fila wf_call_followups es NO_ANSWER/recording_synced coherente con la Activity",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-8",
+    "name": "silencio: la Activity nace NO_ANSWER (sin CONNECTED temporal), 1 sola, attempts 4, lead NO_ANSWER",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-8b",
+    "name": "silencio: el lead nunca pasó por CONTACTED (ningún PATCH status=CONTACTED) y al contestar no hubo POST",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-8c",
+    "name": "silencio: la fila wf_call_followups es NO_ANSWER/recording_synced coherente con la Activity",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-9",
+    "name": "intento 9 contestado (aunque EL diga failure) -> CONTACTED, stage ≠ UNRESPONSIVE/LOST, attempts 9, duración 61",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-9b",
+    "name": "el lead ATTEMPTING con attempts 9 durante la espera NO fue cerrado por Mantenimiento/Fetch (ninguna escritura CLOSED/UNRESPONSIVE)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-9c",
+    "name": "sin intento 10: reproceso forzado -> sigue 1 Activity, attempts 9 (nunca > 9)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-9d",
+    "name": "un lead con 9 intentos no vuelve a despacharse (Fetch + Lock)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-9e",
+    "name": "intento 9 contestado sin conversación real -> fin de 3x3: CLOSED + UNRESPONSIVE, attempts 9, sin nextActionAt",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-10",
+    "name": "webhook x2 + polling x2 + ledger repetido + reproceso forzado -> 1 Activity, attempts 5, una fila en el inbox, una en wf_call_followups",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "A-DUR-10b",
+    "name": "el reproceso reutiliza la Activity existente (providerCallId): duración sigue siendo la del CDR (75)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C1",
+    "name": "Mantenimiento NO libera a NO_ANSWER un lead ATTEMPTING cuya llamada contestada espera a WF9 (45 min > STALE_MIN)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C2",
+    "name": "wf_call_events lo protege: la fila diferida existe, sin resolver (RECEIVED, dispatched_at) y lo ve la consulta de Mantenimiento",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C3",
+    "name": "ventana de re-marcado: mientras espera, Fetch + Lock no vuelve a despachar el lead (0 leads, 0 dial)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C4",
+    "name": "attempts NO cambió mientras WF9 espera (sigue 1, 0 POST)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C4b",
+    "name": "al terminar, WF9 hace el POST (+1) y el lead pasa a CONTACTED",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C4c",
+    "name": "resuelto el evento, Mantenimiento ya no lo retiene (sin reintento ni hold vigente)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C-GIVEUP",
+    "name": "conversación 404: no se rinde antes de 6 h; pasadas 6 h se registra UNA Activity NO_ANSWER \"sin conversación confirmada\" y el lead sale de ATTEMPTING",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C-GIVEUP",
+    "name": "conversación nunca terminal: no se rinde antes de 6 h; pasadas 6 h se registra UNA Activity NO_ANSWER \"sin conversación confirmada\" y el lead sale de ATTEMPTING",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C6",
+    "name": "callback pedido en Asterisk: CONNECTED, lead CONTACTED, fecha pedida en nextFollowUpAt vía nextActionAt, duración = billsec (71)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C8",
+    "name": "ningún PATCH escribe nextFollowUpAt (contestada, NO_ANSWER y buzón): sólo nextActionAt en el POST",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C8b",
+    "name": "buzón intento 6 (fin del ciclo 2) -> NO_ANSWER; NO_ANSWER intento 4 -> +hold correcto; cada llamada 1 Activity",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C9a",
+    "name": "estado del lead cambiado después de la llamada (CLOSED/WON): la Activity histórica se crea 1 vez (billsec 50) pero status/stage NO se pisan",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C9b",
+    "name": "evento viejo con un despacho más nuevo del mismo lead: Activity histórica 1 vez (billsec 44) y lifecycle NO pisado (el lead sigue ATTEMPTING por la llamada nueva)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C9c",
+    "name": "Activity de un agente posterior a la llamada: WF9 igual aplica el ciclo de vida (lead CONTACTED, evento DONE, no STALE) y crea la suya con billsec 50",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C-LEAD",
+    "name": "variables dinámicas sin lead_id/phone: se usan los del ledger de WF2 -> 1 Activity (billsec 60), attempts 1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C-PROV",
+    "name": "webhook previo con provider erróneo: el ledger de WF2 fija provider=asterisk y dispatched_at (Mantenimiento lo retiene)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C12",
+    "name": "Stringee contestada: sigue el flujo WF9 (duración de ElevenLabs = 77, 1 Activity, attempts 2); sin cambios respecto al paquete anterior",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C12b",
+    "name": "el nodo Build CDR SQL ignora eventos Stringee (SELECT 1, ninguna consulta al CDR)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C12c",
+    "name": "WF2: los 3 nodos Stringee son idénticos byte a byte al paquete anterior",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C15",
+    "name": "si el registro diferido falla (MySQL caído): WF2 crea la Activity inmediata como antes (no se pierde la llamada), 1 Activity, attempts 3",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C15b",
+    "name": "después WF9 ve la Activity de WF2 (ASTERISK_OWNED_BY_WF2) y no crea otra",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C16",
+    "name": "ROLLBACK (WF9 anterior + WF2 nuevo): la fila diferida no se pierde; el WF9 viejo la trata como hueco y crea UNA Activity (duración ElevenLabs 70), lead CONTACTED",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "EN",
+    "name": "todo texto persistido en el CRM por este candidato está en inglés (33 notas revisadas)",
+    "pass": true,
+    "detail": ""
+  }
+]

@@ -1,0 +1,234 @@
+{
+  "$contract": "PROVIDER_ADAPTER_CONTRACT",
+  "$version": "2.2",
+  "principle": "PROVEEDORES SOLO LLAMAN. Un adapter recibe una orden de llamada, la dispara, devuelve los identificadores que tenga y normaliza la respuesta al contrato común. Nada más.",
+  "adapter_MUST": [
+    "recibir la orden de llamada normalizada (dispatch_request)",
+    "disparar la llamada contra su API",
+    "devolver los identificadores disponibles: conversation_id, provider_job_id, provider_call_id, sip_code",
+    "normalizar su respuesta a dispatch_result",
+    "si el proveedor produce el resultado más tarde, ese resultado entra por WF9 y también se normaliza al CALL RESULT CONTRACT"
+  ],
+  "adapter_MUST_NOT": [
+    "implementar política de follow-up",
+    "decidir +2h / +3h / días hábiles",
+    "decidir cuándo cerrar un lead",
+    "implementar ciclos de reintento comerciales",
+    "crear followups en LeadStudio",
+    "hacer PATCH de estado en LeadStudio",
+    "decidir que un código SIP es 'no contestó' (eso es policy.no_answer_sip_codes)",
+    "ramificar por país",
+    "leer o escribir wf_call_jobs (eso lo hace el dispatcher, antes y después)",
+    "decidir si un error es técnico o de negocio por su cuenta: lo decide la tabla technical_classification de este contrato, dentro de [<ADAPTER>] Normalize Dispatch"
+  ],
+  "sections": [
+    {
+      "n": 1,
+      "name": "INPUT NORMALIZATION",
+      "node": "[<KIND>] Build Request",
+      "does": "dispatch_request → body del proveedor (p. ej. quitar el '+' si el proveedor lo exige)"
+    },
+    {
+      "n": 2,
+      "name": "DISPATCH",
+      "node": "[<KIND>] Dispatch",
+      "does": "HTTP al proveedor, neverError=true, timeout explícito"
+    },
+    {
+      "n": 3,
+      "name": "PROVIDER RESPONSE",
+      "node": "(salida cruda del nodo 2)",
+      "does": "statusCode + body crudo, sin interpretar"
+    },
+    {
+      "n": 4,
+      "name": "RESULT NORMALIZATION",
+      "node": "[<KIND>] Normalize Dispatch",
+      "does": "respuesta cruda → dispatch_result. Nodo OBLIGATORIO inmediatamente después del HTTP"
+    }
+  ],
+  "naming": {
+    "sip": [
+      "[SIP] Build Request",
+      "[SIP] Dispatch ElevenLabs",
+      "[SIP] Normalize Dispatch"
+    ],
+    "stringee": [
+      "[STRINGEE] Build Request",
+      "[STRINGEE] Dispatch Worker",
+      "[STRINGEE] Normalize Dispatch"
+    ],
+    "future": [
+      "[TWILIO] Build Request",
+      "[TWILIO] Dispatch",
+      "[TWILIO] Normalize Dispatch"
+    ]
+  },
+  "dispatch_request": {
+    "$comment": "Lo que el dispatcher entrega a CUALQUIER adapter. Todo sale de la ruta y del lead; nada del adapter.",
+    "call_job_id": "IN_PROVEEDOR1-20260918T140312Z-7f3a9c",
+    "route_id": 1,
+    "route_key": "IN_PROVEEDOR1",
+    "country_iso": "IN",
+    "provider": "proveedor1",
+    "provider_endpoint": null,
+    "lead_id": "8f2c1a55-4e2b-4a90-9d11-1c77aa03be21",
+    "full_name": "Rahul Sharma",
+    "phone_e164": "+919876543210",
+    "language": "hi",
+    "attempt": 3,
+    "elevenlabs_agent_id": "agent_5701kramx550e3qs2tm11661b48p",
+    "elevenlabs_phone_number_id": "phnum_7801kyktmabxembteqce884tanb6",
+    "caller_id": null,
+    "execution_id": "n8n-exec-88213",
+    "dynamic_variables": {
+      "$comment": "Viajan a ElevenLabs y VUELVEN en el post-call. Así WF9 no infiere nada.",
+      "route_key": "IN_PROVEEDOR1",
+      "route_id": "1",
+      "provider": "proveedor1",
+      "country_iso": "IN",
+      "lead_id": "8f2c1a55-4e2b-4a90-9d11-1c77aa03be21",
+      "full_name": "Rahul Sharma",
+      "phone": "+919876543210",
+      "language": "hi",
+      "attempt": "3",
+      "call_job_id": "IN_PROVEEDOR1-20260918T140312Z-7f3a9c",
+      "is_followup": "false",
+      "adapter_key": "ELEVENLABS_SIP"
+    },
+    "adapter_key": "ELEVENLABS_SIP"
+  },
+  "dispatch_result": {
+    "$comment": "Lo que CUALQUIER adapter devuelve. El dispatcher decide con esto; el adapter no decide nada.",
+    "call_job_id": "IN_PROVEEDOR1-20260918T140312Z-7f3a9c",
+    "route_key": "IN_PROVEEDOR1",
+    "provider": "proveedor1",
+    "dispatch_outcome": "ACCEPTED",
+    "conversation_id": "conv_01k5x8y2z3abcdef",
+    "provider_job_id": null,
+    "provider_call_id": null,
+    "sip_code": null,
+    "http_status": 200,
+    "final_result": null,
+    "error_code": null,
+    "error_detail": null,
+    "raw_excerpt": "{\"success\":true,\"conversation_id\":\"conv_01k5…\"}",
+    "adapter_key": "ELEVENLABS_SIP",
+    "error_class": null
+  },
+  "dispatch_outcome_enum": {
+    "ACCEPTED": {
+      "means": "el proveedor aceptó; el resultado llega después",
+      "job": "mark_dispatched → DISPATCHED",
+      "then": "evento CALL_DISPATCHED · PATCH ATTEMPTING si no se hizo · FIN de la rama (sin followup, sin motor)"
+    },
+    "FINAL": {
+      "means": "el dispatch ya es el resultado (p. ej. SIP 603) y NO habrá post-call",
+      "requires": "final_result + sip_code si aplica",
+      "then": "record_call_result() → CALL_RESULT · llama al FOLLOWUP ENGINE (clave call_job_id)"
+    },
+    "TECHNICAL_ERROR": {
+      "means": "la llamada NO salió y se sabe: 401/403, credencial inválida, CONFIG_ERROR, endpoint que rechaza la conexión antes de enviar",
+      "job": "mark_released → RELEASED, tech_retry_count+1, next_tech_retry_at = backoff 1,2,4…60 min",
+      "then": "evento CALL_TECH_FAILED · NO consume intento de negocio · NO llega al motor · AUTH_ERROR o CONFIG_ERROR además cortan la rama del proveedor en ese ciclo (circuit breaker) y alertan",
+      "replaces": "REJECTED de V2.1"
+    },
+    "UNKNOWN": {
+      "means": "timeout, conexión cortada tras enviar, respuesta ilegible: la llamada PUDO salir",
+      "job": "mark_unknown → UNKNOWN → (reconciliador) NEEDS_RECONCILIATION",
+      "then": "evento CALL_UNKNOWN · JAMÁS re-dispatch · si el post-call llega, record_call_result lo resuelve"
+    }
+  },
+  "adding_a_provider": {
+    "same_adapter (PROVEEDOR2 SIP)": [
+      "Panel → Providers: code, display_name, adapter_key=ELEVENLABS_SIP",
+      "Panel → rutas por país",
+      "n8n: NADA (si usa otra credencial de ElevenLabs, una credential nueva)"
+    ],
+    "new_adapter (TWILIO_VOICE…)": [
+      "código: agregar el adapter a routes_config.ADAPTERS con sus route_requires",
+      "WF2: rama [TWILIO] con los 4 pasos",
+      "si el resultado llega por un canal propio: normalizador al CALL RESULT CONTRACT",
+      "Panel → proveedor + rutas"
+    ],
+    "never_touch": [
+      "FOLLOWUP ENGINE",
+      "políticas",
+      "event store",
+      "WF9 si el resultado llega por ElevenLabs post-call"
+    ]
+  },
+  "provider_vs_adapter": {
+    "provider": "proveedor COMERCIAL: contrato, cuenta, facturación, interruptor. voice_providers.code (proveedor1, stringee, proveedor2…)",
+    "adapter_key": "implementación TÉCNICA: cómo se le habla. voice_providers.adapter_key (ELEVENLABS_SIP, STRINGEE_WORKER…). VARCHAR, no ENUM.",
+    "catalog": "routes_config.ADAPTERS — la aplicación es la que sabe qué adapters tienen código en WF2. Un adapter fuera del catálogo se puede guardar APAGADO pero no activar.",
+    "examples": {
+      "PROVEEDOR1": "ELEVENLABS_SIP · rutas IN, NP, MX, CO, VE (UN proveedor, cinco rutas)",
+      "STRINGEE": "STRINGEE_WORKER · ruta IN",
+      "PROVEEDOR2 (futuro)": "ELEVENLABS_SIP · reutiliza el adapter: CERO código nuevo"
+    },
+    "wf2_routing": "WF2 ramifica por adapter_key, NUNCA por provider ni por país."
+  },
+  "technical_classification": {
+    "$rule": "Ante la duda, UNKNOWN (conservador): es preferible reconciliar a mano que llamar dos veces.",
+    "TECHNICAL_ERROR": [
+      "HTTP 401",
+      "HTTP 403",
+      "ECONNREFUSED / DNS / TLS antes de enviar el body",
+      "config faltante detectada ANTES del HTTP"
+    ],
+    "UNKNOWN": [
+      "timeout",
+      "ECONNRESET después de enviar",
+      "HTTP 5xx",
+      "2xx con cuerpo ilegible o sin id"
+    ],
+    "FINAL": [
+      "SIP 4xx/6xx devuelto por ElevenLabs sin conversation_id (603, 486, 408, 404, 484…)"
+    ],
+    "PERMANENT (FAILED)": [
+      "número inválido detectado localmente antes de enviar"
+    ]
+  },
+  "adapters_known": {
+    "ELEVENLABS_SIP": {
+      "endpoint": "POST https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call",
+      "credential": "n8n credential HTTP Header Auth (xi-api-key). NUNCA en el nodo.",
+      "request_from": "agent_id, agent_phone_number_id, to_number=phone_e164, conversation_initiation_client_data.dynamic_variables",
+      "normalization_v1_evidence": {
+        "success=true + conversation_id": "ACCEPTED",
+        "message contiene 'SIP NNN'": "FINAL result=FAILED sip_code=NNN (el motor reclasifica 603/408/486)",
+        "HTTP 401/403": "TECHNICAL_ERROR · AUTH_ERROR",
+        "timeout / 5xx / body ilegible": "UNKNOWN"
+      },
+      "pending": "PENDING_VERIFICATION: v1 extrae el SIP con regex sobre 'message'. El formato exacto de error de ElevenLabs no está documentado en los archivos.",
+      "used_by": [
+        "proveedor1"
+      ],
+      "route_requires": [
+        "elevenlabs_agent_id",
+        "elevenlabs_phone_number_id"
+      ]
+    },
+    "STRINGEE_WORKER": {
+      "endpoint": "POST {provider_endpoint}/call  (hoy http://172.18.0.1:8091/call)",
+      "request_from_v1_json": "lead_id, phone (SIN '+'), full_name, country, language, is_followup, call_attempts, from_number=caller_id, agent_id",
+      "normalization_v1_evidence": {
+        "2xx + ok=true + job_id": "ACCEPTED (provider_job_id=job_id). NO significa contestó.",
+        "ECONNREFUSED": "TECHNICAL_ERROR · worker caído",
+        "401/403": "TECHNICAL_ERROR · AUTH_ERROR",
+        "timeout / 2xx sin job_id": "UNKNOWN"
+      },
+      "pending": [
+        "PV-3: ver STRINGEE_WORKER_AUDIT_V2_2.md. Mínimo imprescindible: que el worker reenvíe lead_id a ElevenLabs (WF9 correlaciona por la única llamada en vuelo del lead). call_job_id/route_key son mejora, no requisito."
+      ],
+      "used_by": [
+        "stringee"
+      ],
+      "route_requires": [
+        "elevenlabs_agent_id",
+        "caller_id"
+      ]
+    }
+  }
+}

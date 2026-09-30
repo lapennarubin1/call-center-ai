@@ -1,0 +1,89 @@
+VALIDATE WF10 (solo lectura) — 2026-09-29T14:13:13 — host srv1859167
+Ventana: desde 2026-09-29 13:43:13 (últimos 30 min) | gracia Asterisk 10 min, Stringee 15 min
+
+==============================================================================
+== 0. n8n — WF10 publicado y ejecuciones (API pública, opcional)
+==============================================================================
+  [INFO] API de n8n — sin N8N_API_KEY: se omite (el resto de la validación no la necesita)
+
+==============================================================================
+== 1. ASTERISK — mecanismo durable (post-proceso de MixMonitor) y productor viejo
+==============================================================================
+  [PASS] contextos WF10 con MixMonitor + post-proceso — 1/1: from-client-elevenlabs
+  [PASS] /usr/local/bin/wf10-mixmon-post.sh instalado y ejecutable
+  [INFO] cron viejo send_recordings.sh — ACTIVO (normal hasta finalize; si sube una llamada antes que el worker, WF10 responde not_pending y no duplica)
+  post-proceso desde la ventana: con audio -> enqueue = 11 | sin audio (no contestadas) = 69 | enqueue con error = 0
+  [PASS] wf10-enqueue.py sin errores al ser llamado por el post-proceso
+  [FAIL] toda contestada (WAV > 44 B) nueva pasó por el post-proceso — 27 sin línea en /var/log/asterisk/wf10-enqueue.log: test-1790689457.31587.wav (79404 B, 09-29 13:45:00), test-1790689697.31702.wav (357484 B, 09-29 13:48:57), test-1790690057.31885.wav (114604 B, 09-29 13:55:01), test-1790689517.31614.wav (98924 B, 09-29 13:45:47), test-1790689457.31585.wav (99564 B, 09-29 13:44:46), test-1790689517.31602.wav (128684 B, 09-29 13:46:04)
+  [PASS] cola sin atascos (> 10 min) — 3 en cola
+
+==============================================================================
+== 2. ASTERISK — cada llamada contestada nueva (WAV -> cola -> worker -> WF10 -> PUT -> recording_synced)
+==============================================================================
+  inicio         uniqueid           teléfono          KB cola   followup    Δfila synced worker   estado
+  09-29 13:57:18 1790690238.31983   +919782934422    166 queue  -               - -      -        FAIL atascada en la cola > 10 min
+  09-29 13:59:21 1790690361.32027   +919460429403    140 done   258a74bd…     68s 1      -        OK 
+  09-29 13:59:21 1790690361.32037   +919845577963    218 queue  71c04ceb…     68s 0      -        FAIL atascada en la cola > 10 min
+  09-29 13:59:21 1790690361.32031   +919558842874    205 queue  6e3328f4…     68s 0      -        FAIL atascada en la cola > 10 min
+  09-29 14:00:19 1790690419.32069   +918390205191    120 done   2e28be34…     63s 1      -        OK 
+  09-29 14:00:18 1790690418.32061   +917891945246    317 done   20461ed2…     64s 1      -        OK 
+  09-29 14:00:17 1790690417.32057   +919769217636    460 done   9a250750…     65s 1      -        OK 
+  09-29 14:05:17 1790690717.32095   +919819834432    181 done   00d6ace3…     65s 1      -        OK 
+  09-29 14:06:17 1790690777.32119   +918619488158    143 done   ad11e1be…     65s 1      -        OK 
+  09-29 14:07:17 1790690837.32148   +919048505371    137 done   a4e1f169…     65s 1      -        OK 
+  09-29 14:06:17 1790690777.32115   +919428287808   1071 done   423ce1fa…     65s 1      -        OK 
+  [FAIL] contestadas nuevas con grabación en el CRM (recording_synced=1) — OK=8 pendientes<10min=0 FAIL=3 avisos=0
+  wf_call_followups asterisk CONNECTED desde la ventana: 38 | recording_synced=1: 9 | pendientes > 10 min: 29
+  [WARN] filas CONNECTED de WF2 con su grabación — f3359b5d… 9375832772 fila 09-29 13:43:22 (sin WAV encolado); 72626594… 9960999860 fila 09-29 13:44:22 (sin WAV encolado); b1756273… 9762669914 fila 09-29 13:44:22 (sin WAV encolado); c8816d26… 9820534432 fila 09-29 13:44:22 (sin WAV encolado); 64af2979… 9003482670 fila 09-29 13:45:22 (sin WAV encolado); dd7a3f5a… 9638760075 fila 09-29 13:45:22 (sin WAV encolado) — las creadas < 15 min después del apply pueden ser llamadas en curso durante el apply
+
+==============================================================================
+== 3. STRINGEE — grabaciones nuevas del worker -> followup dueño -> PUT -> recording_synced -> ledger
+==============================================================================
+  grabación                                       KB followup    Δfila synced ledger         estado
+  stringee-919601572292-1790689440091.wav       1294 87d836af…     47s 0      -              FAIL dueño pendiente hace > 15 min y no se subió
+  stringee-919720720235-1790689487316.wav        600 a0b8df19…     64s 0      -              FAIL dueño pendiente hace > 15 min y no se subió
+  stringee-917891514544-1790689614150.wav       1678 ad0c11a1…     53s 1      -              OMIT dueño ya sincronizado (otro archivo de la misma llamada, o WF9 no esperaba grabación): sin PUT y sin ledger
+  stringee-918078191173-1790689618905.wav       3726 3ee75424…     49s 1      09-29 13:55:41 OK 
+  stringee-918660762189-1790689857082.wav       4770 cc801c2a…     49s 0      -              FAIL dueño pendiente hace > 15 min y no se subió
+  stringee-917666040568-1790689970722.wav        539 e5d0cb68…     57s 0      -              FAIL dueño pendiente hace > 15 min y no se subió
+  stringee-919510359858-1790690028346.wav       5498 b05e04f6…     57s 0      -              FAIL dueño pendiente hace > 15 min y no se subió
+  stringee-919427494926-1790690042807.wav        754 5675ed6a…     43s 0      -              FAIL dueño pendiente hace > 15 min y no se subió
+  stringee-916376920157-1790690104190.wav        963 72382a3c…     46s 0      -              FAIL dueño pendiente hace > 15 min y no se subió
+  stringee-918084085936-1790690210161.wav        447 a0d7488f…     57s 0      -              FAIL dueño pendiente hace > 15 min y no se subió
+  stringee-919723658768-1790690451148.wav        435 7bdb933a…    246s 0      -              PEND esperando el próximo ciclo
+  stringee-917990432355-1790690453562.wav        493 b6908e54…    244s 0      -              PEND esperando el próximo ciclo
+  stringee-917046405540-1790690521097.wav        638 bc6e1750…    176s 1      -              OMIT dueño ya sincronizado (otro archivo de la misma llamada, o WF9 no esperaba grabación): sin PUT y sin ledger
+  stringee-919512644225-1790690807218.wav        326 3c872302…     60s 0      -              PEND esperando el próximo ciclo
+  stringee-918320307599-1790690871577.wav        567 8e7e7014…     55s 0      -              PEND esperando el próximo ciclo
+  stringee-918000674780-1790690954243.wav       2803 -               - -      -              PEND esperando fila de WF9
+  stringee-916355210755-1790690989053.wav       2565 -               - -      -              PEND esperando fila de WF9
+  stringee-917828564464-1790690998493.wav       2757 -               - -      -              PEND esperando fila de WF9
+  stringee-919956944669-1790691038805.wav       2792 -               - -      -              PEND esperando fila de WF9
+  [FAIL] grabaciones contestadas nuevas subidas al followup correcto (synced=1 + ledger) — FAIL=8 OK=1 OMIT=2 PEND=8
+  [PASS] un followup recibe una sola grabación (ledger = PUT confirmados)
+  ℹ️  2 omitida(s) a propósito (dueño ya sincronizado). Si son contestadas reales que WF9 marcó 'sin grabación', revisá la clasificación en WF9 (no se suben sin aprobación).
+  ledger desde 09-29 13:43:13: 5 fila(s) en 5 ciclo(s) | por ciclo: 13:45:41=1, 13:50:43=1, 13:55:41=1, 14:00:47=1, 14:05:41=1
+  [FAIL] todas las pendientes se procesan en el MISMO ciclo (no una por ejecución) — 20 quedaron para otro ciclo: stringee-919601572292-1790689440091.wav (lista 09-29 13:44:48, ciclo 09-29 13:50:43 procesó 1); stringee-919720720235-1790689487316.wav (lista 09-29 13:45:52, ciclo 09-29 13:50:43 procesó 1); stringee-918660762189-1790689857082.wav (lista 09-29 13:51:47, ciclo 09-29 13:55:41 procesó 1)
+
+==============================================================================
+== RESUMEN
+==============================================================================
+  FAIL: 4
+     - [asterisk] toda contestada (WAV > 44 B) nueva pasó por el post-proceso — 27 sin línea en /var/log/asterisk/wf10-enqueue.log: test-1790689457.31587.wav (79404 B, 09-29 13:45:00), test-1790689697.31702.wav (357484 B, 09-29 13:48:57), test-1790690057.31885.wav (114604 B, 09-29 13:55:01), test-17
+     - [asterisk] contestadas nuevas con grabación en el CRM (recording_synced=1) — OK=8 pendientes<10min=0 FAIL=3 avisos=0
+     - [stringee] grabaciones contestadas nuevas subidas al followup correcto (synced=1 + ledger) — FAIL=8 OK=1 OMIT=2 PEND=8
+     - [stringee] todas las pendientes se procesan en el MISMO ciclo (no una por ejecución) — 20 quedaron para otro ciclo: stringee-919601572292-1790689440091.wav (lista 09-29 13:44:48, ciclo 09-29 13:50:43 procesó 1); stringee-919720720235-1790689487316.wav (lista 09-29 13:45:52, ciclo 09-29 13:50:43 procesó 1);
+  WARN: 1
+     - [asterisk] filas CONNECTED de WF2 con su grabación — f3359b5d… 9375832772 fila 09-29 13:43:22 (sin WAV encolado); 72626594… 9960999860 fila 09-29 13:44:22 (sin WAV encolado); b1756273… 9762669914 fila 09-29 13:44:22 (sin WAV encolado); c8816d26… 9820534432 fila 09-29 13:44
+  PASS: 5
+     - [asterisk] contextos WF10 con MixMonitor + post-proceso
+     - [asterisk] /usr/local/bin/wf10-mixmon-post.sh instalado y ejecutable
+     - [asterisk] wf10-enqueue.py sin errores al ser llamado por el post-proceso
+     - [asterisk] cola sin atascos (> 10 min)
+     - [stringee] un followup recibe una sola grabación (ledger = PUT confirmados)
+  INFO: 2
+     - [n8n] API de n8n — sin N8N_API_KEY: se omite (el resto de la validación no la necesita)
+     - [asterisk] cron viejo send_recordings.sh — ACTIVO (normal hasta finalize; si sube una llamada antes que el worker, WF10 responde not_pending y no duplica)
+
+❌ HAY FALLAS: revisar arriba antes de finalize.
+Informe guardado en /root/wf10_validate_20260929_141313.txt

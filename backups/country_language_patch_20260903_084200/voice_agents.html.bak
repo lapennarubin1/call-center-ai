@@ -1,0 +1,74 @@
+{% extends "base_app.html" %}
+{% import "_icons.html" as ic %}
+{% block title %}Agentes — AI Business Platform{% endblock %}
+{% block content %}
+<div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
+  <div>
+    <h1>Agentes de Voice AI</h1>
+    <p>Agentes configurados en este workspace — todavía sin llamadas reales</p>
+  </div>
+  <div style="display:flex;gap:10px">
+    <a class="btn btn-ghost" href="{{ url_for('web.voice_elevenlabs_settings') }}">
+      {{ ic.icon('plug') }}<span>ElevenLabs</span>
+    </a>
+    <a class="btn btn-primary btn-auto" href="{{ url_for('web.voice_agent_new') }}">
+      {{ ic.icon('plus') }}<span>Nuevo agente</span>
+    </a>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <div>
+      <h2>Agentes</h2>
+      <div class="hint">{{ agents|length }} agente{{ '' if agents|length == 1 else 's' }}</div>
+    </div>
+  </div>
+
+  {% if agents %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Nombre</th><th>Estado</th><th>Idioma</th><th>País / locale</th>
+          <th>Voice provider</th><th>Voice</th><th>ElevenLabs</th><th>Campañas</th><th>Actualizado</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in agents %}
+        <tr>
+          <td><strong>{{ a.name }}</strong></td>
+          <td><span class="badge badge-{{ a.status }}"><span class="badge-dot"></span>{{ a.status }}</span></td>
+          <td>{{ a.language }}</td>
+          <td>{{ locale_labels.get(a.locale, a.locale) if a.locale else '—' }}</td>
+          <td>{{ a.voice_provider or '—' }}</td>
+          <td>
+            {% if a.voice_id %}<span class="mono">{{ a.voice_id }}</span>
+            {% else %}<span class="badge badge-draft"><span class="badge-dot"></span>pendiente</span>{% endif %}
+          </td>
+          <td>
+            {% if a.external_agent_id %}<span class="badge badge-active"><span class="badge-dot"></span>Linked</span>
+            {% else %}<span class="badge badge-draft"><span class="badge-dot"></span>Not linked</span>{% endif %}
+          </td>
+          <td class="mono">{{ a.campaigns_count }}</td>
+          <td class="mono">{{ a.updated_at }}</td>
+          <td class="row-actions">
+            <a class="icon-btn" title="Editar" href="{{ url_for('web.voice_agent_edit', agent_id=a.id) }}">{{ ic.icon('settings') }}</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon-wrap">{{ ic.icon('bot') }}</div>
+    <h3>Todavía no hay agentes</h3>
+    <p>Creá el primer agente de voz para poder asignarlo a una campaña.</p>
+    <a class="btn btn-primary btn-auto" style="margin-top:16px" href="{{ url_for('web.voice_agent_new') }}">
+      {{ ic.icon('plus') }}<span>Crear el primer agente</span>
+    </a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

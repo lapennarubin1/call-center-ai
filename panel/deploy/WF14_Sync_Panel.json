@@ -1,0 +1,329 @@
+{
+  "name": "WF14 - Sync Panel (Sheets → MySQL)",
+  "nodes": [
+    {
+      "id": "trg",
+      "name": "⏰ Cada 15 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "man",
+      "name": "▶ Ejecutar ahora",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        620
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "sh1",
+      "name": "📋 Leer hoja leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        260,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 210138417,
+          "mode": "list",
+          "cachedResultName": "leads"
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000
+    },
+    {
+      "id": "nz1",
+      "name": "⚙️ Normalizar leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Convierte las filas de la hoja `leads` en filas listas para MySQL.\n// Sólo se toman los campos que el panel necesita: no copiamos la hoja\n// entera para no inflar la base ni duplicar datos personales de más.\nconst rows = $input.all().map(i => i.json);\nconst now  = new Date().toISOString().slice(0, 19).replace('T', ' ');\n\nfunction toMySqlDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nconst out = [];\nfor (const r of rows) {\n  const leadId = String(r.lead_id ?? '').trim();\n  if (!leadId) continue;                       // sin clave no se puede sincronizar\n\n  out.push({ json: {\n    lead_id         : leadId.slice(0, 64),\n    full_name       : String(r.full_name ?? '').trim().slice(0, 160) || null,\n    phone           : String(r.phone ?? '').replace(/[^0-9+]/g, '').slice(0, 32) || null,\n    country         : String(r.country ?? '').trim().slice(0, 64) || null,\n    language        : String(r.language ?? '').trim().slice(0, 16) || null,\n    status          : String(r.status ?? '').trim().toUpperCase().slice(0, 48) || null,\n    last_call_status: String(r.last_call_status ?? '').trim().toUpperCase().slice(0, 48) || null,\n    call_attempts   : Number(r.call_attempts ?? 0) || 0,\n    last_call_time  : toMySqlDate(r.last_call_time),\n    duration_secs   : Number(r.duration_secs ?? 0) || 0,\n    synced_at       : now\n  }});\n}\n\nconsole.log(`📥 Leads normalizados para el panel: ${out.length}`);\nreturn out;"
+      }
+    },
+    {
+      "id": "my1",
+      "name": "💾 Guardar leads",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        780,
+        300
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "PANEL_MYSQL_CRED",
+          "name": "MySQL Panel (asterisk)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO panel_leads (lead_id, full_name, phone, country, language, status, last_call_status, call_attempts, last_call_time, duration_secs, synced_at) VALUES ({{ $json.lead_id === null ? 'NULL' : \"'\" + String($json.lead_id).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.full_name === null ? 'NULL' : \"'\" + String($json.full_name).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.phone === null ? 'NULL' : \"'\" + String($json.phone).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.country === null ? 'NULL' : \"'\" + String($json.country).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.language === null ? 'NULL' : \"'\" + String($json.language).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.status === null ? 'NULL' : \"'\" + String($json.status).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.last_call_status === null ? 'NULL' : \"'\" + String($json.last_call_status).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.call_attempts === null ? 'NULL' : \"'\" + String($json.call_attempts).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.last_call_time === null ? 'NULL' : \"'\" + String($json.last_call_time).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.duration_secs === null ? 'NULL' : \"'\" + String($json.duration_secs).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.synced_at === null ? 'NULL' : \"'\" + String($json.synced_at).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}) ON DUPLICATE KEY UPDATE full_name=VALUES(full_name), phone=VALUES(phone), country=VALUES(country), language=VALUES(language), status=VALUES(status), last_call_status=VALUES(last_call_status), call_attempts=VALUES(call_attempts), last_call_time=VALUES(last_call_time), duration_secs=VALUES(duration_secs), synced_at=VALUES(synced_at);",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "sh2",
+      "name": "📋 Leer hoja conversions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        260,
+        560
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "conversions"
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 65000
+    },
+    {
+      "id": "nz2",
+      "name": "⚙️ Normalizar cuentas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        560
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Convierte la hoja `conversions` (cuentas abiertas) en filas de MySQL.\nconst rows = $input.all().map(i => i.json);\nconst now  = new Date().toISOString().slice(0, 19).replace('T', ' ');\n\nfunction toMySqlDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nconst out = [];\nfor (const r of rows) {\n  const leadId = String(r.lead_id ?? '').trim();\n  if (!leadId) continue;\n\n  out.push({ json: {\n    lead_id      : leadId.slice(0, 64),\n    full_name    : String(r.full_name ?? '').trim().slice(0, 160) || null,\n    phone        : String(r.phone ?? '').replace(/[^0-9+]/g, '').slice(0, 32) || null,\n    atlantis_user: String(r.atlantis_user ?? r.username ?? '').trim().slice(0, 80) || null,\n    account_id   : String(r.account_id ?? r.account ?? '').trim().slice(0, 80) || null,\n    created_at   : toMySqlDate(r.created_at ?? r.timestamp ?? r.date),\n    synced_at    : now\n  }});\n}\n\nconsole.log(`📥 Cuentas normalizadas para el panel: ${out.length}`);\nreturn out;"
+      }
+    },
+    {
+      "id": "my2",
+      "name": "💾 Guardar cuentas",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        780,
+        560
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "PANEL_MYSQL_CRED",
+          "name": "MySQL Panel (asterisk)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO panel_conversions (lead_id, full_name, phone, atlantis_user, account_id, created_at, synced_at) VALUES ({{ $json.lead_id === null ? 'NULL' : \"'\" + String($json.lead_id).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.full_name === null ? 'NULL' : \"'\" + String($json.full_name).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.phone === null ? 'NULL' : \"'\" + String($json.phone).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.atlantis_user === null ? 'NULL' : \"'\" + String($json.atlantis_user).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.account_id === null ? 'NULL' : \"'\" + String($json.account_id).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.created_at === null ? 'NULL' : \"'\" + String($json.created_at).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}, {{ $json.synced_at === null ? 'NULL' : \"'\" + String($json.synced_at).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\" }}) ON DUPLICATE KEY UPDATE full_name=VALUES(full_name), phone=VALUES(phone), atlantis_user=VALUES(atlantis_user), account_id=VALUES(account_id), created_at=VALUES(created_at), synced_at=VALUES(synced_at);",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "lg",
+      "name": "📝 Contar filas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Deja constancia de la sincronización. Si el panel muestra un\n// \"última sincronización\" viejo, es señal de que WF14 dejó de correr.\nconst n = $input.all().length;\nconst now = new Date().toISOString().slice(0, 19).replace('T', ' ');\nreturn [{ json: { rows_in: n, synced_at: now } }];"
+      }
+    },
+    {
+      "id": "mylog",
+      "name": "🗒 Registrar sincronización",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        1300,
+        400
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "PANEL_MYSQL_CRED",
+          "name": "MySQL Panel (asterisk)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO panel_sync_log (source, rows_in, status, synced_at) VALUES ('sheets', {{ $json.rows_in }}, 'ok', '{{ $json.synced_at }}');",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "⏰ Cada 15 minutos": {
+      "main": [
+        [
+          {
+            "node": "📋 Leer hoja leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Leer hoja conversions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "▶ Ejecutar ahora": {
+      "main": [
+        [
+          {
+            "node": "📋 Leer hoja leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 Leer hoja conversions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Leer hoja leads": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalizar leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalizar leads": {
+      "main": [
+        [
+          {
+            "node": "💾 Guardar leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Guardar leads": {
+      "main": [
+        [
+          {
+            "node": "📝 Contar filas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Leer hoja conversions": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Normalizar cuentas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Normalizar cuentas": {
+      "main": [
+        [
+          {
+            "node": "💾 Guardar cuentas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Contar filas": {
+      "main": [
+        [
+          {
+            "node": "🗒 Registrar sincronización",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata"
+  },
+  "id": "4404aeb1-132f-4291-9686-725eea4149ee",
+  "tags": [
+    {
+      "name": "panel"
+    },
+    {
+      "name": "reporting"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# ---------- /etc/systemd/system/fraud-monitor.timer ----------
+[Unit]
+Description=Ejecuta fraud-monitor cada minuto
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

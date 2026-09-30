@@ -1,0 +1,302 @@
+{
+  "id": "X1TsAjnftzvHOJr2",
+  "name": "WF_Stringee_Event",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-08-05T07:26:23.137Z",
+  "updatedAt": "2026-08-10T06:44:51.890Z",
+  "isArchived": true,
+  "versionId": "fc2731d4-b196-49af-a051-afb42558accd",
+  "versionCounter": 5,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stringee-init",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "9e84febd-a8c5-4bde-b757-49f926a0cc59",
+      "name": "📥 ElevenLabs Init Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        -544
+      ],
+      "webhookId": "d6c36420-6c97-4212-865f-606453b582b0",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\n// ElevenLabs manda: { caller_id: \"+91XXXXXXXXXX\", called_number: \"+91797...\", agent_id: \"...\" }\nconst body = $input.item.json.body || $input.item.json;\nconst callerRaw = String(body.caller_id || body.from || body.phone || '').replace(/[^0-9]/g,'');\n// Normalizar a E.164 sin +\nconst caller = callerRaw.length >= 10 ? callerRaw : '';\nconsole.log('📞 ElevenLabs init | caller_id raw:', body.caller_id, '| normalized:', caller);\nreturn { json: { caller } };\n"
+      },
+      "id": "6cf0c052-8744-4da0-a8c8-60e447a796e4",
+      "name": "⚙️ Extract Caller Phone",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        -544
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "getRows",
+        "documentId": {
+          "__rl": true,
+          "value": "1qef9I1e7mKrHjIbFgh-87E6Rk9Ef1V7_HJglkyCtoUk",
+          "mode": "id"
+        }
+      },
+      "id": "5a2c33c9-790e-4d00-8b09-ff357ca0e63b",
+      "name": "🔎 Lookup Lead by Phone",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -464,
+        -544
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MKkCDXpC3xrijLxd",
+          "name": "Google Sheets account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\n// Si encontramos el lead, devolvemos sus datos como dynamic_variables\n// ElevenLabs los inyecta en la conversación igual que outbound\nconst lead = $input.item.json;\nconst leadId   = String(lead.lead_id   || '');\nconst fullName = String(lead.full_name || '').trim() || 'User';\nconst phone    = String(lead.phone     || '');\nconst country  = String(lead.country   || 'India');\nconst attempts = String(lead.call_attempts || '0');\n\nif (!leadId) {\n  console.warn('⚠️ Lead no encontrado por teléfono — devolviendo defaults');\n}\n\nconst response = {\n  conversation_config_override: {\n    agent: { language: 'hi' }\n  },\n  dynamic_variables: {\n    lead_id:       leadId || ('STRINGEE-' + phone),\n    full_name:     fullName,\n    phone:         phone,\n    country:       country,\n    language:      'hi',\n    is_followup:   Number(attempts) > 0 ? 'true' : 'false',\n    call_attempts: attempts\n  }\n};\n\nconsole.log('✅ Init response | lead_id:', response.dynamic_variables.lead_id);\nreturn { json: { responseBody: JSON.stringify(response) } };\n"
+      },
+      "id": "16abca80-5c3e-4f53-baa9-d005b4b0cd4e",
+      "name": "🔀 Build Dynamic Vars Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -544
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.responseBody }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "27646f22-05da-4d67-a0a7-225379d97a54",
+      "name": "✅ Respond to ElevenLabs",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        32,
+        -544
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"dynamic_variables\": {\"lead_id\": \"UNKNOWN\", \"full_name\": \"User\", \"phone\": \"\", \"country\": \"India\", \"language\": \"hi\", \"is_followup\": \"false\", \"call_attempts\": \"0\"}}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a3b8d688-f62e-4f74-b130-9584396e5295",
+      "name": "⚠️ Respond Fallback (no lead)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -224,
+        -336
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stringee-event",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c0f83148-41cb-4245-8bb0-a1801f293b4d",
+      "name": "Webhook Event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        112,
+        96
+      ],
+      "webhookId": "stringee-event"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconsole.log('Stringee Event:', JSON.stringify(body));\nreturn { json: { received: true, event: body } };"
+      },
+      "id": "2eb53d98-d3a9-4ffa-a5a0-59aed9ca80a2",
+      "name": "Log Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"ok\" } }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "fddc95d5-ad76-47e2-b42c-8733240774ef",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        96
+      ]
+    }
+  ],
+  "connections": {
+    "📥 ElevenLabs Init Webhook": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Extract Caller Phone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Extract Caller Phone": {
+      "main": [
+        [
+          {
+            "node": "🔎 Lookup Lead by Phone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Lookup Lead by Phone": {
+      "main": [
+        [
+          {
+            "node": "🔀 Build Dynamic Vars Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Build Dynamic Vars Response": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond to ElevenLabs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Event": {
+      "main": [
+        [
+          {
+            "node": "Log Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Event": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [
+    {
+      "id": "AfAUJfbvYt7e8py1",
+      "name": "call-center",
+      "createdAt": "2026-07-27T09:29:13.399Z",
+      "updatedAt": "2026-07-27T09:29:13.399Z"
+    },
+    {
+      "id": "ewb8t7katYNDAFKZ",
+      "name": "stringee",
+      "createdAt": "2026-08-05T07:26:05.946Z",
+      "updatedAt": "2026-08-05T07:26:05.946Z"
+    }
+  ],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "X1TsAjnftzvHOJr2",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-08-05T07:26:23.137Z",
+      "updatedAt": "2026-08-05T07:26:23.137Z"
+    }
+  ],
+  "activeVersion": null
+}

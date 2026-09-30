@@ -1,0 +1,14 @@
+== ASTERISK_WF10_FIX: APPLY  (backup en /root/wf10-fix-backups/20260929T135646Z) ==
+  CAMBIO  [from-client-elevenlabs] _+52XXXXXXXXXX prioridad 4  (/etc/asterisk/extensions.conf:8)
+     antes:   same => n,MixMonitor(${RECORDING},b)
+     después: same => n,MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh "${EXTEN}" "${RECORDING}" "${UNIQUEID}" ANSWER)
+  CAMBIO  [from-client-elevenlabs] _+91XXXXXXXXXX prioridad 4  (/etc/asterisk/extensions.conf:27)
+     antes:   same => n,MixMonitor(${RECORDING},b)
+     después: same => n,MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh "${EXTEN}" "${RECORDING}" "${UNIQUEID}" ANSWER)
+  CAMBIO  [from-client-elevenlabs] _+977XXXXXXXXXX prioridad 4  (/etc/asterisk/extensions.conf:17)
+     antes:   same => n,MixMonitor(${RECORDING},b)
+     después: same => n,MixMonitor(${RECORDING},b,/usr/local/bin/wf10-mixmon-post.sh "${EXTEN}" "${RECORDING}" "${UNIQUEID}" ANSWER)
+  dialplan actual: 61 extensiones, 141 prioridades, 31 contextos
+✅ APLICADO. Dialplan recargado sin reiniciar Asterisk. Dialplan idéntico salvo las líneas MixMonitor cambiadas: -= 61 extensions (141 priorities) in 31 contexts. =-
+   Backup y plan: /root/wf10-fix-backups/20260929T135646Z
+   Siguiente: esperar llamadas contestadas y correr VALIDATE_WF10_AFTER_DEPLOY.sh. Recién después: /root/wf10_reviewed_package/ASTERISK_WF10_FIX.sh finalize

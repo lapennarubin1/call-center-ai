@@ -1,0 +1,1431 @@
+{
+  "id": "8capACjGjSnSRFBV",
+  "name": "TEMPLATE_WF10_RECORDINGS_V2",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-09-22T07:32:49.279Z",
+  "updatedAt": "2026-09-22T08:23:30.387Z",
+  "isArchived": false,
+  "versionId": "6cd096a3-2ac5-4ef6-8145-6b019fcefa12",
+  "versionCounter": 2,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
+  "nodes": [
+    {
+      "id": "ba48f1be-1aa2-4696-8b5e-b84548ad2f3c",
+      "name": "NOTE 00 00 — TRIGGER",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        40
+      ],
+      "parameters": {
+        "content": "## 00 — TRIGGER\n\nTEMPLATE_WF10_RECORDINGS_V2 · v2.0.0\nContratos: TEMPLATE_DATA v2.2 · ANALYTICS_EVENT v2.2 · CRM_ENGLISH_RULE\nRollback: WF10 v1 — desactivar este workflow; v1 sigue con su propio ledger (§12)\n\nCada 5 minutos. La ventana de recogida es **configuración por ruta**\n(`recording_lookback_hours`, 48 h por defecto), no \"las de hoy\": v1 comparaba\ncontra la fecha UTC del día y perdía sistemáticamente las grabaciones de las\nllamadas de medianoche.",
+        "height": 360,
+        "width": 420,
+        "color": 4
+      }
+    },
+    {
+      "id": "4d77ad01-fea6-42a8-978f-7434dc5f40e1",
+      "name": "[TRIGGER] Every Five Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "85a86d84-d6e5-475a-b10c-20c8602ddd4a",
+      "name": "NOTE 01 01 — LOAD CONFIG",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        440,
+        40
+      ],
+      "parameters": {
+        "content": "## 01 — LOAD CONFIG\n\n`GET /api/routes/active?include_archived=1`.\n\n**Incluye archivadas a propósito**: una grabación puede llegar después de que la\nruta se archivó, y su configuración (mínimo de duración, destinos de Telegram)\ntiene que seguir resolviendo. Por eso `route_key` nunca se reutiliza.\n\nPor ruta: `recording_enabled`, `recording_min_secs`, `recording_upload_crm`,\n`recording_telegram`, `recording_source`, `recording_lookback_hours` y los\nchats de Telegram con propósito `recording`.",
+        "height": 420,
+        "width": 420,
+        "color": 3
+      }
+    },
+    {
+      "id": "cc495313-0dc5-4a2c-95a1-78f813022a86",
+      "name": "[CONFIG] Load Routes With Recordings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LM_PANEL_URL || \"http://172.18.0.1:8081\" }}/api/routes/active?include_archived=1",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1lFXJDSI9rAJvJ2B",
+          "name": "Landmark Panel API STAGING"
+        }
+      }
+    },
+    {
+      "id": "35a7f1fe-259c-4ecc-bea5-aaf9e82517cb",
+      "name": "[CONFIG] Load Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LM_PANEL_URL || \"http://172.18.0.1:8081\" }}/api/settings",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1lFXJDSI9rAJvJ2B",
+          "name": "Landmark Panel API STAGING"
+        }
+      }
+    },
+    {
+      "id": "8f7ac573-a7d1-4da4-b96c-0b65a28a702c",
+      "name": "[CONFIG] Check Recording Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst rResp = $('[CONFIG] Load Routes With Recordings').first().json || {};\nconst sResp = $input.first().json || {};\nconst code = Number(rResp.statusCode || 0);\nconst routes = ((rResp.body || {}).routes) || [];\nconst settings = ((sResp.body || {}).settings) || {};\nif (code < 200 || code >= 300) {\n  console.log('[WF10] CONFIG_ERROR: el panel no respondio (HTTP ' + code +\n              '): no se procesa ninguna grabacion');\n  return [{ json: { config_ok: false, error_code: 'CONFIG_ERROR', routes: [] } }];\n}\nconst enabled = routes.filter(r => r.recording && r.recording.enabled);\nconsole.log('[WF10] rutas con grabacion activa: ' + enabled.length + '/' + routes.length);\nreturn [{ json: {\n  config_ok: enabled.length > 0, routes: enabled, all_routes: routes,\n  default_min_secs: Number(settings.recording_default_min_secs || 60),\n  error_code: enabled.length ? null : 'NO_RECORDING_ROUTES',\n  execution_id: $execution.id\n}}];\n"
+      }
+    },
+    {
+      "id": "ed2081f0-29bc-4fb8-a0c3-a6c7cea2ed7e",
+      "name": "[CONFIG] Config Is Usable",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1240,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b8a6cd10-dfc9-4296-a32c-e7cf0c2c0ea6",
+              "leftValue": "={{ $json.config_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ebd5f09f-d407-4c04-8fbb-e104daae6b2b",
+      "name": "[LOG] Nothing To Process",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        740
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst d = $json;\nconsole.log('[WF10][exec=' + $execution.id + '] fin sin procesar · code=' + d.error_code);\nreturn [{ json: { ok: true, processed: 0, reason: d.error_code } }];\n"
+      }
+    },
+    {
+      "id": "308c9f5b-4a98-4eea-90a3-df7096ed8d56",
+      "name": "NOTE 02 02 — COLLECT RECORDINGS",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1480,
+        40
+      ],
+      "parameters": {
+        "content": "## 02 — COLLECT RECORDINGS\n\nDos orígenes, elegidos por\n`recording_source` de la ruta — **no** por un `if stringee`:\n\n · `STRINGEE_WORKER` → `GET {endpoint}/recordings` y\n   `GET /recordings/{filename}` del worker local\n · `ELEVENLABS_API` → las llamadas COMPLETADAS con `conversation_id` que aún no\n   están en el ledger, vía `GET /v1/convai/conversations/{id}/audio`\n\nLa duración se lee del **header del WAV** (`byteRate` en el offset 28), no del\ntamaño en bytes: el tamaño depende del sample rate y daba mal. Si el header no\nse puede leer, la grabación **no se descarta**: se deja pasar marcada —\ndescartar por no poder medir perdía conversaciones reales en silencio.",
+        "height": 460,
+        "width": 420,
+        "color": 6
+      }
+    },
+    {
+      "id": "4d366dd0-d406-49d5-be5f-1829b9699d68",
+      "name": "[RECORDING] Collect Pending",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Arma la lista de grabaciones a procesar. Un solo nodo hace las llamadas HTTP\n// de listado/descarga (igual que v1) para no multiplicar nodos por origen.\nconst cfg = $json;\nconst out = [];\n\nfunction wavDurationSecs(b64, sizeBytes) {\n  // Header WAV canónico: byteRate en el offset 28 (uint32 LE).\n  try {\n    const head = Buffer.from(b64.slice(0, 200), 'base64');\n    if (head.length < 44) return null;\n    if (head.toString('ascii', 0, 4) !== 'RIFF') return null;\n    const byteRate = head.readUInt32LE(28);\n    if (!byteRate) return null;\n    const dataBytes = Math.max(0, (sizeBytes || head.length) - 44);\n    return Math.round(dataBytes / byteRate);\n  } catch (e) { return null; }\n}\n\nfor (const route of cfg.routes) {\n  const rec = route.recording || {};\n  const source = route.recording_source ||\n    (route.adapter_key === 'STRINGEE_WORKER' ? 'STRINGEE_WORKER' : 'ELEVENLABS_API');\n  const lookbackH = Number(route.recording_lookback_hours || 48);\n  const since = Date.now() - lookbackH * 3600 * 1000;\n  const minSecs = Number(rec.min_secs === undefined ? cfg.default_min_secs : rec.min_secs);\n\n  if (source === 'STRINGEE_WORKER') {\n    const base = route.provider_endpoint || 'http://172.18.0.1:8091';\n    let list;\n    try {\n      list = await this.helpers.httpRequest({ method: 'GET', url: base + '/recordings',\n                                              json: true, timeout: 30000 });\n    } catch (e) {\n      console.log('[WF10][' + route.route_key + '] worker no responde: ' + e.message);\n      continue;\n    }\n    for (const r of (list.recordings || [])) {\n      if (Number(r.timestamp_ms || 0) < since) continue;\n      let dl;\n      try {\n        dl = await this.helpers.httpRequest({ method: 'GET',\n          url: base + '/recordings/' + encodeURIComponent(r.filename),\n          json: true, timeout: 60000 });\n      } catch (e) {\n        console.log('[WF10][' + route.route_key + '] descarga ' + r.filename + ': ' + e.message);\n        continue;\n      }\n      if (!dl.ok || !dl.audio_base64) continue;\n      const secs = wavDurationSecs(dl.audio_base64, r.size_bytes);\n      out.push({\n        json: {\n          recording_ref: r.filename, source: 'STRINGEE_WORKER',\n          filename: r.filename, phone: String(r.phone || ''),\n          recorded_at: new Date(Number(r.timestamp_ms || Date.now())).toISOString(),\n          size_bytes: Number(r.size_bytes || 0),\n          duration_seconds: secs === null ? 0 : secs,\n          duration_unknown: secs === null,\n          min_secs: minSecs,\n          route_key: route.route_key, route_id: route.route_id, country_iso: route.iso,\n          provider: route.provider, adapter_key: route.adapter_key,\n          upload_crm: !!rec.upload_crm, send_telegram: !!rec.telegram,\n          telegram_chats: (route.telegram || {}).recording || [],\n          conversation_id: null, call_job_id: null,\n          worker_endpoint: base,\n          execution_id: cfg.execution_id\n        },\n        binary: { data: { data: dl.audio_base64, mimeType: 'audio/wav',\n                          fileName: r.filename } }\n      });\n    }\n  } else {\n    // ELEVENLABS_API: el listado de candidatos lo resuelve el nodo siguiente\n    // contra la base (llamadas completadas sin grabacion registrada). Acá solo\n    // se deja la ruta preparada.\n    out.push({ json: {\n      recording_ref: null, source: 'ELEVENLABS_API', pending_lookup: true,\n      min_secs: minSecs, lookback_hours: lookbackH,\n      route_key: route.route_key, route_id: route.route_id, country_iso: route.iso,\n      provider: route.provider, adapter_key: route.adapter_key,\n      upload_crm: !!rec.upload_crm, send_telegram: !!rec.telegram,\n      telegram_chats: (route.telegram || {}).recording || [],\n      execution_id: cfg.execution_id\n    }});\n  }\n}\nconsole.log('[WF10][exec=' + cfg.execution_id + '] candidatas: ' + out.length);\nreturn out;\n"
+      }
+    },
+    {
+      "id": "78f24785-f439-42ad-acfe-96ca07a041b9",
+      "name": "[RECORDING] Needs Conversation Lookup",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f274d180-7fa9-4238-a6fe-ec73f1e7d27d",
+              "leftValue": "={{ $json.pending_lookup === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f102c91e-e19a-4a03-b411-eea17b4070c1",
+      "name": "[DB] Find Calls Without Recording",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        1760,
+        740
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT j.call_job_id, j.conversation_id, j.lead_id, j.route_key, j.country_iso,\n       j.provider, j.adapter_key, j.followup_id, j.duration_seconds\n  FROM wf_call_jobs j\n  LEFT JOIN wf_recording_ledger l ON l.call_job_id = j.call_job_id\n WHERE j.route_key = ? AND j.state = 'COMPLETED'\n   AND j.conversation_id IS NOT NULL\n   AND j.completed_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? HOUR)\n   AND l.id IS NULL\n ORDER BY j.completed_at DESC LIMIT 100",
+        "options": {
+          "queryReplacement": "={{ $json.route_key }},={{ $json.lookback_hours }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "ea2a6d1a-37d5-4d75-ab2f-af84badbc45a",
+      "name": "[RECORDING] Fetch ElevenLabs Audio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        740
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Descarga el audio de la conversación. La cadena de correlación ya está\n// resuelta por construcción: la fila viene de wf_call_jobs.\nconst key = $env.ELEVENLABS_API_KEY || '';\nconst out = [];\nfor (const it of $input.all()) {\n  const row = it.json || {};\n  if (!row.conversation_id) continue;\n  const route = (() => {\n    try {\n      return $('[RECORDING] Needs Conversation Lookup').all()\n        .map(x => x.json).find(x => x.route_key === row.route_key) || {};\n    } catch (e) { return {}; }\n  })();\n  if (!key) {\n    console.log('[WF10] falta ELEVENLABS_API_KEY: no se descargan grabaciones SIP');\n    break;\n  }\n  let audio;\n  try {\n    const res = await this.helpers.httpRequest({\n      method: 'GET',\n      url: 'https://api.elevenlabs.io/v1/convai/conversations/' +\n           encodeURIComponent(row.conversation_id) + '/audio',\n      headers: { 'xi-api-key': key }, encoding: 'arraybuffer', returnFullResponse: true,\n      timeout: 60000 });\n    audio = Buffer.from(res.body).toString('base64');\n  } catch (e) {\n    console.log('[WF10] audio de ' + row.conversation_id + ': ' + e.message);\n    continue;\n  }\n  out.push({\n    json: {\n      recording_ref: row.conversation_id, source: 'ELEVENLABS_API',\n      filename: row.conversation_id + '.mp3',\n      phone: null, recorded_at: new Date().toISOString(),\n      size_bytes: Math.round(audio.length * 3 / 4),\n      duration_seconds: Number(row.duration_seconds || 0), duration_unknown: false,\n      min_secs: Number(route.min_secs || 60),\n      route_key: row.route_key, route_id: route.route_id || null,\n      country_iso: row.country_iso, provider: row.provider,\n      adapter_key: row.adapter_key,\n      upload_crm: !!route.upload_crm, send_telegram: !!route.send_telegram,\n      telegram_chats: route.telegram_chats || [],\n      call_job_id: row.call_job_id, conversation_id: row.conversation_id,\n      lead_id: row.lead_id, followup_id: row.followup_id,\n      execution_id: $execution.id\n    },\n    binary: { data: { data: audio, mimeType: 'audio/mpeg',\n                      fileName: row.conversation_id + '.mp3' } }\n  });\n}\nconsole.log('[WF10] grabaciones SIP descargadas: ' + out.length);\nreturn out;\n"
+      }
+    },
+    {
+      "id": "ac1fe583-bba4-40e8-b137-5a0bf612032a",
+      "name": "NOTE 03 03 — CORRELATE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2260,
+        40
+      ],
+      "parameters": {
+        "content": "## 03 — CORRELATE\n\nCadena preferida:\n\n    call_job_id → conversation_id → followup_id → grabación\n\nPara las del worker Stringee, que no traen ningún id, se resuelve por la llamada\ndel lead: el worker nombra el archivo `stringee-<phone>-<ms>.wav`, y ese\nteléfono se cruza contra las llamadas de **esa ruta** en la ventana de tiempo\ndel archivo.\n\nEso se marca en el ledger como `LEGACY_PHONE`: es **compatibilidad explícita y\nauditable**, no el mecanismo principal. `correlation` queda guardado en cada\nfila, así que se puede medir cuántas grabaciones siguen dependiendo del\nteléfono.\n\nSin correlación ⇒ `ORPHAN`: **no se sube al CRM**. Adjuntar un audio al\nfollow-up equivocado es peor que no adjuntarlo.",
+        "height": 480,
+        "width": 420,
+        "color": 3
+      }
+    },
+    {
+      "id": "13711774-ec82-49e2-8401-0e5426e1e102",
+      "name": "[DB] Correlate Recording",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        2280,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ? AS _k,\n  COALESCE(\n    (SELECT j.call_job_id FROM wf_call_jobs j WHERE ? <> '' AND j.call_job_id = ?),\n    (SELECT j.call_job_id FROM wf_call_jobs j WHERE ? <> '' AND j.conversation_id = ?\n       ORDER BY j.created_at DESC LIMIT 1),\n    (SELECT j.call_job_id FROM wf_call_jobs j\n      WHERE ? <> '' AND j.route_key = ?\n        AND j.lead_id IN (SELECT c.lead_id FROM crm_leads c\n                           WHERE RIGHT(c.phone, 10) = RIGHT(?, 10))\n        AND j.created_at <= ? AND j.created_at >= DATE_SUB(?, INTERVAL 2 HOUR)\n      ORDER BY j.created_at DESC LIMIT 1)\n  ) AS matched_call_job_id",
+        "options": {
+          "queryReplacement": "={{ $json.recording_ref }},={{ $json.call_job_id || \"\" }},={{ $json.call_job_id || \"\" }},={{ $json.conversation_id || \"\" }},={{ $json.conversation_id || \"\" }},={{ $json.phone || \"\" }},={{ $json.route_key }},={{ $json.phone || \"\" }},={{ $json.recorded_at.replace(\"T\",\" \").replace(\"Z\",\"\").slice(0,19) }},={{ $json.recorded_at.replace(\"T\",\" \").replace(\"Z\",\"\").slice(0,19) }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "2ec5b1af-2df3-451c-b11c-e136d10337ed",
+      "name": "[DB] Load Recording Job",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        2540,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ? AS _k, j.call_job_id, j.lead_id, j.route_key, j.country_iso,\n       j.provider, j.adapter_key, j.conversation_id, j.followup_id,\n       j.duration_seconds\n  FROM wf_call_jobs j WHERE j.call_job_id = ?\n UNION ALL\nSELECT ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL\n WHERE NOT EXISTS (SELECT 1 FROM wf_call_jobs x WHERE x.call_job_id = ?)",
+        "options": {
+          "queryReplacement": "={{ $json._k }},={{ $json.matched_call_job_id || \"\" }},={{ $json._k }},={{ $json.matched_call_job_id || \"\" }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "f7bde0de-6902-4e3f-b4f0-161066860b11",
+      "name": "[RECORDING] Merge Correlation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Reconstruye el item (incluido el binario) y anota CÓMO se correlacionó.\nconst rows = $input.all();\nconst out = [];\nfor (let i = 0; i < rows.length; i++) {\n  const job = rows[i].json || {};\n  let src;\n  try { src = $('[DB] Correlate Recording').itemMatching(i); }\n  catch (e) { src = null; }\n  const key = job._k;\n  // el item original (con el binario) está en el nodo que lo produjo\n  let orig = null;\n  for (const nodeName of ['[RECORDING] Fetch ElevenLabs Audio',\n                          '[RECORDING] Needs Conversation Lookup']) {\n    try {\n      const cand = $(nodeName).all().find(x => x.json.recording_ref === key);\n      if (cand) { orig = cand; break; }\n    } catch (e) { /* el nodo puede no haber corrido en esta rama */ }\n  }\n  if (!orig) continue;\n  const d = orig.json;\n\n  const matched = !!job.call_job_id;\n  const correlation = !matched ? 'NONE'\n    : (d.call_job_id ? 'CALL_JOB'\n      : d.conversation_id ? 'CONVERSATION'\n      : job.followup_id ? 'FOLLOWUP' : 'LEGACY_PHONE');\n\n  const duration = (d.duration_seconds && d.duration_seconds > 0)\n    ? Number(d.duration_seconds)\n    : Number(job.duration_seconds || 0);\n\n  out.push({\n    json: Object.assign({}, d, {\n      call_job_id: job.call_job_id || null,\n      lead_id: job.lead_id || d.lead_id || null,\n      conversation_id: job.conversation_id || d.conversation_id || null,\n      followup_id: job.followup_id || d.followup_id || null,\n      country_iso: job.country_iso || d.country_iso,\n      provider: job.provider || d.provider,\n      duration_seconds: duration,\n      correlated: matched,\n      correlation: correlation,\n      below_min: duration > 0 && duration < Number(d.min_secs || 60)\n    }),\n    binary: orig.binary\n  });\n}\nconsole.log('[WF10] correlacionadas: ' +\n            out.filter(o => o.json.correlated).length + '/' + out.length +\n            ' (legacy por telefono: ' +\n            out.filter(o => o.json.correlation === 'LEGACY_PHONE').length + ')');\nreturn out;\n"
+      }
+    },
+    {
+      "id": "5e54cfee-fc52-4217-a1a7-7f0bca393d01",
+      "name": "NOTE 04 04 — CLAIM & FILTER",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        40
+      ],
+      "parameters": {
+        "content": "## 04 — CLAIM & FILTER\n\n`wf_recording_ledger`, clave\n`recording_ref` (el filename del worker o el `conversation_id`). UNIQUE: la\nmisma grabación **no se sube ni se reenvía dos veces**, aunque dos corridas se\nsolapen o el workflow se re-ejecute.\n\nGanar el claim es la **única** autorización para subir y reenviar. v1 mandaba a\nTelegram primero y registraba después, así que un fallo intermedio reenviaba\ntodo el historial en la corrida siguiente.\n\nFiltro de duración: `recording_min_secs` **de la ruta** (60 s por defecto,\nconfigurable). Las descartadas se cuentan: `RECORDING_SKIPPED_SHORT`.",
+        "height": 440,
+        "width": 420,
+        "color": 3
+      }
+    },
+    {
+      "id": "64c7d0a8-3e7b-4f66-9a8d-59746c74b0aa",
+      "name": "[RECORDING] Build Claim Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3060,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst crypto = require('crypto');\nreturn $input.all().map(it => ({\n  json: Object.assign({}, it.json, { claim_token: crypto.randomBytes(16).toString('hex') }),\n  binary: it.binary\n}));\n"
+      }
+    },
+    {
+      "id": "3382e89f-a44c-4874-93de-f1ee1d827669",
+      "name": "[DB] Claim Recording",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        3320,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_recording_ledger\n  (recording_ref, source, call_job_id, conversation_id, followup_id, lead_id,\n   route_key, country_iso, provider, duration_seconds, size_bytes, correlation,\n   claim_token, execution_id, state)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CLAIMED')",
+        "options": {
+          "queryReplacement": "={{ $json.recording_ref }},={{ $json.source }},={{ $json.call_job_id }},={{ $json.conversation_id }},={{ $json.followup_id }},={{ $json.lead_id }},={{ $json.route_key }},={{ $json.country_iso }},={{ $json.provider }},={{ $json.duration_seconds }},={{ $json.size_bytes }},={{ $json.correlation }},={{ $json.claim_token }},={{ $json.execution_id }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "a148a54f-5309-406f-900b-4c8c13194cc9",
+      "name": "[DB] Read Recording Claim",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        3580,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ? AS _k, claim_token, state\n  FROM wf_recording_ledger WHERE recording_ref = ?",
+        "options": {
+          "queryReplacement": "={{ $('[RECORDING] Build Claim Token').item.json.recording_ref }},={{ $('[RECORDING] Build Claim Token').item.json.recording_ref }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "afad0d49-f078-433d-8eee-74f2217847f6",
+      "name": "[RECORDING] Check Recording Claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst rows = $input.all();\nconst out = [];\nfor (let i = 0; i < rows.length; i++) {\n  const row = rows[i].json || {};\n  const orig = $('[RECORDING] Build Claim Token').itemMatching(i);\n  const ctx = orig.json;\n  const won = !!row.claim_token && row.claim_token === ctx.claim_token;\n  if (!won) continue;                        // ya procesada: no se repite\n  out.push({ json: Object.assign({}, ctx, { claim_won: true }), binary: orig.binary });\n}\nconsole.log('[WF10] grabaciones reclamadas en esta corrida: ' + out.length +\n            '/' + rows.length);\nreturn out;\n"
+      }
+    },
+    {
+      "id": "18a13bde-609f-4df5-9dc9-9377ff2f4fe4",
+      "name": "[RECORDING] Filter Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        4100,
+        300
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "67fb197f-1816-4f99-8df0-2cf863f66f85",
+                    "leftValue": "={{ !$json.correlated ? \"ORPHAN\" : ($json.below_min ? \"SHORT\" : \"OK\") }}",
+                    "rightValue": "OK",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "696fa6e2-f9af-453d-83e2-5f608ffd648f",
+                    "leftValue": "={{ !$json.correlated ? \"ORPHAN\" : ($json.below_min ? \"SHORT\" : \"OK\") }}",
+                    "rightValue": "SHORT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "short"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "009b9b87-1ff3-4daf-a76e-b83a63419827",
+                    "leftValue": "={{ !$json.correlated ? \"ORPHAN\" : ($json.below_min ? \"SHORT\" : \"OK\") }}",
+                    "rightValue": "ORPHAN",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "orphan"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      }
+    },
+    {
+      "id": "a3576398-ccfe-4c43-a293-3b41bb99ce96",
+      "name": "[DB] Mark Recording Short",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        4360,
+        960
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_recording_ledger\n   SET state = 'SKIPPED_SHORT', error_code = 'BELOW_MIN', error_message = ?,\n       completed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()\n WHERE recording_ref = ? AND state = 'CLAIMED'",
+        "options": {
+          "queryReplacement": "={{ \"duration \" + $json.duration_seconds + \"s < route minimum \" + $json.min_secs + \"s\" }},={{ $json.recording_ref }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "e32d4ce2-453c-4a37-b480-56c0e660e5a1",
+      "name": "[DB] Record Event Recording Short",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        4620,
+        960
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, call_job_id, lead_id,\n   country_iso, route_key, provider, duration_seconds, source_workflow,\n   execution_id)\nVALUES (?, 'RECORDING_SKIPPED_SHORT', 'RECORDING', UTC_TIMESTAMP(), ?, ?, ?, ?, ?,\n        ?, 'WF10', ?)",
+        "options": {
+          "queryReplacement": "={{ \"RECORDING_SKIPPED_SHORT:\" + ($('[RECORDING] Filter Router').item.json.call_job_id || $('[RECORDING] Filter Router').item.json.recording_ref) }},={{ $('[RECORDING] Filter Router').item.json.call_job_id }},={{ $('[RECORDING] Filter Router').item.json.lead_id }},={{ $('[RECORDING] Filter Router').item.json.country_iso }},={{ $('[RECORDING] Filter Router').item.json.route_key }},={{ $('[RECORDING] Filter Router').item.json.provider }},={{ $('[RECORDING] Filter Router').item.json.duration_seconds }},={{ $('[RECORDING] Filter Router').item.json.execution_id }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "52219ae3-2740-4fe4-9ae7-a35fb72305f3",
+      "name": "[DB] Mark Recording Orphan",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        4360,
+        1400
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_recording_ledger\n   SET state = 'ORPHAN', error_code = 'NO_CORRELATION',\n       error_message = 'no matching call job',\n       completed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()\n WHERE recording_ref = ? AND state = 'CLAIMED'",
+        "options": {
+          "queryReplacement": "={{ $json.recording_ref }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "92bd29a8-0506-42c5-adc2-54a99c28636c",
+      "name": "[LOG] Recording Orphan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        1400
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\n// Sin llamada a la que pertenecer: NO se sube al CRM. Queda contabilizada para\n// que el panel muestre cuántas grabaciones quedan sin correlacionar.\nreturn $input.all().map((r, i) => {\n  const d = $('[RECORDING] Filter Router').itemMatching(i).json;\n  console.log('[WF10] ORPHAN ref=' + d.recording_ref + ' route=' + d.route_key +\n              ' (no se sube al CRM)');\n  return { json: { ok: false, recording_ref: d.recording_ref, state: 'ORPHAN' } };\n});\n"
+      }
+    },
+    {
+      "id": "49d098a3-a6cb-401f-a243-f847c74c033d",
+      "name": "[LOG] Recording Unroutable",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4360,
+        1840
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nreturn $input.all().map(it => {\n  console.log('[WF10] item sin clasificar: ' + it.json.recording_ref);\n  return { json: { ok: false, recording_ref: it.json.recording_ref, state: 'UNCLASSIFIED' } };\n});\n"
+      }
+    },
+    {
+      "id": "ccb89c8d-0312-4fec-ae54-0f15bb5a1db6",
+      "name": "NOTE 06 06 — UPLOAD TO CRM",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4860,
+        40
+      ],
+      "parameters": {
+        "content": "## 06 — UPLOAD TO CRM\n\n`PUT /api/calls/recording/{followup_id}`\ncon el audio como `multipart/form-data`.\n\nSolo se sube si la ruta tiene `recording_upload_crm` y la llamada **ya tiene**\n`followup_id`. Sin follow-up todavía (el post-call llegó después que la\ngrabación), la grabación queda `CLAIMED` y la recoge la corrida siguiente:\nno se pierde y no se sube a ciegas.",
+        "height": 380,
+        "width": 420,
+        "color": 2
+      }
+    },
+    {
+      "id": "031bbe15-ba71-44ad-b1b3-2b05278fb153",
+      "name": "[RECORDING] Should Upload To Crm",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4880,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4c75ac20-0271-4961-95af-0f8d6f640864",
+              "leftValue": "={{ $json.upload_crm === true && !!$json.followup_id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "92a3dc27-1eda-451f-a2ef-3e49d03f01ef",
+      "name": "[CRM] Get Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        5140,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/auth/login",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth"
+      },
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "uA7mfYZBwicXc83u",
+          "name": "LeadStudio Login V2"
+        }
+      }
+    },
+    {
+      "id": "6ecbce2a-b18a-4c78-80a4-4e63222faad5",
+      "name": "[CRM] Attach Upload Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5400,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\nconst resp = $input.first().json || {};\nconst token = (resp.body && resp.body.accessToken) || null;\nreturn $('[RECORDING] Should Upload To Crm').all().map(it => ({\n  json: Object.assign({}, it.json, { access_token: token }), binary: it.binary\n}));\n"
+      }
+    },
+    {
+      "id": "f24fdcab-f6b6-4c19-8e4d-80c74fc46fa3",
+      "name": "[CRM] Upload Recording",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        5660,
+        300
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.LM_LEADSTUDIO_URL || \"https://lead-studio-9gnl.onrender.com\" }}/api/calls/recording/{{ $json.followup_id }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a168a9c5-1a24-4b23-b678-c327165e2671",
+      "name": "[CRM] Check Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5920,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nconst rows = $input.all();\nreturn rows.map((r, i) => {\n  const orig = $('[CRM] Attach Upload Token').itemMatching(i);\n  const d = orig.json;\n  const code = Number((r.json || {}).statusCode || 0);\n  const ok = code >= 200 && code < 300;\n  if (!ok) console.log('[WF10] upload al CRM fallo · ref=' + d.recording_ref +\n                       ' HTTP ' + code);\n  return { json: Object.assign({}, d, { upload_ok: ok, upload_http_status: code }),\n           binary: orig.binary };\n});\n"
+      }
+    },
+    {
+      "id": "b981f3a2-7c26-4342-a865-dd1104916a85",
+      "name": "[DB] Mark Recording Uploaded",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        6180,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_recording_ledger\n   SET crm_uploaded = ?, state = 'UPLOADED', updated_at = UTC_TIMESTAMP()\n WHERE recording_ref = ? AND state IN ('CLAIMED','UPLOADED')",
+        "options": {
+          "queryReplacement": "={{ $json.upload_ok ? 1 : 0 }},={{ $json.recording_ref }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "f19df5cf-7854-41bb-af32-28f5f86e255b",
+      "name": "NOTE 07 07 — TELEGRAM",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        6420,
+        40
+      ],
+      "parameters": {
+        "content": "## 07 — TELEGRAM\n\nDestinos por **ruta** y propósito `recording`\n(`route_telegram_targets`). v1 tenía cuatro nodos de Telegram con los chat_id y\nel mapa de países escritos a mano, y dos de ellos apuntaban al mismo grupo por\nun copy-paste.\n\nEl caption lleva duración real (leída del WAV), país, ruta y proveedor. v1\nmostraba `— s` porque el caption leía un campo que no existía.",
+        "height": 380,
+        "width": 420,
+        "color": 6
+      }
+    },
+    {
+      "id": "99b536b9-42c0-4afd-9979-2842375243e9",
+      "name": "[TELEGRAM] Prepare Recording Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n// ── LM CRM NOTES ────────────────────────────────────────────────────────────\n// Port 1:1 de app/crm_notes.py. TODO texto humano que se escribe o se envía a\n// LeadStudio / CRM va en INGLÉS, sin importar el país, el idioma del cliente ni\n// el del agente (docs/CRM_ENGLISH_RULE.md).\n//\n// NO se traducen: nombre del cliente, teléfono, email, IDs, URLs, route_key,\n// IDs de proveedor. Los enums técnicos siguen el contrato de LeadStudio.\n//\n// tests/test_crm_english_v2.py compara este catálogo con el de Python: si\n// alguien edita una frase en un solo lado, el test falla.\n\nconst LM_PHRASES = {\n  CALL_ANSWERED: 'Call answered.',\n  CALL_NO_ANSWER: 'Call was not answered.',\n  CALL_BUSY: 'Line was busy.',\n  CALL_VOICEMAIL: 'Call reached voicemail.',\n  CALL_CALLBACK: 'Customer requested a callback.',\n  CALL_WRONG_NUMBER: 'Wrong number.',\n  CALL_DNC: 'Customer asked not to be contacted again.',\n  CALL_FAILED: 'Call failed.',\n  CALL_UNKNOWN: 'Call result could not be determined.',\n  FOLLOWUP_RETRY: 'Next attempt scheduled.',\n  FOLLOWUP_CLOSE: 'No further attempts: retry policy exhausted.',\n  FOLLOWUP_COMPLETE: 'Contact established; no retry scheduled.',\n  FOLLOWUP_CALLBACK: 'Callback scheduled.',\n  FOLLOWUP_NONE: 'Result recorded; nothing scheduled.',\n  ACCOUNT_CREATED: 'Trading account created successfully.',\n  ACCOUNT_ALREADY_EXISTS: 'Customer already has a trading account; credentials were not resent (issued once at creation).',\n  ACCOUNT_FAILED: 'Trading account could not be created.',\n  ACCOUNT_REQUESTED: 'Customer requested a trading account.',\n  PAYMENT_LINK_CREATED: 'Payment link sent successfully.',\n  PAYMENT_LINK_FAILED: 'Payment link could not be created.',\n  PAYMENT_CONFIRMED: 'Payment confirmed.',\n  RECORDING_ATTACHED: 'Call recording attached.',\n  RECORDING_SKIPPED: 'Call recording not attached: below minimum duration.',\n  RECORDING_MISSING: 'Call recording not available.',\n  RECONCILIATION_OPENED: 'Automatic reconciliation opened a discrepancy for review.',\n  RECONCILIATION_CLOSED: 'Reconciliation discrepancy resolved.',\n  ERR_CONFIG: 'Request rejected: country configuration is incomplete.',\n  ERR_COUNTRY_DISABLED: 'Request rejected: this country is currently disabled.',\n  ERR_TOOL_DISABLED: 'Request rejected: this tool is not enabled for the country.',\n  ERR_VALIDATION: 'Request rejected: invalid or missing data.',\n  ERR_PROVIDER: 'Request failed at the provider.',\n  ERR_AMBIGUOUS: 'Result unconfirmed; flagged for manual reconciliation.'\n};\n\nconst LM_RESULT_PHRASE = {\n  ANSWERED: 'CALL_ANSWERED', NO_ANSWER: 'CALL_NO_ANSWER', BUSY: 'CALL_BUSY',\n  VOICEMAIL: 'CALL_VOICEMAIL', CALLBACK: 'CALL_CALLBACK',\n  WRONG_NUMBER: 'CALL_WRONG_NUMBER', DNC: 'CALL_DNC', FAILED: 'CALL_FAILED',\n  UNKNOWN: 'CALL_UNKNOWN'\n};\nconst LM_ACTION_PHRASE = {\n  RETRY: 'FOLLOWUP_RETRY', CLOSE: 'FOLLOWUP_CLOSE', COMPLETE: 'FOLLOWUP_COMPLETE',\n  CALLBACK: 'FOLLOWUP_CALLBACK', NONE: 'FOLLOWUP_NONE'\n};\nconst LM_MAX_NOTE = 900;\n\nfunction lmPhrase(key) {\n  if (!(key in LM_PHRASES)) throw new Error('frase desconocida: ' + key);\n  return LM_PHRASES[key];\n}\n\nfunction lmJoin(parts) {\n  return parts.filter(p => p && String(p).trim())\n              .map(p => String(p).trim()).join(' ').slice(0, LM_MAX_NOTE);\n}\n\n\n// Gemelo 1:1 de crm_notes.is_english. Heuristica conservadora: no es un\n// detector de idioma, es una red que hace fallar el caso conocido — que\n// alguien vuelva a meter \"No contesto\" o devanagari en una nota del CRM.\nvar LM_NON_ENGLISH_CHARS = /[\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00fc\\u00c1\\u00c9\\u00cd\\u00d3\\u00da\\u00d1\\u00dc\\u00bf\\u00a1\\u0900-\\u097f\\u0600-\\u06ff]/;\nvar LM_SPANISH_WORDS = new RegExp(\n  '\\\\b(no contest[o\\u00f3]|cuenta creada|llamada|intento|pr[o\\u00f3]xima|correctamente|' +\n  'usuario|contrase[n\\u00f1]a|grabaci[o\\u00f3]n|pago|enlace|fall[o\\u00f3]|d[i\\u00ed]as|h[a\\u00e1]biles|' +\n  'buz[o\\u00f3]n|ocupado|desconocido|pendiente|rechazado|creada|enviado)\\\\b', 'i');\n\n// Palabras funcionales del espanol que casi no aparecen en una nota en\n// ingles. Se exigen DOS distintas: con una habria falsos positivos\n// (\"la carte\"), con dos ya es una frase en espanol. NO incluye \"son\",\n// \"no\", \"a\", \"e\", \"o\" ni \"va\", que si son palabras inglesas.\nvar LM_SPANISH_STOPWORDS = new RegExp(\n  '\\\\b(el|la|los|las|una|unos|unas|que|del|por|para|con|sin|como|pero|' +\n  'cuando|donde|quiere|quiso|cliente|llamar|llamen|llame|llamada|' +\n  'ma[\\u00f1n]ana|hoy|ayer|gracias|favor|n[u\\u00fa]mero|dijo|pidi[o\\u00f3]|' +\n  'est[a\\u00e1]|tiene|hacer|m[a\\u00e1]s|muy|todo|nada|porque|tambi[e\\u00e9]n|' +\n  'ahora|luego)\\\\b', 'gi');\n\nfunction lmIsEnglish(text) {\n  var t = String(text === null || text === undefined ? '' : text);\n  if (LM_NON_ENGLISH_CHARS.test(t) || LM_SPANISH_WORDS.test(t)) return false;\n  var vistas = {}, n = 0, m;\n  LM_SPANISH_STOPWORDS.lastIndex = 0;\n  while ((m = LM_SPANISH_STOPWORDS.exec(t)) !== null) {\n    var w = m[0].toLowerCase();\n    if (!vistas[w]) { vistas[w] = true; n++; }\n    if (n >= 2) return false;\n  }\n  return true;\n}\n\n// ── Nada que no sea inglés entra al CRM ──────────────────────────────\n// Una version anterior adjuntaba el resumen de ElevenLabs tal cual. Eso\n// metia hindi, nepali y espanol dentro de notas del CRM. No hay excepcion.\n// Gemelo 1:1 de crm_notes.safe_summary / safe_detail / error_code_of.\n\n// lmcore.js ya declara LM_ERROR_CODES (el contrato de errores). Aqui se\n// usa esa misma lista mas los tres estados que solo aparecen en notas.\nvar LM_PUBLISHABLE_CODES = (typeof LM_ERROR_CODES !== 'undefined'\n  ? LM_ERROR_CODES : ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR',\n                      'PROVIDER_ERROR', 'CRM_ERROR', 'RETRYABLE_ERROR',\n                      'PERMANENT_ERROR'])\n  .concat(['UNKNOWN', 'TIMEOUT', 'AMBIGUOUS']);\n\n// Un token tecnico tiene que PARECER tecnico: MAYUSCULAS, con digito, o\n// con separador. Una palabra corriente en minusculas es prosa de alguien.\nfunction lmIsTechnicalToken(t) {\n  if (!t || t.length > 64) return false;\n  if (!/^[A-Za-z0-9][A-Za-z0-9._:/+-]*$/.test(t)) return false;\n  if (t.length > 1 && t === t.toUpperCase() && /[A-Z]/.test(t)) return true;\n  if (/[0-9]/.test(t)) return true;\n  if (/[._:/+-]/.test(t)) return true;\n  return false;\n}\n\nfunction lmSafeDetail(detail) {\n  if (detail === null || detail === undefined || detail === '') return null;\n  var texto = String(detail).trim();\n  if (!texto) return null;\n  var partes = texto.split(/\\s+/);\n  if (partes.length > 4) return null;\n  for (var i = 0; i < partes.length; i++) {\n    if (!lmIsTechnicalToken(partes[i])) return null;\n  }\n  return partes.join(' ').slice(0, 64);\n}\n\nfunction lmErrorCodeOf(error) {\n  if (error === null || error === undefined || error === '') return 'UNKNOWN';\n  var t = String(error).trim().toUpperCase();\n  if (LM_PUBLISHABLE_CODES.indexOf(t) >= 0) return t;\n  var seguro = lmSafeDetail(error);\n  if (seguro && LM_PUBLISHABLE_CODES.indexOf(seguro.toUpperCase()) >= 0) {\n    return seguro.toUpperCase();\n  }\n  return 'PROVIDER_ERROR';\n}\n\n// El resumen solo entra si la fuente GARANTIZA que es ingles. Sin idioma\n// declarado se descarta, aunque \"parezca\" ingles: la heuristica existe\n// para cazar regresiones, no para autorizar contenido de idioma\n// desconocido. El original se guarda como evidencia local.\nfunction lmSafeSummary(summary, language, isEnglishFlag) {\n  if (!summary) return null;\n  var lang = String(language || '').trim().toLowerCase();\n  var declarado = !!isEnglishFlag ||\n    lang === 'en' || lang === 'en-us' || lang === 'en-gb' ||\n    lang === 'eng' || lang === 'english';\n  if (!declarado) return null;\n  var texto = String(summary).trim();\n  if (!texto) return null;\n  if (!lmIsEnglish(texto)) return null;\n  return texto;\n}\n\nfunction lmCallNote(o) {\n  o = o || {};\n  const head = lmPhrase(LM_RESULT_PHRASE[String(o.result || '').toUpperCase()] || 'CALL_UNKNOWN');\n  const tail = LM_ACTION_PHRASE[o.action] ? lmPhrase(LM_ACTION_PHRASE[o.action]) : '';\n  const meta = [];\n  if (o.attempt !== null && o.attempt !== undefined) meta.push('attempt ' + parseInt(o.attempt, 10));\n  if (o.route_key) meta.push('route ' + o.route_key);\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.sip_code) meta.push('sip ' + o.sip_code);\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.schedule_next_at) meta.push('next ' + o.schedule_next_at);\n  let note = lmJoin([head, tail, meta.length ? '[' + meta.join(' · ') + ']' : '']);\n  var __sum = lmSafeSummary(o.summary, o.summary_language, o.summary_is_english);\n  if (__sum) note = (note + ' Agent summary: ' + __sum).slice(0, LM_MAX_NOTE);\n  return note;\n}\n\nfunction lmAccountNote(o) {\n  o = o || {};\n  const key = { CREATED: 'ACCOUNT_CREATED', ALREADY_EXISTS: 'ACCOUNT_ALREADY_EXISTS',\n                FAILED: 'ACCOUNT_FAILED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de cuenta desconocido: ' + o.status);\n  const meta = [];\n  if (o.market) meta.push('market ' + o.market);\n  if (o.username) meta.push('username ' + o.username);\n  if (o.portal_url) meta.push('portal ' + o.portal_url);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmPaymentNote(o) {\n  o = o || {};\n  const key = { LINK_CREATED: 'PAYMENT_LINK_CREATED', LINK_FAILED: 'PAYMENT_LINK_FAILED',\n                CONFIRMED: 'PAYMENT_CONFIRMED' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de pago desconocido: ' + o.status);\n  const meta = [];\n  if (o.amount !== null && o.amount !== undefined && o.currency) {\n    meta.push('amount ' + o.currency + ' ' + o.amount);\n  }\n  if (o.provider) meta.push('provider ' + o.provider);\n  if (o.order_ref) meta.push('order ' + o.order_ref);\n  if (o.transaction_id) meta.push('txn ' + o.transaction_id);\n  if (o.error) meta.push('code ' + lmErrorCodeOf(o.error));\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmRecordingNote(o) {\n  o = o || {};\n  const key = { ATTACHED: 'RECORDING_ATTACHED', SKIPPED: 'RECORDING_SKIPPED',\n                MISSING: 'RECORDING_MISSING' }[String(o.status || '').toUpperCase()];\n  if (!key) throw new Error('status de grabacion desconocido: ' + o.status);\n  const meta = [];\n  if (o.duration_seconds !== null && o.duration_seconds !== undefined) {\n    meta.push('duration ' + parseInt(o.duration_seconds, 10) + 's');\n  }\n  if (o.min_secs !== null && o.min_secs !== undefined) {\n    meta.push('minimum ' + parseInt(o.min_secs, 10) + 's');\n  }\n  if (o.route_key) meta.push('route ' + o.route_key);\n  return lmJoin([lmPhrase(key), meta.length ? '[' + meta.join(' · ') + ']' : '']);\n}\n\nfunction lmErrorNote(errorCode, detail) {\n  const key = { CONFIG_ERROR: 'ERR_CONFIG', COUNTRY_DISABLED: 'ERR_COUNTRY_DISABLED',\n                TOOL_DISABLED: 'ERR_TOOL_DISABLED', VALIDATION_ERROR: 'ERR_VALIDATION',\n                PROVIDER_ERROR: 'ERR_PROVIDER', AMBIGUOUS: 'ERR_AMBIGUOUS'\n              }[String(errorCode || '').toUpperCase()] || 'ERR_VALIDATION';\n  const meta = ['code ' + errorCode];\n  var __d = lmSafeDetail(detail);\n  if (__d) meta.push('detail ' + __d);\n  return lmJoin([lmPhrase(key), '[' + meta.join(' · ') + ']']);\n}\n\nfunction lmReconciliationNote(issueType, detail) {\n  const meta = ['issue ' + issueType];\n  var __d2 = lmSafeDetail(detail);\n  if (__d2) meta.push(__d2);\n  return lmJoin([lmPhrase('RECONCILIATION_OPENED'), '[' + meta.join(' · ') + ']']);\n}\n\n// Un item por (grabación × chat de destino). Sin chats configurados, no se\n// envía nada y el workflow sigue.\nconst out = [];\nconst rows = $input.all();\nfor (let i = 0; i < rows.length; i++) {\n  let orig;\n  try { orig = $('[CRM] Check Upload').itemMatching(i); }\n  catch (e) { orig = rows[i]; }\n  const d = orig.json;\n  if (!d.send_telegram) continue;\n  const chats = d.telegram_chats || [];\n  if (!chats.length) {\n    console.log('[WF10] ruta ' + d.route_key + ' pide Telegram y no tiene chat destino');\n    continue;\n  }\n  const caption = [\n    d.country_iso + ' · ' + d.route_key + ' · ' + (d.provider || ''),\n    d.duration_seconds + 's' + (d.duration_unknown ? ' (estimada)' : ''),\n    d.recorded_at\n  ].join(' — ');\n  for (const chat of chats) {\n    out.push({ json: Object.assign({}, d, { telegram_chat_id: chat, caption: caption }),\n               binary: orig.binary });\n  }\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "334a7def-df28-4490-883b-ff2efb920c40",
+      "name": "[TELEGRAM] Send Recording",
+      "webhookId": "e544066e-0645-4913-a266-c244c0049529",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        6700,
+        300
+      ],
+      "parameters": {
+        "operation": "sendAudio",
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "binaryData": true,
+        "binaryPropertyName": "data",
+        "additionalFields": {
+          "caption": "={{ $json.caption }}"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "aZWABzEfC4SEy3oC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "id": "43d611b4-f538-44de-bca6-4d9a21563bfc",
+      "name": "NOTE 08 08 — FINALIZE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        6940,
+        40
+      ],
+      "parameters": {
+        "content": "## 08 — FINALIZE\n\nSe cierra el ledger y se emite\n`RECORDING_ATTACHED`, con clave por `call_job_id`: una grabación por llamada,\ncontada una sola vez.\n\nLa nota del CRM, si la ruta la pide, va **en inglés**.",
+        "height": 320,
+        "width": 420,
+        "color": 3
+      }
+    },
+    {
+      "id": "99984ed2-102d-4221-9dd7-c120ef533ac3",
+      "name": "[DB] Mark Recording Sent",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        6960,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE wf_recording_ledger\n   SET telegram_sent = 1, state = 'SENT', completed_at = UTC_TIMESTAMP(),\n       updated_at = UTC_TIMESTAMP()\n WHERE recording_ref = ? AND state IN ('CLAIMED','UPLOADED')",
+        "options": {
+          "queryReplacement": "={{ $('[TELEGRAM] Prepare Recording Message').item.json.recording_ref }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "eb16dc5d-a5c1-4905-b802-01ecae1d9b14",
+      "name": "[DB] Record Event Recording Attached",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        7220,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO wf_events\n  (event_key, event_type, event_domain, occurred_at, call_job_id, lead_id,\n   country_iso, route_key, provider, conversation_id, followup_id,\n   duration_seconds, source_workflow, execution_id, metadata_json)\nVALUES (?, 'RECORDING_ATTACHED', 'RECORDING', UTC_TIMESTAMP(), ?, ?, ?, ?, ?, ?, ?,\n        ?, 'WF10', ?, ?)",
+        "options": {
+          "queryReplacement": "={{ \"RECORDING_ATTACHED:\" + ($('[TELEGRAM] Prepare Recording Message').item.json.call_job_id || $('[TELEGRAM] Prepare Recording Message').item.json.recording_ref) }},={{ $('[TELEGRAM] Prepare Recording Message').item.json.call_job_id }},={{ $('[TELEGRAM] Prepare Recording Message').item.json.lead_id }},={{ $('[TELEGRAM] Prepare Recording Message').item.json.country_iso }},={{ $('[TELEGRAM] Prepare Recording Message').item.json.route_key }},={{ $('[TELEGRAM] Prepare Recording Message').item.json.provider }},={{ $('[TELEGRAM] Prepare Recording Message').item.json.conversation_id }},={{ $('[TELEGRAM] Prepare Recording Message').item.json.followup_id }},={{ $('[TELEGRAM] Prepare Recording Message').item.json.duration_seconds }},={{ $('[TELEGRAM] Prepare Recording Message').item.json.execution_id }},={{ JSON.stringify({correlation: $('[TELEGRAM] Prepare Recording Message').item.json.correlation, source: $('[TELEGRAM] Prepare Recording Message').item.json.source}) }}"
+        }
+      },
+      "credentials": {
+        "mySql": {
+          "id": "2AQAc06GZ9AmB328",
+          "name": "Landmark MySQL STAGING"
+        }
+      }
+    },
+    {
+      "id": "3cf409d5-85c0-4062-bd55-c1878041f853",
+      "name": "[LOG] Recording Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7480,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ── LM CORE ─────────────────────────────────────────────────────────────────\n// Utilidades compartidas por los Code nodes del suite V2. Se INLINEA en cada\n// nodo que las necesita (n8n no tiene \"require\" de archivos del repo).\n// Fuente única: tools/js/lmcore.js — no editar la copia dentro del JSON.\n\nconst LM_ERROR_CODES = ['CONFIG_ERROR', 'AUTH_ERROR', 'VALIDATION_ERROR', 'PROVIDER_ERROR',\n                        'CRM_ERROR', 'RETRYABLE_ERROR', 'PERMANENT_ERROR'];\n\nfunction lmMaskPhone(p) {\n  const s = String(p || '').replace(/[^0-9]/g, '');\n  return s ? s.slice(-4) : '';\n}\n\n// Línea de log estándar (N8N_TEMPLATE_STANDARD §10). Nunca teléfono completo,\n// nunca tokens, nunca accessToken.\nfunction lmLog(wf, ctx, fields) {\n  const f = Object.assign({\n    call_job_id: null, route_key: null, country: null, provider: null, adapter_key: null,\n    lead_id: null, attempt: null, conversation_id: null, followup_id: null,\n    result: null, error_code: null, action: null\n  }, fields || {});\n  const parts = Object.keys(f).filter(k => f[k] !== null && f[k] !== undefined)\n    .map(k => `${k}=${f[k]}`);\n  const line = `[${wf}][exec=${ctx.execution_id || '-'}]` +\n               `[${f.route_key || '-'}] ` + parts.join(' ') +\n               (ctx.phone ? ` phone=...${lmMaskPhone(ctx.phone)}` : '');\n  console.log(line);\n  return line;\n}\n\nfunction lmNowIso() {\n  return new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n}\n\nfunction lmToSqlUtc(d) {\n  const x = (d instanceof Date) ? d : new Date(d);\n  if (isNaN(x)) return null;\n  return x.toISOString().slice(0, 19).replace('T', ' ');\n}\n\n// ── zona horaria sin librerías ──────────────────────────────────────────────\n// n8n corre sobre Node con ICU completo: Intl resuelve DST correctamente.\nfunction lmZonedParts(date, tz) {\n  const fmt = new Intl.DateTimeFormat('en-CA', {\n    timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n  const out = {};\n  for (const p of fmt.formatToParts(date)) {\n    if (p.type !== 'literal') out[p.type] = Number(p.value);\n  }\n  if (out.hour === 24) out.hour = 0;\n  return out;\n}\n\n// offset = (hora local expresada como si fuera UTC) - (instante real)\nfunction lmTzOffsetMs(date, tz) {\n  const p = lmZonedParts(date, tz);\n  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)\n         - (Math.floor(date.getTime() / 1000) * 1000);\n}\n\n// Hora de pared local -> instante UTC. Itera porque el offset depende del\n// instante (cambio de horario). Dos pasadas bastan para cualquier zona real.\nfunction lmWallToUtc(y, m, d, hh, mm, ss, tz) {\n  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);\n  let guess = wall;\n  for (let i = 0; i < 3; i++) {\n    const off = lmTzOffsetMs(new Date(guess), tz);\n    const next = wall - off;\n    if (next === guess) break;\n    guess = next;\n  }\n  return new Date(guess);\n}\n\n// Día de la semana LOCAL (0=lunes .. 6=domingo), para los días hábiles.\nfunction lmLocalWeekday(y, m, d) {\n  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=domingo\n  return (dow + 6) % 7;                                       // 0=lunes\n}\n\nfunction count(n) { try { return $(n).all().length; } catch (e) { return 0; } }\nconst s = { workflow: 'WF10', execution_id: $execution.id,\n            attached: count('[DB] Record Event Recording Attached'),\n            below_min: count('[DB] Record Event Recording Short'),\n            orphan: count('[LOG] Recording Orphan') };\nconsole.log('[WF10][exec=' + $execution.id + '] ' + JSON.stringify(s));\nreturn [{ json: s }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "[TRIGGER] Every Five Minutes": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Load Routes With Recordings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Load Routes With Recordings": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Load Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Load Settings": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Check Recording Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Check Recording Config": {
+      "main": [
+        [
+          {
+            "node": "[CONFIG] Config Is Usable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CONFIG] Config Is Usable": {
+      "main": [
+        [
+          {
+            "node": "[RECORDING] Collect Pending",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[LOG] Nothing To Process",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RECORDING] Collect Pending": {
+      "main": [
+        [
+          {
+            "node": "[RECORDING] Needs Conversation Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RECORDING] Needs Conversation Lookup": {
+      "main": [
+        [
+          {
+            "node": "[DB] Find Calls Without Recording",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Correlate Recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Find Calls Without Recording": {
+      "main": [
+        [
+          {
+            "node": "[RECORDING] Fetch ElevenLabs Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RECORDING] Fetch ElevenLabs Audio": {
+      "main": [
+        [
+          {
+            "node": "[DB] Correlate Recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Correlate Recording": {
+      "main": [
+        [
+          {
+            "node": "[DB] Load Recording Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Load Recording Job": {
+      "main": [
+        [
+          {
+            "node": "[RECORDING] Merge Correlation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RECORDING] Merge Correlation": {
+      "main": [
+        [
+          {
+            "node": "[RECORDING] Build Claim Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RECORDING] Build Claim Token": {
+      "main": [
+        [
+          {
+            "node": "[DB] Claim Recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Claim Recording": {
+      "main": [
+        [
+          {
+            "node": "[DB] Read Recording Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Read Recording Claim": {
+      "main": [
+        [
+          {
+            "node": "[RECORDING] Check Recording Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RECORDING] Check Recording Claim": {
+      "main": [
+        [
+          {
+            "node": "[RECORDING] Filter Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RECORDING] Filter Router": {
+      "main": [
+        [
+          {
+            "node": "[RECORDING] Should Upload To Crm",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Mark Recording Short",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[DB] Mark Recording Orphan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[LOG] Recording Unroutable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Mark Recording Short": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record Event Recording Short",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Mark Recording Orphan": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Recording Orphan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[RECORDING] Should Upload To Crm": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Get Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[TELEGRAM] Prepare Recording Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Get Token": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Attach Upload Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Attach Upload Token": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Upload Recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Upload Recording": {
+      "main": [
+        [
+          {
+            "node": "[CRM] Check Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[CRM] Check Upload": {
+      "main": [
+        [
+          {
+            "node": "[DB] Mark Recording Uploaded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Mark Recording Uploaded": {
+      "main": [
+        [
+          {
+            "node": "[TELEGRAM] Prepare Recording Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TELEGRAM] Prepare Recording Message": {
+      "main": [
+        [
+          {
+            "node": "[TELEGRAM] Send Recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TELEGRAM] Send Recording": {
+      "main": [
+        [
+          {
+            "node": "[DB] Mark Recording Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Mark Recording Sent": {
+      "main": [
+        [
+          {
+            "node": "[DB] Record Event Recording Attached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Recording Attached": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Recording Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[DB] Record Event Recording Short": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Recording Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LOG] Recording Orphan": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Recording Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[LOG] Recording Unroutable": {
+      "main": [
+        [
+          {
+            "node": "[LOG] Recording Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "saveManualExecutions": true,
+    "timezone": "UTC",
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "8capACjGjSnSRFBV",
+      "projectId": "NUSx6gZ8GtnKjd8W",
+      "project": {
+        "id": "NUSx6gZ8GtnKjd8W",
+        "name": "Land Market <lm2026market@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+        "createdAt": "2026-07-27T08:49:36.851Z",
+        "updatedAt": "2026-07-27T09:24:13.725Z"
+      },
+      "createdAt": "2026-09-22T07:32:49.279Z",
+      "updatedAt": "2026-09-22T07:32:49.279Z"
+    }
+  ],
+  "activeVersion": null
+}

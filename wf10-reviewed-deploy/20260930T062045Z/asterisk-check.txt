@@ -1,0 +1,11 @@
+== ASTERISK_WF10_FIX: CHECK (sólo lectura) ==
+Asterisk: Asterisk 20.6.0~dfsg+~cs6.13.40431414-2build5 built by nobody @ buildd.debian.org on a unknown running Linux on 2024-04-15 00:13:12 UTC   usuario del proceso: asterisk
+  YA APLICADO [from-client-elevenlabs] _+52XXXXXXXXXX prioridad 4
+  YA APLICADO [from-client-elevenlabs] _+91XXXXXXXXXX prioridad 4
+  YA APLICADO [from-client-elevenlabs] _+977XXXXXXXXXX prioridad 4
+  dialplan actual: 61 extensiones, 141 prioridades, 31 contextos
+• /usr/local/bin/wf10-enqueue.py existe y es ejecutable
+• asterisk puede escribir en /var/spool/wf10/queue
+• asterisk puede escribir /var/log/asterisk/wf10-enqueue.log
+Llamadas activas: 0 active calls
+ℹ️  Nada que cambiar (ya aplicado o sin contextos WF10).

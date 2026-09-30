@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Panel · Call Center Settings{% endblock %}
+
+{#  Solo rol master. wf_settings guarda PARÁMETROS OPERATIVOS del suite, nunca
+    secretos: el panel rechaza cualquier clave con pinta de secreto. Los
+    secretos viven en credentials de n8n; acá solo su referencia lógica. #}
+
+{% block content %}
+
+<nav class="countries" aria-label="Call Center">
+  <a class="chip" href="/callcenter">Switches</a>
+  <a class="chip" href="/callcenter/routes">Countries &amp; Routes</a>
+  <a class="chip" href="/callcenter/billing">Billing</a>
+  <a class="chip" href="/callcenter/legacy">Legacy Backup</a>
+  <a class="chip" href="/callcenter/analytics">Analytics</a>
+  <a class="chip" href="/callcenter/issues">Reconciliation</a>
+  <a class="chip on" href="/callcenter/settings">Settings</a>
+</nav>
+
+{% if err %}<p class="notice stale-warn">{{ err }}</p>{% endif %}
+
+<p class="cap" style="margin:0 0 12px">
+  Estos valores los lee n8n por <code>GET /api/settings</code>. Existen para que
+  ningún template lleve un umbral hardcodeado (N8N_TEMPLATE_STANDARD §1).
+  <b>Nunca guardar un secreto acá</b>: las API keys van en credentials de n8n y en
+  esta base solo viaja la referencia lógica (p. ej. <code>OKPAY_IN</code>).
+  Una fila marcada <span class="pill">default</span> no existe en la base y el
+  suite usa el valor por defecto de la aplicación.
+</p>
+
+{% for scope, rows in by_scope.items() %}
+<section class="panel">
+  <header class="panel-head"><div><span class="eyebrow">Scope</span><h2>{{ scope }}</h2></div></header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>Key</th><th>Value</th><th>Type</th><th>Description</th><th></th></tr></thead>
+      <tbody>
+      {% for s in rows %}
+        <tr>
+          <td class="mono"><b>{{ s.key }}</b>
+            {% if s.from_default %}<span class="pill">default</span>{% endif %}</td>
+          <td>
+            <form method="post" action="/callcenter/settings/save" style="display:flex; gap:6px">
+              <input type="hidden" name="setting_key" value="{{ s.key }}">
+              <input type="hidden" name="value_type" value="{{ s.value_type }}">
+              <input type="hidden" name="scope" value="{{ s.scope }}">
+              <input type="hidden" name="description" value="{{ s.description or '' }}">
+              <input class="mono" name="setting_value" value="{{ s.raw if s.raw is not none else '' }}"
+                     style="max-width:200px">
+              <button class="btn ghost" type="submit">Save</button>
+            </form>
+          </td>
+          <td class="mono">{{ s.value_type }}</td>
+          <td class="cap">{{ s.description or '' }}</td>
+          <td class="mono muted">{{ s.value }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}
+
+<!-- ══ ADAPTERS SOPORTADOS ═══════════════════════════════════════════ -->
+<section class="panel">
+  <header class="panel-head">
+    <div><span class="eyebrow">Read-only</span><h2>Adapters soportados</h2></div>
+  </header>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>adapter_key</th><th>Implementación</th><th>La ruta exige</th>
+                 <th>Endpoint del proveedor</th><th>Cuándo llega el resultado</th></tr></thead>
+      <tbody>
+      {% for key, a in adapters.items() %}
+        <tr>
+          <td class="mono"><b>{{ key }}</b></td>
+          <td class="cap">{{ a.label }}</td>
+          <td class="mono">{{ a.route_requires|join(' · ') }}</td>
+          <td class="mono">{{ 'obligatorio' if a.provider_requires_endpoint else 'no' }}</td>
+          <td class="cap">{{ a.result_timing }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="cap">
+    Este catálogo vive en <code>routes_config.ADAPTERS</code>, no en la base:
+    <code>adapter_key</code> es VARCHAR y no ENUM, pero un adapter que no esté acá
+    <b>no se puede activar</b> porque no hay código en WF2 que sepa llamarlo.
+    Agregar <span class="mono">PROVEEDOR2</span> con <span class="mono">ELEVENLABS_SIP</span>
+    no requiere tocar n8n. Ver <b>ADD_PROVIDER_GUIDE.md</b>.
+  </p>
+</section>
+
+{% endblock %}

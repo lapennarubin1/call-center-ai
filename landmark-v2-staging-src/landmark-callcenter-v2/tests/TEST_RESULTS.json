@@ -1,0 +1,183 @@
+{
+  "suites": [
+    {
+      "suite": "test_engine_parity_v2.py",
+      "origen": "v2",
+      "name": "MOTOR DE FOLLOW-UP · paridad JS/Python",
+      "pass": 21,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_package_hygiene_v2.py",
+      "origen": "v2",
+      "name": "higiene del paquete V2",
+      "pass": 21,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_crm_english_v2.py",
+      "origen": "v2",
+      "name": "CRM ENGLISH RULE",
+      "pass": 16,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_panel_base_regression_v2.py",
+      "origen": "v2",
+      "name": "no-regresión del panel base",
+      "pass": 21,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_billing_v2.py",
+      "origen": "v2",
+      "name": "facturación V2",
+      "pass": 32,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_legacy_backup_v2.py",
+      "origen": "v2",
+      "name": "Legacy Backup y modo de operación",
+      "pass": 29,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_payments_v2.py",
+      "origen": "v2",
+      "name": "pagos V2",
+      "pass": 31,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_workflow_standard_v2.py",
+      "origen": "v2",
+      "name": "N8N TEMPLATE STANDARD V2.2 · checklist de aceptación",
+      "pass": 24,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_workflow_sql_v2.py",
+      "origen": "v2",
+      "name": "SQL DE LOS WORKFLOWS · contra el esquema real",
+      "pass": 27,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_suite_behaviour_v2.py",
+      "origen": "v2",
+      "name": "MATRIZ DE COMPORTAMIENTO DEL SUITE V2",
+      "pass": 38,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_migration_suite_v2.py",
+      "origen": "v2",
+      "name": "MIGRACIÓN DEL SUITE V2 (MariaDB)",
+      "pass": 14,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_analytics_filters_v2.py",
+      "origen": "v2",
+      "name": "analytics V2 · filtros y export",
+      "pass": 19,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_interlock_v2.py",
+      "origen": "v2",
+      "name": "enclavamiento del modo de operación",
+      "pass": 34,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_real_interlock_v2.py",
+      "origen": "v2",
+      "name": "camino real del enclavamiento",
+      "pass": 32,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_panel_v2.py",
+      "origen": "v2",
+      "name": "LANDMARK PANEL V2",
+      "pass": 53,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_foundation_v2_2.py",
+      "origen": "fundacion",
+      "name": "FUNDACIÓN V2.2 (config · switches · claims)",
+      "pass": 112,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_ops_analytics_v2_2.py",
+      "origen": "fundacion",
+      "name": "EVENTOS Y ANALYTICS V2.2",
+      "pass": 42,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_http_v2_2.py",
+      "origen": "fundacion",
+      "name": "HTTP V2.2 (API · switches · permisos · UI · analytics)",
+      "pass": 15,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_migration_v2_2.py",
+      "origen": "fundacion",
+      "name": "MIGRACIÓN V2.2 (MariaDB)",
+      "pass": 13,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "suite": "test_concurrency_v2_2.py",
+      "origen": "fundacion",
+      "name": "CONCURRENCIA (MariaDB)",
+      "pass": 10,
+      "fail": 0,
+      "skip": 0
+    }
+  ],
+  "total": {
+    "pass": 604,
+    "fail": 0,
+    "skip": 0
+  },
+  "por_origen": {
+    "v2": {
+      "suites": 15,
+      "pass": 412,
+      "fail": 0,
+      "skip": 0
+    },
+    "fundacion": {
+      "suites": 5,
+      "pass": 192,
+      "fail": 0,
+      "skip": 0
+    }
+  }
+}

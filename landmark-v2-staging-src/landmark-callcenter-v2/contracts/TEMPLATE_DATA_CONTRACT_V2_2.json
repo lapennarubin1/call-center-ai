@@ -1,0 +1,347 @@
+{
+  "$schema_version": "2.2",
+  "$generated": "bloque 'route' GENERADO por routes_config.route_to_api() con el seed real + franjas 5/8/5, martes 14:30 Asia/Kolkata",
+  "$rules": [
+    "Todo item de un template V2 lleva estos bloques. Un campo sin valor viaja como null, nunca ausente.",
+    "route_key obligatorio desde ROUTING. Sin route_key → VALIDATION_ERROR (LEGACY_NO_ROUTE); jamás se reconstruye por prefijo.",
+    "phone en E.164 con '+'. La conversión al formato del proveedor ocurre DENTRO del adapter.",
+    "provider = proveedor COMERCIAL (proveedor1). adapter_key = implementación técnica (ELEVENLABS_SIP). No se confunden.",
+    "Ningún secreto viaja en este contrato.",
+    "Todo timestamp en UTC ISO-8601 con Z."
+  ],
+  "correlation": {
+    "workflow": "TEMPLATE_WF2_CALL_DISPATCHER_V2",
+    "workflow_version": "2.0.0",
+    "execution_id": "n8n-exec-88213",
+    "call_job_id": "IN_PROVEEDOR1-20260915T090000Z-7f3a9c",
+    "$call_job_id_format": "{route_key}-{UTC compacto}-{6 hex}. PK lógica del despacho; viaja en dynamic_variables.",
+    "emitted_at": "2026-09-15T09:00:00Z"
+  },
+  "route": {
+    "route_id": 1,
+    "route_key": "IN_PROVEEDOR1",
+    "status": "ACTIVE",
+    "iso": "IN",
+    "country": "India",
+    "provider": "proveedor1",
+    "adapter_key": "ELEVENLABS_SIP",
+    "provider_endpoint": null,
+    "priority": 10,
+    "switches": {
+      "country_enabled": true,
+      "provider_enabled": true,
+      "route_enabled": true
+    },
+    "ready": true,
+    "country_ready": true,
+    "config_issues": [],
+    "blocked_by": [],
+    "calling_now": true,
+    "capacity_now": 8,
+    "capacity_default": 6,
+    "capacity_source": {
+      "local_time": "14:30",
+      "local_day": "tue",
+      "mode": "window",
+      "window_id": 2,
+      "window": "14:00-15:00",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri"
+      ],
+      "blocked_by": []
+    },
+    "dial_prefix": "+91",
+    "national_number_len": 10,
+    "language": "hi",
+    "timezone": "Asia/Kolkata",
+    "caller_id": null,
+    "elevenlabs_agent_id": "agent_5701kramx550e3qs2tm11661b48p",
+    "elevenlabs_phone_number_id": "phnum_7801kyktmabxembteqce884tanb6",
+    "followup_policy_key": "STANDARD_CALL_RETRY",
+    "followup_policy": {
+      "policy_version": 1,
+      "no_answer_sip_codes": [
+        "603",
+        "408",
+        "486"
+      ],
+      "result_aliases": {
+        "BUSY": "NO_ANSWER",
+        "VOICEMAIL": "NO_ANSWER"
+      },
+      "rules": [
+        {
+          "result": "NO_ANSWER",
+          "attempt": 1,
+          "action": "RETRY",
+          "delay": "+2h"
+        },
+        {
+          "result": "NO_ANSWER",
+          "attempt": 2,
+          "action": "RETRY",
+          "delay": "+3h"
+        },
+        {
+          "result": "NO_ANSWER",
+          "attempt": 3,
+          "action": "RETRY",
+          "delay": "+2bd"
+        },
+        {
+          "result": "NO_ANSWER",
+          "attempt": 4,
+          "action": "RETRY",
+          "delay": "+2h"
+        },
+        {
+          "result": "NO_ANSWER",
+          "attempt": 5,
+          "action": "RETRY",
+          "delay": "+3h"
+        },
+        {
+          "result": "NO_ANSWER",
+          "attempt": 6,
+          "action": "RETRY",
+          "delay": "+3bd"
+        },
+        {
+          "result": "NO_ANSWER",
+          "attempt": 7,
+          "action": "RETRY",
+          "delay": "+2h"
+        },
+        {
+          "result": "NO_ANSWER",
+          "attempt": 8,
+          "action": "RETRY",
+          "delay": "+3h"
+        },
+        {
+          "result": "NO_ANSWER",
+          "attempt": 9,
+          "action": "CLOSE",
+          "delay": null
+        },
+        {
+          "result": "NO_ANSWER",
+          "attempt": "*",
+          "action": "CLOSE",
+          "delay": null
+        },
+        {
+          "result": "ANSWERED",
+          "attempt": "*",
+          "action": "COMPLETE",
+          "delay": null
+        },
+        {
+          "result": "CALLBACK",
+          "attempt": "*",
+          "action": "CALLBACK",
+          "delay": null
+        },
+        {
+          "result": "WRONG_NUMBER",
+          "attempt": "*",
+          "action": "CLOSE",
+          "delay": null
+        },
+        {
+          "result": "DNC",
+          "attempt": "*",
+          "action": "CLOSE",
+          "delay": null
+        }
+      ],
+      "callback_default": "+24h",
+      "unmatched_action": "NONE"
+    },
+    "recording": {
+      "enabled": true,
+      "min_secs": 60,
+      "upload_crm": true,
+      "telegram": true
+    },
+    "recording_enabled": true,
+    "recording_min_secs": 60,
+    "telegram": {
+      "account": [
+        "-1004454561082",
+        "-1003984044945"
+      ],
+      "recording": [
+        "-1004454561082",
+        "-1003984044945"
+      ]
+    },
+    "tools": {
+      "CALLBACK": {
+        "tool_type": "CALLBACK",
+        "enabled": false,
+        "mode": "CONFIG_ROUTER",
+        "provider_key": null,
+        "endpoint": null,
+        "http_method": null,
+        "credential_ref": null,
+        "market": null,
+        "currency": null,
+        "config": {}
+      },
+      "CREATE_ACCOUNT": {
+        "tool_type": "CREATE_ACCOUNT",
+        "enabled": true,
+        "mode": "CONFIG_ROUTER",
+        "provider_key": "cashstudio",
+        "endpoint": null,
+        "http_method": null,
+        "credential_ref": "LEADSTUDIO_API",
+        "market": "IND",
+        "currency": null,
+        "config": {
+          "portal_url": "https://crm.landmarkmarkets.in/"
+        }
+      },
+      "CREATE_PAYMENT_LINK": {
+        "tool_type": "CREATE_PAYMENT_LINK",
+        "enabled": true,
+        "mode": "CONFIG_ROUTER",
+        "provider_key": "okpay",
+        "endpoint": null,
+        "http_method": null,
+        "credential_ref": "OKPAY_IN",
+        "market": null,
+        "currency": "INR",
+        "config": {
+          "min_amount": 2000,
+          "max_amount": 500000
+        }
+      }
+    },
+    "archived_at": null
+  },
+  "route_example_blocked_by_country_switch": {
+    "route_key": "IN_STRINGEE",
+    "switches": {
+      "country_enabled": false,
+      "provider_enabled": true,
+      "route_enabled": true
+    },
+    "ready": true,
+    "country_ready": true,
+    "calling_now": false,
+    "capacity_now": 0,
+    "blocked_by": [
+      "COUNTRY_DISABLED"
+    ]
+  },
+  "$blocked_by_enum": [
+    "COUNTRY_DISABLED",
+    "COUNTRY_ARCHIVED",
+    "PROVIDER_DISABLED",
+    "ROUTE_DISABLED",
+    "ROUTE_ARCHIVED",
+    "ROUTE_NOT_READY",
+    "COUNTRY_NOT_READY",
+    "OUTSIDE_SCHEDULE",
+    "ZERO_CAPACITY",
+    "INVALID_TIMEZONE"
+  ],
+  "lead": {
+    "lead_id": "8f2c1a55-4e2b-4a90-9d11-1c77aa03be21",
+    "full_name": "Rahul Sharma",
+    "phone": "+919876543210",
+    "phone_last4": "3210",
+    "language": "hi",
+    "status": "NOT_CONTACTED",
+    "crm_attempts": 2,
+    "do_not_call": false
+  },
+  "job": {
+    "$table": "wf_call_jobs",
+    "attempt": 3,
+    "$attempt": "intento de NEGOCIO = call_jobs.next_attempt(lead_id, crm_attempts): retoma un intento RELEASED; si no, max(CRM, local)+1",
+    "tech_retry_count": 0,
+    "$tech_retry_count": "reintentos TÉCNICOS del mismo intento; no los ve la política",
+    "state": "DISPATCHED",
+    "$states": [
+      "CLAIMED",
+      "DISPATCHING",
+      "DISPATCHED",
+      "UNKNOWN",
+      "RELEASED",
+      "FAILED",
+      "COMPLETED",
+      "NEEDS_RECONCILIATION"
+    ],
+    "$inflight_states": [
+      "CLAIMED",
+      "DISPATCHING",
+      "DISPATCHED",
+      "UNKNOWN",
+      "NEEDS_RECONCILIATION"
+    ],
+    "claimed": true,
+    "$claim_rule": "INSERT IGNORE + relectura de call_job_id. Nunca affectedRows.",
+    "conversation_id": "conv_01k5x8y2z3abcdef",
+    "provider_job_id": null,
+    "provider_call_id": null,
+    "dispatch_http_status": 200,
+    "error_class": null,
+    "$error_class": [
+      "TECHNICAL",
+      "AMBIGUOUS",
+      "PERMANENT"
+    ]
+  },
+  "dispatch_result": "→ PROVIDER_ADAPTER_CONTRACT_V2_2.json · dispatch_result",
+  "call_result": "→ FOLLOWUP_ENGINE_CONTRACT_V2_2.json · input",
+  "decision": {
+    "result": "NO_ANSWER",
+    "sip_code": null,
+    "effective_result": "NO_ANSWER",
+    "attempt": 3,
+    "action": "RETRY",
+    "delay": "+2bd",
+    "schedule_next_at": "2026-09-22T04:30:00Z",
+    "rule_matched": {
+      "result": "NO_ANSWER",
+      "attempt": 3
+    },
+    "crm_status_hint": "NO_ANSWER",
+    "$example": "attempt 3, NO_ANSWER, viernes 10:00 Kolkata → martes 10:00 local"
+  },
+  "events": "→ ANALYTICS_EVENT_CONTRACT_V2_2.json",
+  "error": {
+    "error": false,
+    "error_code": null,
+    "error_detail": null,
+    "$error_code_enum": [
+      "CONFIG_ERROR",
+      "AUTH_ERROR",
+      "VALIDATION_ERROR",
+      "PROVIDER_ERROR",
+      "CRM_ERROR",
+      "RETRYABLE_ERROR",
+      "PERMANENT_ERROR"
+    ]
+  },
+  "$api_endpoints": {
+    "GET /api/routes/active": "rutas que deben llamar AHORA (WF2). Fail-closed: los 3 interruptores + READY + horario.",
+    "GET /api/routes/active?all=1": "todas las no archivadas, con blocked_by (WF14, panel).",
+    "GET /api/routes/active?include_archived=1": "también archivadas (reconciliación).",
+    "GET /api/routes/by-key/{route_key}": "una ruta, AUNQUE esté archivada (WF9, WF10, motor).",
+    "GET /api/countries/{iso}/tools": "tools enabled del PAÍS + country_enabled/country_ready (WF3/WF7).",
+    "$auth": "X-Service-Token. Solo red interna Docker/VPS o HTTPS; HTTP plano desde IP pública → 403."
+  },
+  "$pending_verification": [
+    "PV-3: el worker Stringee reenvía lead_id (mínimo imprescindible) — ver STRINGEE_WORKER_AUDIT_V2_2.md",
+    "PV-11: enum de outcome/callStatus de POST /followups",
+    "PV-1: si LeadStudio mueve status/attempts al recibir un followup"
+  ]
+}

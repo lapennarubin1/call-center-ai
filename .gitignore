@@ -1,3 +1,6 @@
+.cache/
+.npm/
+.local/
 node_modules/
 .env
 *.log

@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Panel · Legacy Backup{% endblock %}
+
+{#  Solo master (§54). Esta pantalla NO reemplaza al Call Center: los grupos,
+    sus workflows, sus estados ON/OFF y sus horarios se siguen gestionando en
+    /callcenter, que no se ha tocado. Aquí sólo se clasifica cada grupo y se
+    cambia el modo de operación, con el enclavamiento que impide que los dos
+    sistemas llamen a la vez (§49, §50). #}
+
+{% block content %}
+
+<nav class="countries" aria-label="Call Center">
+  <a class="chip" href="/callcenter">Switches</a>
+  <a class="chip" href="/callcenter/routes">Countries &amp; Routes</a>
+  <a class="chip" href="/callcenter/billing">Billing</a>
+  <a class="chip on" href="/callcenter/legacy">Legacy Backup</a>
+  <a class="chip" href="/callcenter/analytics">Analytics</a>
+  <a class="chip" href="/callcenter/issues">Reconciliation</a>
+  <a class="chip" href="/callcenter/settings">Settings</a>
+</nav>
+
+{% if err %}<p class="notice stale-warn">{{ err }}</p>{% endif %}
+{% if ok %}<p class="notice">{{ ok }}</p>{% endif %}
+
+<section class="panel">
+  <header class="panel-head">
+    <h2>Operating mode</h2>
+    <span class="pill {{ 'on' if mode.mode == 'V2_PRIMARY' else 'warn' }}">
+      {{ mode.label|upper }}</span>
+  </header>
+
+  <p class="cap">
+    This decides which system is allowed to call customers. It is never both:
+    two dispatchers running at once means the same person is called twice,
+    gets two accounts, or is sent two payment links.
+    {% if mode.changed_at %}
+      Last changed {{ mode.changed_at }} by {{ mode.changed_by }}.
+    {% endif %}
+  </p>
+
+  <table class="grid">
+    <tbody>
+      <tr><th>V2 routes able to call right now</th>
+        <td>
+          {% if live_routes %}
+            {% for r in live_routes %}<code>{{ r }}</code> {% endfor %}
+          {% else %}
+            <span class="cap">none — V2 is not calling</span>
+          {% endif %}
+        </td></tr>
+      <tr><th>Legacy groups that conflict</th>
+        <td>
+          {% for g in groups if g.conflicts %}<code>{{ g.label }}</code> {% else %}
+            <span class="cap">none</span>{% endfor %}
+        </td></tr>
+      <tr><th>Legacy groups that can coexist</th>
+        <td>
+          {% for g in groups if not g.conflicts %}<code>{{ g.label }}</code> {% else %}
+            <span class="cap">none</span>{% endfor %}
+        </td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="cap">Switch to {{ mode.other }}</h3>
+
+  {% if preflight.blockers %}
+  <p class="notice stale-warn"><b>Cannot switch yet.</b></p>
+  <ul class="issues">
+    {% for b in preflight.blockers %}<li>{{ b }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if preflight.actions %}
+  <p class="cap"><b>What you have to do first:</b></p>
+  <ul class="issues">
+    {% for a in preflight.actions %}<li>{{ a }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if preflight.warnings %}
+  <ul class="issues">
+    {% for w in preflight.warnings %}<li class="cap">{{ w }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  <form method="post" action="/callcenter/legacy/mode">
+    <input type="hidden" name="to_mode" value="{{ mode.other }}">
+    <label>Type <code>{{ mode.confirmation_phrase }}</code> to confirm
+      <input name="confirmation" autocomplete="off"
+             placeholder="{{ mode.confirmation_phrase }}"></label>
+    <label>Reason <input name="reason" placeholder="why you are switching"></label>
+    <button class="btn danger" {% if preflight.blockers %}disabled{% endif %}>
+      Switch to {{ mode.other }}</button>
+  </form>
+  <p class="cap">
+    Switching the mode does not start or stop any workflow by itself. It records
+    which system is in charge and <b>refuses to change while the other one could
+    still be calling</b> — verified against n8n, not taken on trust. Turning
+    workflows on and off stays where it always was, in
+    <a href="/callcenter">Call Center</a>.
+  </p>
+  <p class="cap">
+    While <b>V2_PRIMARY</b> is selected, a legacy group that dispatches, follows
+    up, opens accounts, takes payments or processes call results
+    <b>cannot be turned on</b> — not manually, not by Turn ON all, and not by its
+    schedule. The attempt is refused and recorded. While
+    <b>LEGACY_BACKUP</b> is selected, V2 routes return zero callable routes to
+    WF2, even if their country, provider and route are all enabled.
+  </p>
+</section>
+
+<section class="panel">
+  <header class="panel-head"><h2>Legacy groups</h2></header>
+  <p class="cap">
+    Not every legacy workflow conflicts with V2. A job that only mirrors CRM
+    data into MySQL is idempotent and can keep running; one that places calls
+    cannot. A group that has not been classified is treated as conflicting.
+  </p>
+  {% if live and not live.ok %}
+  <p class="notice stale-warn">
+    <b>Cannot reach n8n</b> ({{ live.error }}). The live state of these groups is
+    unknown, so switching back to V2 is blocked: not knowing whether the legacy
+    dispatcher is on is not the same as knowing it is off.
+  </p>
+  {% endif %}
+  <table class="grid">
+    <thead><tr><th>Group</th><th>Workflows</th><th>Running now</th>
+      <th>Category</th><th>Coexists with V2</th><th>Why</th>
+      <th>Classify</th></tr></thead>
+    <tbody>
+    {% for g in groups %}
+      <tr>
+        <td><b>{{ g.label }}</b></td>
+        <td>{{ g.workflow_count }}</td>
+        <td>
+          {% set lv = (live.groups | selectattr('label','equalto',g.label) | list | first) if live and live.ok else none %}
+          {% if lv is none %}<span class="cap">unknown</span>
+          {% elif lv.is_on %}<span class="pill warn">ON</span>
+            <span class="cap">{{ lv.active_count }} workflow(s)</span>
+          {% else %}<span class="cap">off</span>{% endif %}
+        </td>
+        <td>{% if g.classified %}{{ g.category }}
+            {% else %}<span class="pill warn">UNKNOWN</span>{% endif %}</td>
+        <td>{{ 'yes' if g.coexists_with_v2 else 'no' }}</td>
+        <td class="cap">{{ g.rationale or g.category_help }}</td>
+        <td>
+          <form method="post" action="/callcenter/legacy/classify" class="row">
+            <input type="hidden" name="label" value="{{ g.label }}">
+            <select name="category">
+              {% for c in categories %}
+              <option value="{{ c }}" {% if c == g.category %}selected{% endif %}>{{ c }}</option>
+              {% endfor %}
+            </select>
+            <input name="rationale" placeholder="why" size="18">
+            <button class="btn small">Save</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="cap">
+        No legacy switch groups found in this database.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <header class="panel-head"><h2>Compatibility matrix</h2></header>
+  <table class="grid">
+    <thead><tr><th>Category</th><th>Coexists with V2</th><th>Groups</th>
+      <th>Why</th></tr></thead>
+    <tbody>
+      {% for c in matrix.categories %}
+      <tr>
+        <td><b>{{ c.category }}</b></td>
+        <td>{{ 'yes' if c.coexists_with_v2 else 'no' }}</td>
+        <td>{% for g in c.groups %}<code>{{ g }}</code> {% else %}
+            <span class="cap">—</span>{% endfor %}</td>
+        <td class="cap">{{ c.help }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <header class="panel-head"><h2>Operating mode history</h2></header>
+  <table class="grid">
+    <thead><tr><th>When</th><th>What</th><th>From</th><th>To</th>
+      <th>Reason</th><th>By</th></tr></thead>
+    <tbody>
+      {% for a in audit %}
+      <tr><td>{{ a.changed_at }}</td><td>{{ a.action }} {{ a.scope_ref }}</td>
+        <td>{{ a.old_value or '—' }}</td><td>{{ a.new_value or '—' }}</td>
+        <td>{{ a.reason or '—' }}</td><td>{{ a.actor }}</td></tr>
+      {% else %}
+      <tr><td colspan="6" class="cap">No mode changes recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% endblock %}

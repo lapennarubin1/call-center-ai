@@ -1,0 +1,2 @@
+root     1779424  0.0  0.6 11885324 112244 ?     Ssl  Sep14   4:25 /root/.nvm/versions/node/v22.23.2/bin/node /opt/stringee-ai-worker/server.js
+root     4000584  0.0  0.0   7080  2348 pts/0    S+   09:20   0:00 grep --color=auto -i stringee

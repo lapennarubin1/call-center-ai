@@ -1,0 +1,1965 @@
+{
+  "id": "wNUh5ugIlHCyShyI",
+  "name": "INDIA MULTI-PAIS WF9 — Post-Call Handler (100% LeadStudio API, sin Sheets) — FIX status del lead",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Vincular conversation_id de ElevenLabs a stringee_calls (solo Stringee = bare digits)\nconst d = $input.first().json;\n\n// Stringee usa bare digits (sin +), Asterisk usa E.164 (con +)\nconst isStringee = d.phone && !String(d.phone).startsWith('+');\n\nif (d.country !== 'india' || !isStringee || !d.elevenlabs_call_id) {\n  return [{ json: { skip: true, reason: 'no es Stringee o no aplica (country=' + d.country + ', phone_format=' + (String(d.phone).startsWith('+') ? 'E164' : 'bare') + ')' } }];\n}\n\nconst phoneDigits = String(d.phone).replace(/[^0-9]/g, '');\nconst last10 = phoneDigits.slice(-10);\nconst convId = String(d.elevenlabs_call_id).replace(/'/g, \"''\");\n\nconst sql = `UPDATE stringee_calls\n  SET conversation_id = '${convId}'\n  WHERE RIGHT(phone,10) = '${last10}'\n    AND conversation_id IS NULL\n    AND answered = 1\n  ORDER BY start_time DESC\n  LIMIT 1;`;\n\nconsole.log('🔗 Stringee Conv-ID SQL (webhook):', sql.slice(0, 150));\nreturn [{ json: { sql, phone: d.phone, last10, convId, provider: 'stringee' } }];"
+      },
+      "id": "bdd15dd2-2046-4ab3-b758-f96be6ff9f76",
+      "name": "🔗 Build Stringee Conv-ID SQL (webhook)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        37952,
+        5712
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "fab4ea18-3fe4-48b0-a5fb-29762b84d7a5",
+      "name": "💾 Update stringee_calls conv_id (webhook)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        38160,
+        5712
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "disabled": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vincula conversation_id a stringee_calls — consume RAW de ElevenLabs (sin filtro de lead_id)\n// Esto es independiente del filtro de Sheet (que descarta calls sin lead_id/sourceSheet)\nconst convos = $input.all().map(i => i.json);\nconst results = [];\n\nfor (const c of convos) {\n  const d = c.data || c;\n\n  const convId = String(d.conversation_id || '');\n  if (!convId) continue;\n\n  const dyn = d.conversation_initiation_client_data?.dynamic_variables || {};\n  const phone = String(dyn.phone || '').replace(/[^0-9+]/g, '');\n  let country = String(dyn.country || '').trim().toLowerCase();\n  if (['in'].includes(country)) country = 'india';\n  if (['np'].includes(country)) country = 'nepal';\n  if (!country) {\n    if (phone.startsWith('+977') || phone.startsWith('977')) country = 'nepal';\n    else if (phone.startsWith('+91') || phone.startsWith('91')) country = 'india';\n  }\n\n  // Stringee = bare digits (sin +), Asterisk = E.164 (con +)\n  const isStringee = phone && !phone.startsWith('+');\n\n  if (country !== 'india' || !isStringee || !phone) continue;\n\n  const phoneDigits = phone.replace(/[^0-9]/g, '');\n  const last10 = phoneDigits.slice(-10);\n  const convIdEscaped = convId.replace(/'/g, \"''\");\n\n  const sql = `UPDATE stringee_calls\n    SET conversation_id = '${convIdEscaped}'\n    WHERE RIGHT(phone,10) = '${last10}'\n      AND conversation_id IS NULL\n      AND answered = 1\n    ORDER BY start_time DESC\n    LIMIT 1;`;\n\n  results.push({ json: { sql, phone, last10, convId, provider: 'stringee' } });\n}\n\nif (results.length) console.log(`🔗 Stringee Conv-ID SQL (polling): ${results.length} filas a vincular`);\nreturn results.length ? results : [{ json: { skip: true, reason: 'ninguna conversación raw es Stringee sin vincular' } }];"
+      },
+      "id": "c73905f5-9135-4c5d-9c56-728cc6c8aaab",
+      "name": "🔗 Build Stringee Conv-ID SQL (polling)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38352,
+        6544
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "917f9c8f-0371-4de9-90ee-d9f2e44ec2fa",
+      "name": "💾 Update stringee_calls conv_id (polling)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        38624,
+        6544
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "disabled": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "elevenlabs-postcall-webhook",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "f51048cd-fe0f-4f8f-8919-f5b5338fc33e",
+      "name": "📥 ElevenLabs Post-Call Webhook4",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        37520,
+        5520
+      ],
+      "webhookId": "elevenlabs-call-webhook",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "id": "986e24d6-637b-4ee3-b656-9f91cb73ce09",
+      "name": "✅ Respond OK4",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        37728,
+        5360
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst raw = item.json;\n\n// ── 1. Recuperar el body CRUDO si el webhook tiene \"Raw Body\" activado ──────\n// (necesario para verificar la firma HMAC de forma fiable)\nlet rawStr = '';\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    rawStr = Buffer.from(item.binary.data.data, 'base64').toString('utf8');\n  }\n} catch (e) { /* sin rawBody, seguimos con el body parseado */ }\n\nlet body = raw.body || raw;\nif (rawStr) { try { body = JSON.parse(rawStr); } catch (e) {} }\n\n// ── 2. Verificación HMAC (formato ElevenLabs: t=timestamp,v0=firma) ─────────\nconst crypto = require('crypto');\nconst secret = 'wsec_98c0a66b3f1df7af8eaf22503381cb78ce648dc63da8eead8ce3dafc7a95b630';\nconst headers = raw.headers || {};\nconst sigHeader = String(headers['elevenlabs-signature'] || headers['ElevenLabs-Signature'] || '');\nif (sigHeader) {\n  const parts = Object.fromEntries(sigHeader.split(',').map(p => p.split('=')));\n  const timestamp = parts['t'] || '';\n  const receivedSig = parts['v0'] || parts['v1'] || '';\n  if (timestamp && Math.abs(Date.now() / 1000 - Number(timestamp)) > 1800) {\n    throw new Error('Webhook timestamp demasiado viejo (>30min) — posible replay');\n  }\n  if (rawStr && receivedSig) {\n    const expected = crypto.createHmac('sha256', secret).update(timestamp + '.' + rawStr).digest('hex');\n    if (receivedSig !== expected) {\n      console.warn('⚠️ HMAC no coincide — procesando igual. esperado=' + expected + ' recibido=' + receivedSig + ' rawLen=' + rawStr.length);\n    }\n  } else if (receivedSig) {\n    console.warn('⚠️ HMAC no verificable sin Raw Body — procesando igual. Activa \"Raw Body\" en el nodo Webhook.');\n  }\n}\n\nconst d = body.data || body;\n\nconst conversationId = String(d.conversation_id || d.conversationId || '');\nconst callSuccessful = String(d.analysis?.call_successful || d.call_successful || '').toLowerCase();\nconst summary        = d.analysis?.transcript_summary || d.summary || d.conversation_summary || '';\nconst durationSecs   = Number(d.metadata?.call_duration_secs || d.duration_secs || 0);\nconst callEndedBy    = String(d.metadata?.termination_reason || d.call_ended_by || '').toLowerCase();\n\nlet transcript = '';\nif (Array.isArray(d.transcript)) {\n  transcript = d.transcript.map(t => `${t.role === 'agent' ? '🤖' : '👤'} ${t.message || ''}`).join(' | ');\n} else {\n  transcript = typeof d.transcript === 'string' ? d.transcript : JSON.stringify(d.transcript || '');\n}\n\nconst dc = d.analysis?.data_collection_results\n        || d.analysis?.data_collection\n        || d.data_collection_results\n        || d.data_collection\n        || {};\n\nconst interested    = String(dc.user_interest?.value      || '').toLowerCase();\nconst fullName      = String(dc.full_name?.value           || '').replace(/^=/, '').trim();\nconst callbackReq   = String(dc.callback_requested?.value  || '').toLowerCase();\nconst callbackDate  = String(dc.callback_date?.value       || '');\nconst accountOpened = String(dc.account_requested?.value   || '').toLowerCase();\n\nconst dynVars = d.conversation_initiation_client_data?.dynamic_variables\n             || d.metadata?.dynamic_variables\n             || body.conversation_initiation_client_data?.dynamic_variables\n             || {};\nconst leadId = String(dynVars.lead_id || d.lead_id || body.lead_id || '');\nconst phone  = String(dynVars.phone   || d.phone   || '').replace(/[^0-9+]/g, '');\n\nfunction canonicalCountry(rawCountry, rawPhone='') {\n  const c = String(rawCountry || '').trim().toLowerCase();\n  if (['india','in'].includes(c)) return 'india';\n  if (['nepal','np'].includes(c)) return 'nepal';\n  if (['slot3'].includes(c)) return 'slot3';\n  if (['slot4'].includes(c)) return 'slot4';\n  const p = String(rawPhone || '').replace(/[^0-9+]/g,'');\n  if (p.startsWith('+977') || p.startsWith('977')) return 'nepal';\n  if (p.startsWith('+91') || p.startsWith('91')) return 'india';\n  return '';\n}\nconst country = canonicalCountry(dynVars.country || d.country || body.country, phone);\nconst sourceSheet = String(\n  dynVars._source_sheet ||\n  ({india:'leads',nepal:'leads nepal',slot3:'leads slot3',slot4:'leads slot4'})[country] ||\n  ''\n);\n\nconst callAttempts = dynVars.call_attempts !== undefined ? Number(dynVars.call_attempts) : undefined;\n\nconst isVoicemail =\n  callEndedBy.includes('voicemail') ||\n  String(summary).toLowerCase().includes('voicemail') ||\n  (durationSecs > 0 && durationSecs < 8 && callSuccessful !== 'success');\n\nlet status, last_call_status, notes;\n\nif (!conversationId) {\n  status = 'FAILED'; last_call_status = 'NO_CONV_ID';\n  notes = 'Webhook sin conversation_id';\n} else if (durationSecs === 0) {\n  status = 'NO_ANSWER'; last_call_status = 'NO_ANSWER';\n  notes = 'No contestó (duración 0s) | fin: ' + callEndedBy;\n} else if (callSuccessful === 'failure' || callSuccessful === 'failed') {\n  status = 'FAILED'; last_call_status = 'FAILED';\n  notes = 'Llamada fallida: ' + (callEndedBy || 'sin razón');\n} else if (isVoicemail) {\n  status = 'VOICEMAIL'; last_call_status = 'VOICEMAIL';\n  notes = '📵 Buzón de voz | duración: ' + durationSecs + 's';\n} else if (callbackReq === 'true' || callbackReq === 'yes') {\n  status = 'SCHEDULED'; last_call_status = 'CALLBACK_REQUESTED';\n  notes = '📅 Pidió callback | ' + String(summary).slice(0, 200);\n} else {\n  status = 'SUCCESSFUL'; last_call_status = 'COMPLETED';\n  notes = 'Contestó, conversación completa | ' + String(summary).slice(0, 200);\n}\n\nconsole.log('📞 Post-call | lead:', leadId, '| status:', status, '| dur:', durationSecs + 's', '| conv:', conversationId);\n\nconst out = {\n  lead_id:              leadId,\n  country,\n  _source_country: country,\n  _source_sheet: sourceSheet,\n  phone,\n  status,\n  last_call_status,\n  notes,\n  elevenlabs_call_id:   conversationId,\n  conversation_summary: String(summary).slice(0, 500),\n  full_name:            fullName || null,\n  interested:           (interested === 'interested' || interested === 'true' || interested === 'yes') ? 'TRUE' : '',\n  callback_requested:   (callbackReq === 'true' || callbackReq === 'yes') ? 'TRUE' : '',\n  callback_date:        callbackDate,\n  account_opened:       (accountOpened === 'yes' || accountOpened === 'true') ? 'PENDING' : '',\n  duration_secs:        durationSecs,\n  transcript:           transcript.slice(0, 1000),\n  last_call_time:       new Date().toISOString()\n};\nif (callAttempts !== undefined && !Number.isNaN(callAttempts)) out.call_attempts = callAttempts;\nif (!out.full_name) delete out.full_name;\nif (!out.callback_date) delete out.callback_date;\n\nreturn [{ json: out }];\n"
+      },
+      "id": "58c050a5-7e20-4378-b5dd-5b82e6d61ca9",
+      "name": "⚙️ Parse Post-Call Data4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        37728,
+        5520
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "lead-check",
+              "leftValue": "={{ $json.lead_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "route-check",
+              "leftValue": "={{ $json._source_sheet }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "04781f69-51ba-4d2a-a944-4291729b9838",
+      "name": "🔍 Has lead + safe route?4",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        38400,
+        5520
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const d=$input.first().json||{};\nconsole.log('⚠️ Post-call skipped safely | lead_id:', d.lead_id || '(missing)', '| country:', d.country || '(unknown)', '| source_sheet:', d._source_sheet || '(missing)', '| conv_id:', d.elevenlabs_call_id || '');\nreturn [{json:{...d,_skipped:true,_skip_reason:!d.lead_id?'missing lead_id':'missing safe country route'}}];"
+      },
+      "id": "181ff095-048a-4e0a-863f-315b14e30b19",
+      "name": "📝 Log Missing Lead/Route4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38592,
+        5728
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconsole.log('✅ Post-call processed | lead_id:', d.lead_id, '| status:', d.status);\nreturn [{ json: { processed: true, lead_id: d.lead_id, status: d.status } }];"
+      },
+      "id": "35eac7fd-bc09-451a-885f-54d3ebe6dfa8",
+      "name": "📝 Log Success4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40592,
+        5728
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "741575bf-d6ad-41b5-9852-30a43c4d853c",
+      "name": "Polling Cada 5min (última hora)4",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        37888,
+        6320
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const KEY = 'sk_79048a9776812db4416e5c690d0c047132d565fee7d43acd';\n\nconst AGENT_IDS = [\n  'agent_5701kramx550e3qs2tm11661b48p',\n  'agent_7601m209ntj3fyrbg0dcq6w507yq'\n];\n\nconst WINDOW_MIN = 20;\nconst after = Math.floor(Date.now()/1000) - (WINDOW_MIN * 60);\nconst H = { 'xi-api-key': KEY };\nconst base = 'https://api.elevenlabs.io/v1/convai/conversations';\nconst byId = new Map();\n\nfor (const agentId of [...new Set(AGENT_IDS.filter(Boolean))]) {\n  let cursor = '';\n  let page = 0;\n  do {\n    let url = `${base}?page_size=100&summary_mode=include&call_start_after_unix=${after}&agent_id=${encodeURIComponent(agentId)}`;\n    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;\n    const res = await this.helpers.httpRequest({ method: 'GET', url, headers: H, json: true, timeout: 30000 });\n    const convos = res.conversations || [];\n    for (const c of convos) { if (c.conversation_id) byId.set(c.conversation_id, c); }\n    cursor = res.has_more ? (res.next_cursor || '') : '';\n    page++;\n    console.log(`📄 ${agentId} página ${page}: +${convos.length} | únicos ${byId.size}`);\n  } while (cursor && page < 30);\n}\n\nconst todas = [...byId.values()];\nif (!todas.length) { console.log(`⚠️ Sin conversaciones en los últimos ${WINDOW_MIN} min`); return []; }\n\nconst CONCURRENCY = 10;\nconst out = [];\nfor (let i = 0; i < todas.length; i += CONCURRENCY) {\n  const chunk = todas.slice(i, i + CONCURRENCY);\n  const results = await Promise.allSettled(\n    chunk.map(c => this.helpers.httpRequest({ method: 'GET', url: `${base}/${c.conversation_id}`, headers: H, json: true, timeout: 20000 }).then(det => ({ json: { ...det, _lista: c } })))\n  );\n  for (let j = 0; j < results.length; j++) {\n    if (results[j].status === 'fulfilled') out.push(results[j].value);\n    else console.warn('⚠️ Falló detalle ' + chunk[j].conversation_id + ': ' + results[j].reason?.message);\n  }\n}\nconsole.log(`✅ ${out.length}/${todas.length} detalles obtenidos`);\nreturn out;"
+      },
+      "id": "735833e2-b0f1-4401-bcf7-112788f65837",
+      "name": "Traer Histórico ElevenLabs4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38096,
+        6320
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nif (!Array.isArray(staticData.processedConvIds)) staticData.processedConvIds = [];\nconst processedSet = new Set(staticData.processedConvIds);\n\nconst convos = $input.all().map(i => i.json);\nconst out = [];\nconst newlyProcessed = [];\n\nfor (const c of convos) {\n  const d = c.data || c;\n\n  const convId   = String(d.conversation_id || '');\n  if (convId && processedSet.has(convId)) continue;\n  const duration = Number(d.metadata?.call_duration_secs || 0);\n  const success  = String(d.analysis?.call_successful || '').toLowerCase();\n  const endedBy  = String(d.metadata?.termination_reason || '').toLowerCase();\n  const summary  = d.analysis?.transcript_summary || '';\n  const startTs  = Number(d.metadata?.start_time_unix_secs || 0);\n\n  const dyn     = d.conversation_initiation_client_data?.dynamic_variables || {};\n  const leadId  = String(dyn.lead_id || '').trim();\n  const phoneDyn = String(dyn.phone || '').replace(/[^0-9+]/g,'');\n  let country = String(dyn.country || '').trim().toLowerCase();\n  if (['in'].includes(country)) country = 'india';\n  if (['np'].includes(country)) country = 'nepal';\n  if (!country) {\n    if (phoneDyn.startsWith('+977') || phoneDyn.startsWith('977')) country = 'nepal';\n    else if (phoneDyn.startsWith('+91') || phoneDyn.startsWith('91')) country = 'india';\n  }\n  const sourceSheet = String(\n    dyn._source_sheet ||\n    ({india:'leads',nepal:'leads nepal',slot3:'leads slot3',slot4:'leads slot4'})[country] ||\n    ''\n  );\n  if (!leadId || leadId === 'TEST-MANUAL-001' || !sourceSheet) continue;\n\n  const dc = d.analysis?.data_collection_results || {};\n  const callbackReq = String(dc.callback_requested?.value || '').toLowerCase();\n  const fullName    = String(dc.full_name?.value || '').replace(/^=/,'').trim();\n  const callbackDt  = String(dc.callback_date?.value || '');\n\n  const isVoicemail =\n    endedBy.includes('voicemail') ||\n    String(summary).toLowerCase().includes('voicemail') ||\n    (duration > 0 && duration < 8 && success !== 'success');\n\n  let status, lastCall, notes;\n  if (!convId)                                    { status='FAILED';    lastCall='NO_CONV_ID';         notes='Sin conversation_id'; }\n  else if (duration === 0)                        { status='NO_ANSWER'; lastCall='NO_ANSWER';          notes='No contestó | '+endedBy; }\n  else if (success==='failure'||success==='failed'){ status='FAILED';   lastCall='FAILED';             notes='Falló: '+endedBy; }\n  else if (isVoicemail)                           { status='VOICEMAIL'; lastCall='VOICEMAIL';          notes='📵 Buzón | '+duration+'s'; }\n  else if (['true','yes'].includes(callbackReq))  { status='SCHEDULED'; lastCall='CALLBACK_REQUESTED'; notes='📅 Callback | '+String(summary).slice(0,200); }\n  else                                            { status='SUCCESSFUL';lastCall='COMPLETED';          notes='Contestó | '+String(summary).slice(0,200); }\n\n  const row = {\n    lead_id:              leadId,\n    country,\n    _source_country: country,\n    _source_sheet: sourceSheet,\n    status,\n    last_call_status:     lastCall,\n    notes:                notes.slice(0, 500),\n    elevenlabs_call_id:   convId,\n    conversation_summary: String(summary).slice(0, 500),\n    duration_secs:        duration,\n    last_call_time:       startTs ? new Date(startTs*1000).toISOString() : new Date().toISOString()\n  };\n  if (fullName)    row.full_name    = fullName;\n  if (callbackDt)  row.callback_date = callbackDt;\n\n  out.push({ json: row });\n  if (convId) newlyProcessed.push(convId);\n}\n\nstaticData.processedConvIds = [...processedSet, ...newlyProcessed].slice(-3000);\n\nconsole.log(`🔀 Mapeados para actualizar: ${out.length} leads`);\nreturn out;"
+      },
+      "id": "ad392064-abfa-4d1a-a3fe-d9157087e11b",
+      "name": "🔀 Mapear para Sheet4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38432,
+        6320
+      ],
+      "retryOnFail": false,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"email\": \"ai@leadstudio.com\", \"password\": \"Admin@123\"}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "995dcf37-6fd4-45a9-963d-454d295c1140",
+      "name": "🔐 Login LeadStudio (WF9)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        39472,
+        5728
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "disabled": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recibe el resultado clasificado por Parse Post-Call Data4 (webhook) o Mapear para Sheet4 (polling).\n// Mapea al contrato de LeadStudio /followups y decide scheduleNextAt.\n//\n// IMPORTANTE — Asterisk vs Stringee:\n// Asterisk ya programa su propio scheduleNextAt de forma síncrona en WF2 (respuesta SIP inmediata).\n// Stringee es asíncrono: WF2 no sabe el resultado real hasta que ElevenLabs manda este webhook.\n// Por eso: si el teléfono es formato Stringee (dígitos sin '+'), WF9 SÍ programa scheduleNextAt.\n// Si es Asterisk (E.164 con '+'), WF9 NO reprograma (ya lo hizo WF2, evita pisar el timer).\n\nconst d = $json;\n\nconst phone = String(d.phone || '');\nconst isStringee = phone !== '' && !phone.startsWith('+');\n\nconst STATUS_TO_OUTCOME = {\n  SUCCESSFUL: 'CONNECTED',\n  NO_ANSWER:  'NO_ANSWER',\n  FAILED:     'NO_ANSWER',\n  VOICEMAIL:  'NO_ANSWER',\n  SCHEDULED:  'CALLBACK'\n};\n\nconst STATUS_TO_CALLSTATUS = {\n  SUCCESSFUL: 'ANSWERED',\n  NO_ANSWER:  'NO_ANSWER',\n  FAILED:     'FAILED',\n  VOICEMAIL:  'NO_ANSWER',\n  SCHEDULED:  'ANSWERED'\n};\n\nconst outcome    = STATUS_TO_OUTCOME[d.status]    || 'NO_ANSWER';\nconst callStatus = STATUS_TO_CALLSTATUS[d.status] || 'FAILED';\n\nfunction addHours(date, h) { return new Date(date.getTime() + h * 3600 * 1000); }\n\nlet scheduleNextAt = null;\n\nif (isStringee) {\n  const now = new Date();\n  if (d.status === 'NO_ANSWER' || d.status === 'FAILED' || d.status === 'VOICEMAIL') {\n    scheduleNextAt = addHours(now, 2).toISOString();\n  } else if (d.status === 'SCHEDULED') {\n    scheduleNextAt = d.callback_date\n      ? new Date(d.callback_date).toISOString()\n      : addHours(now, 24).toISOString();\n  }\n  // SUCCESSFUL -> sin reintento (scheduleNextAt queda null)\n}\n\nconsole.log('🧱 WF9 followup payload | lead:', d.lead_id, '| status:', d.status, '| stringee:', isStringee, '| scheduleNextAt:', scheduleNextAt);\n\nreturn [{ json: {\n  ...d,\n  outcome,\n  callStatus,\n  scheduleNextAt,\n  is_stringee: isStringee\n}}];"
+      },
+      "id": "e19a68e5-6351-4874-b323-36501080fc3e",
+      "name": "🧱 Build Followup Payload (WF9)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        39184,
+        5728
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/leads/' + $('🧱 Build Followup Payload (WF9)').first().json.lead_id + '/followups' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify((() => { const d = $('🧱 Build Followup Payload (WF9)').first().json; const body = { type: 'CALL', outcome: d.outcome, callStatus: d.callStatus, durationSeconds: d.duration_secs || 0, notes: (d.notes || '').slice(0, 900) }; if (d.scheduleNextAt) body.scheduleNextAt = d.scheduleNextAt; return body; })()) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "953cf093-f7ba-41c7-bba8-c67dc6fa39d8",
+      "name": "📤 POST Followup — Call Result (WF9)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        39760,
+        5728
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "disabled": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "followup-id-check",
+              "leftValue": "={{ $json.followUp && $json.followUp.id ? $json.followUp.id : '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "798ab6bc-579e-49df-9fc0-9da7dea2338f",
+      "name": "🔍 Followup Registrado?4",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        40032,
+        5728
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wf_call_followups (phone, lead_id, followup_id, provider, outcome, call_status)\nVALUES (\n  '{{ $(\"🧱 Build Followup Payload (WF9)\").first().json.phone }}',\n  '{{ $(\"🧱 Build Followup Payload (WF9)\").first().json.lead_id }}',\n  '{{ $json.followUp.id }}',\n  '{{ $(\"🧱 Build Followup Payload (WF9)\").first().json.is_stringee ? \"stringee\" : \"asterisk\" }}',\n  '{{ $(\"🧱 Build Followup Payload (WF9)\").first().json.outcome }}',\n  '{{ $(\"🧱 Build Followup Payload (WF9)\").first().json.callStatus }}'\n);",
+        "options": {}
+      },
+      "id": "29236474-620e-4d5b-b68d-c36afe67fa45",
+      "name": "💾 Save Followup ID (WF9)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        40352,
+        5520
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "disabled": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 🧮 FIX (23/09) — Calcula el status REAL del LEAD (no solo el followup del\n// timeline) a partir del resultado real de la llamada que llegó por webhook.\n//\n// Por qué hace falta: WF9 solo hacía POST /followups (crea la entrada del\n// timeline) pero NUNCA hacía PATCH /leads/{id} para actualizar el campo\n// `status` del lead. Ese campo es el que usan el GET Queue (?status=\n// NOT_CONTACTED) y 'Filtrar Vencidos' para decidir si un lead se vuelve a\n// llamar. Sin este PATCH, un lead que atendió y quedó CONTACTED de verdad\n// podía seguir circulando indefinidamente (caso real: 31 intentos con 12\n// conexiones reales, el status del lead nunca se movía de ATTEMPTING).\n//\n// Aplica igual para Asterisk y Stringee: este nodo es ahora la única fuente\n// de verdad para el status final del lead una vez que se conoce el\n// resultado real. WF2 solo debe marcar el estado TRANSITORIO al disparar\n// (ATTEMPTING) para sacar al lead de la cola mientras se llama — no debe\n// escribir un resultado final inventado (ver fix separado en WF2 Stringee:\n// 💾 POST Followup (Stringee)1 desactivado, y WF2 Asterisk: 🏁 PATCH Status\n// Final (Asterisk)1 puede quedar desactivado sin problema, este nodo lo\n// reemplaza para el status final).\nconst d = $json; // viene de 🧱 Build Followup Payload (WF9) — incluye scheduleNextAt, outcome, etc.\n\nfunction addHours(date, h) { return new Date(date.getTime() + h * 3600 * 1000); }\nfunction addBusinessDays(date, days) {\n  const result = new Date(date.getTime());\n  let added = 0;\n  while (added < days) {\n    result.setDate(result.getDate() + 1);\n    const dow = result.getDay();\n    if (dow !== 0 && dow !== 6) added++;\n  }\n  return result;\n}\nfunction safeDate(raw, fallbackDate) {\n  if (!raw) return fallbackDate;\n  try {\n    const dt = new Date(raw);\n    if (isNaN(dt.getTime())) return fallbackDate;\n    return dt;\n  } catch (e) {\n    return fallbackDate;\n  }\n}\n\n// call_attempts viaja en dynamic_variables desde WF2 para AMBOS proveedores.\n// Si por algún motivo no llegó (worker no lo propagó), asumimos 1 — preferible\n// subestimar el ciclo a trabarlo con un número inventado alto.\nconst attempts = Number.isFinite(Number(d.call_attempts)) && d.call_attempts !== undefined\n  ? Number(d.call_attempts)\n  : 1;\n\nlet leadStatus, leadNextFollowUpAt = null;\n\nif (d.status === 'SUCCESSFUL') {\n  leadStatus = 'CONTACTED';\n  leadNextFollowUpAt = null; // conectó de verdad -> sale del ciclo de reintentos\n} else if (d.status === 'SCHEDULED') {\n  // Pidió callback -> lo tratamos como contactado/engaged, con el próximo\n  // contacto en la fecha que pidió (o +24h si no se pudo interpretar la fecha).\n  leadStatus = 'CONTACTED';\n  leadNextFollowUpAt = safeDate(d.callback_date, addHours(new Date(), 24));\n} else if (d.status === 'NO_ANSWER' || d.status === 'FAILED' || d.status === 'VOICEMAIL') {\n  // Mismo ciclo de reintentos que usa Asterisk en WF2:\n  // intento 1 -> +2h -> intento 2 -> +3h -> intento 3 (fin ciclo) ->\n  // ciclo 1 fin -> +2 días hábiles -> ciclo 2 fin -> +3 días hábiles -> ciclo 3 fin -> CLOSED\n  const now = new Date();\n  const posInCycle = ((attempts - 1) % 3) + 1;\n  const cycle = Math.ceil(attempts / 3);\n\n  if (posInCycle === 1) {\n    leadStatus = 'NO_ANSWER';\n    leadNextFollowUpAt = addHours(now, 2);\n  } else if (posInCycle === 2) {\n    leadStatus = 'NO_ANSWER';\n    leadNextFollowUpAt = addHours(now, 3);\n  } else if (cycle === 1) {\n    leadStatus = 'NO_ANSWER';\n    leadNextFollowUpAt = addBusinessDays(now, 2);\n  } else if (cycle === 2) {\n    leadStatus = 'NO_ANSWER';\n    leadNextFollowUpAt = addBusinessDays(now, 3);\n  } else {\n    leadStatus = 'CLOSED';\n    leadNextFollowUpAt = null;\n  }\n} else {\n  // Defensivo — no debería llegar acá dado el mapeo de STATUS_TO_OUTCOME.\n  leadStatus = 'NO_ANSWER';\n  leadNextFollowUpAt = addHours(new Date(), 2);\n}\n\nconst leadNextFollowUpAtIso = leadNextFollowUpAt ? leadNextFollowUpAt.toISOString() : null;\n\nconsole.log('🧮 WF9 lead patch | lead:', d.lead_id, '| call_status:', d.status, '| attempts:', attempts, '| leadStatus:', leadStatus, '| leadNextFollowUpAt:', leadNextFollowUpAtIso);\n\nreturn [{ json: {\n  ...d,\n  leadStatus,\n  leadNextFollowUpAt: leadNextFollowUpAtIso,\n  leadAttempts: attempts\n}}];\n"
+      },
+      "id": "ef6db987-ed83-479e-bb78-5c76fc621bfe",
+      "name": "🧮 Build Lead Status Patch (WF9)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38912,
+        7680
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://lead-studio-9gnl.onrender.com/api/leads/{{ $('🧮 Build Lead Status Patch (WF9)').first().json.lead_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"{{ $('🧮 Build Lead Status Patch (WF9)').first().json.leadStatus }}\",\n  \"attempts\": {{ $('🧮 Build Lead Status Patch (WF9)').first().json.leadAttempts }},\n  \"nextFollowUpAt\": {{ $('🧮 Build Lead Status Patch (WF9)').first().json.leadNextFollowUpAt ? '\"' + $('🧮 Build Lead Status Patch (WF9)').first().json.leadNextFollowUpAt + '\"' : 'null' }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "0f5b445f-455a-4692-8853-a50bbd5232e2",
+      "name": "🏁 PATCH Lead Status (WF9)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        39408,
+        7920
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "disabled": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('🧮 Build Lead Status Patch (WF9)').first().json;\nconst resp = $input.first().json || {};\nconst ok = !!(resp.lead && resp.lead.id);\nif (ok) {\n  console.log('✅ WF9 PATCH lead status OK | lead:', req.lead_id, '-> status:', resp.lead.status, '| nextFollowUpAt:', resp.lead.nextFollowUpAt);\n} else {\n  console.error('❌ WF9 PATCH lead status FAILED | lead:', req.lead_id, '| attempted:', req.leadStatus, '| response:', JSON.stringify(resp).slice(0, 300));\n}\nreturn [{ json: { lead_id: req.lead_id, patch_ok: ok, response: resp } }];"
+      },
+      "id": "46794ddf-6c3d-475a-845b-b0980da27493",
+      "name": "📝 Log Lead Patch Result (WF9)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        39680,
+        7920
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "content": "### 🧮 FIX 23/09 — Status del lead ahora SÍ se actualiza\nAntes, WF9 solo creaba el followup (entrada de timeline) pero nunca hacía\nPATCH /leads/{id} — el campo `status` del lead (el que usan el GET Queue y\n\"Filtrar Vencidos\") se quedaba desactualizado para siempre tras el resultado\nreal de la llamada. Caso real que lo destapó: un lead con 31 intentos y 12\nconexiones reales, siempre en ATTEMPTING.\n\nAhora: 🧱 Build Followup Payload → 🧮 Build Lead Status Patch (calcula\nstatus/nextFollowUpAt/attempts con el MISMO ciclo 2h/3h/2d/3d que usa\nAsterisk) → 🏁 PATCH Lead Status, en paralelo con el POST del followup.\n\nAplica igual para Asterisk y Stringee — WF9 es ahora la única fuente de\nverdad del status final del lead. WF2 solo debe marcar el estado\nTRANSITORIO (ATTEMPTING) al disparar la llamada, nunca un resultado final\ninventado antes de tiempo.\n\n⚠️ Pendiente de revisar aparte (no tocado en este fix): el outcome\n'CALLBACK' que se manda en el followup para leads con status=SCHEDULED no\nfue confirmado contra el backend — si el backend lo rechaza (\"Unrecognized\nvalue\"), el followup de ese caso fallará silenciosamente (neverError=true) y\nsolo se verá en los logs de este nodo. El PATCH del lead (este fix) no\ndepende de eso y funciona igual.\n\n⚠️ No implementado: detección automática de \"cliente pidió no ser\nllamado\" -> doNotCall=true. Se recomienda agregarlo a mano por ahora\n(vía panel o PATCH manual) cuando se detecte en una llamada, hasta decidir\nun criterio confiable para automatizarlo.",
+        "height": 460,
+        "width": 560,
+        "color": 4
+      },
+      "id": "47a26a51-9631-4ed6-829c-996295856c4e",
+      "name": "🧭 Nota — Fix Status del Lead (WF9)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        38832,
+        7120
+      ],
+      "height": 300,
+      "width": 560,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vincular conversation_id de ElevenLabs a stringee_calls (solo Stringee = bare digits)\nconst d = $input.first().json;\n\n// Stringee usa bare digits (sin +), Asterisk usa E.164 (con +)\nconst isStringee = d.phone && !String(d.phone).startsWith('+');\n\nif (d.country !== 'india' || !isStringee || !d.elevenlabs_call_id) {\n  return [{ json: { skip: true, reason: 'no es Stringee o no aplica (country=' + d.country + ', phone_format=' + (String(d.phone).startsWith('+') ? 'E164' : 'bare') + ')' } }];\n}\n\nconst phoneDigits = String(d.phone).replace(/[^0-9]/g, '');\nconst last10 = phoneDigits.slice(-10);\nconst convId = String(d.elevenlabs_call_id).replace(/'/g, \"''\");\n\nconst sql = `UPDATE stringee_calls\n  SET conversation_id = '${convId}'\n  WHERE RIGHT(phone,10) = '${last10}'\n    AND conversation_id IS NULL\n    AND answered = 1\n  ORDER BY start_time DESC\n  LIMIT 1;`;\n\nconsole.log('🔗 Stringee Conv-ID SQL (webhook):', sql.slice(0, 150));\nreturn [{ json: { sql, phone: d.phone, last10, convId, provider: 'stringee' } }];"
+      },
+      "id": "5d8bcf94-e0d8-41cb-9c2f-eb4f6346302b",
+      "name": "🔗 Build Stringee Conv-ID SQL (webhook)1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        37600,
+        7664
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "f646f483-b4c5-4506-985f-60faf301ef96",
+      "name": "💾 Update stringee_calls conv_id (webhook)1",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        37808,
+        7664
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "disabled": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vincula conversation_id a stringee_calls — consume RAW de ElevenLabs (sin filtro de lead_id)\n// Esto es independiente del filtro de Sheet (que descarta calls sin lead_id/sourceSheet)\nconst convos = $input.all().map(i => i.json);\nconst results = [];\n\nfor (const c of convos) {\n  const d = c.data || c;\n\n  const convId = String(d.conversation_id || '');\n  if (!convId) continue;\n\n  const dyn = d.conversation_initiation_client_data?.dynamic_variables || {};\n  const phone = String(dyn.phone || '').replace(/[^0-9+]/g, '');\n  let country = String(dyn.country || '').trim().toLowerCase();\n  if (['in'].includes(country)) country = 'india';\n  if (['np'].includes(country)) country = 'nepal';\n  if (!country) {\n    if (phone.startsWith('+977') || phone.startsWith('977')) country = 'nepal';\n    else if (phone.startsWith('+91') || phone.startsWith('91')) country = 'india';\n  }\n\n  // Stringee = bare digits (sin +), Asterisk = E.164 (con +)\n  const isStringee = phone && !phone.startsWith('+');\n\n  if (country !== 'india' || !isStringee || !phone) continue;\n\n  const phoneDigits = phone.replace(/[^0-9]/g, '');\n  const last10 = phoneDigits.slice(-10);\n  const convIdEscaped = convId.replace(/'/g, \"''\");\n\n  const sql = `UPDATE stringee_calls\n    SET conversation_id = '${convIdEscaped}'\n    WHERE RIGHT(phone,10) = '${last10}'\n      AND conversation_id IS NULL\n      AND answered = 1\n    ORDER BY start_time DESC\n    LIMIT 1;`;\n\n  results.push({ json: { sql, phone, last10, convId, provider: 'stringee' } });\n}\n\nif (results.length) console.log(`🔗 Stringee Conv-ID SQL (polling): ${results.length} filas a vincular`);\nreturn results.length ? results : [{ json: { skip: true, reason: 'ninguna conversación raw es Stringee sin vincular' } }];"
+      },
+      "id": "889fc735-0bdb-4343-afb4-57d047fc1728",
+      "name": "🔗 Build Stringee Conv-ID SQL (polling)1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38000,
+        8496
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "421dba1f-16e1-45ef-b5fe-563b9b342601",
+      "name": "💾 Update stringee_calls conv_id (polling)1",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        38272,
+        8496
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "disabled": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "elevenlabs-postcall-webhook",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "52299e16-a59a-4b83-98f3-3c6f6e07424f",
+      "name": "📥 ElevenLabs Post-Call Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        37168,
+        7472
+      ],
+      "webhookId": "elevenlabs-call-webhook",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "id": "c2f625e2-b778-4c5c-a6f7-5f06fb460dab",
+      "name": "✅ Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        37376,
+        7312
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst raw = item.json;\n\n// ── 1. Retrieve the RAW body if the webhook has \"Raw Body\" enabled ──────\n// (needed to reliably verify the HMAC signature)\nlet rawStr = '';\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    rawStr = Buffer.from(item.binary.data.data, 'base64').toString('utf8');\n  }\n} catch (e) { /* no rawBody, continue with the parsed body */ }\n\nlet body = raw.body || raw;\nif (rawStr) { try { body = JSON.parse(rawStr); } catch (e) {} }\n\n// ── 2. HMAC verification (ElevenLabs format: t=timestamp,v0=signature) ─────────\nconst crypto = require('crypto');\nconst secret = 'wsec_98c0a66b3f1df7af8eaf22503381cb78ce648dc63da8eead8ce3dafc7a95b630';\nconst headers = raw.headers || {};\nconst sigHeader = String(headers['elevenlabs-signature'] || headers['ElevenLabs-Signature'] || '');\nif (sigHeader) {\n  const parts = Object.fromEntries(sigHeader.split(',').map(p => p.split('=')));\n  const timestamp = parts['t'] || '';\n  const receivedSig = parts['v0'] || parts['v1'] || '';\n  if (timestamp && Math.abs(Date.now() / 1000 - Number(timestamp)) > 1800) {\n    throw new Error('Webhook timestamp too old (>30min) — possible replay');\n  }\n  if (rawStr && receivedSig) {\n    const expected = crypto.createHmac('sha256', secret).update(timestamp + '.' + rawStr).digest('hex');\n    if (receivedSig !== expected) {\n      console.warn('⚠️ HMAC mismatch — processing anyway. expected=' + expected + ' received=' + receivedSig + ' rawLen=' + rawStr.length);\n    }\n  } else if (receivedSig) {\n    console.warn('⚠️ HMAC not verifiable without Raw Body — processing anyway. Enable \"Raw Body\" in the Webhook node.');\n  }\n}\n\nconst d = body.data || body;\n\nconst conversationId = String(d.conversation_id || d.conversationId || '');\nconst callSuccessful = String(d.analysis?.call_successful || d.call_successful || '').toLowerCase();\nconst summary        = d.analysis?.transcript_summary || d.summary || d.conversation_summary || '';\nconst durationSecs   = Number(d.metadata?.call_duration_secs || d.duration_secs || 0);\nconst callEndedBy    = String(d.metadata?.termination_reason || d.call_ended_by || '').toLowerCase();\n\nlet transcript = '';\nif (Array.isArray(d.transcript)) {\n  transcript = d.transcript.map(t => `${t.role === 'agent' ? '🤖' : '👤'} ${t.message || ''}`).join(' | ');\n} else {\n  transcript = typeof d.transcript === 'string' ? d.transcript : JSON.stringify(d.transcript || '');\n}\n\nconst dc = d.analysis?.data_collection_results\n        || d.analysis?.data_collection\n        || d.data_collection_results\n        || d.data_collection\n        || {};\n\nconst interested    = String(dc.user_interest?.value      || '').toLowerCase();\nconst fullName      = String(dc.full_name?.value           || '').replace(/^=/, '').trim();\nconst callbackReq   = String(dc.callback_requested?.value  || '').toLowerCase();\nconst callbackDate  = String(dc.callback_date?.value       || '');\nconst accountOpened = String(dc.account_requested?.value   || '').toLowerCase();\n\nconst dynVars = d.conversation_initiation_client_data?.dynamic_variables\n             || d.metadata?.dynamic_variables\n             || body.conversation_initiation_client_data?.dynamic_variables\n             || {};\nconst leadId = String(dynVars.lead_id || d.lead_id || body.lead_id || '');\nconst phone  = String(dynVars.phone   || d.phone   || '').replace(/[^0-9+]/g, '');\n\nfunction canonicalCountry(rawCountry, rawPhone='') {\n  const c = String(rawCountry || '').trim().toLowerCase();\n  if (['india','in'].includes(c)) return 'india';\n  if (['nepal','np'].includes(c)) return 'nepal';\n  if (['slot3'].includes(c)) return 'slot3';\n  if (['slot4'].includes(c)) return 'slot4';\n  const p = String(rawPhone || '').replace(/[^0-9+]/g,'');\n  if (p.startsWith('+977') || p.startsWith('977')) return 'nepal';\n  if (p.startsWith('+91') || p.startsWith('91')) return 'india';\n  return '';\n}\nconst country = canonicalCountry(dynVars.country || d.country || body.country, phone);\nconst sourceSheet = String(\n  dynVars._source_sheet ||\n  ({india:'leads',nepal:'leads nepal',slot3:'leads slot3',slot4:'leads slot4'})[country] ||\n  ''\n);\n\nconst callAttempts = dynVars.call_attempts !== undefined ? Number(dynVars.call_attempts) : undefined;\n\nconst isVoicemail =\n  callEndedBy.includes('voicemail') ||\n  String(summary).toLowerCase().includes('voicemail') ||\n  (durationSecs > 0 && durationSecs < 8 && callSuccessful !== 'success');\n\nlet status, last_call_status, notes;\n\nif (!conversationId) {\n  status = 'FAILED'; last_call_status = 'NO_CONV_ID';\n  notes = 'Webhook without conversation_id';\n} else if (durationSecs === 0) {\n  status = 'NO_ANSWER'; last_call_status = 'NO_ANSWER';\n  notes = 'No answer (0s duration) | ended: ' + callEndedBy;\n} else if (callSuccessful === 'failure' || callSuccessful === 'failed') {\n  status = 'FAILED'; last_call_status = 'FAILED';\n  notes = 'Call failed: ' + (callEndedBy || 'no reason given');\n} else if (isVoicemail) {\n  status = 'VOICEMAIL'; last_call_status = 'VOICEMAIL';\n  notes = '📵 Voicemail | duration: ' + durationSecs + 's';\n} else if (callbackReq === 'true' || callbackReq === 'yes') {\n  status = 'SCHEDULED'; last_call_status = 'CALLBACK_REQUESTED';\n  notes = '📅 Requested callback | ' + String(summary).slice(0, 200);\n} else {\n  status = 'SUCCESSFUL'; last_call_status = 'COMPLETED';\n  notes = 'Answered, full conversation | ' + String(summary).slice(0, 200);\n}\n\nconsole.log('📞 Post-call | lead:', leadId, '| status:', status, '| dur:', durationSecs + 's', '| conv:', conversationId);\n\nconst out = {\n  lead_id:              leadId,\n  country,\n  _source_country: country,\n  _source_sheet: sourceSheet,\n  phone,\n  status,\n  last_call_status,\n  notes,\n  elevenlabs_call_id:   conversationId,\n  conversation_summary: String(summary).slice(0, 500),\n  full_name:            fullName || null,\n  interested:           (interested === 'interested' || interested === 'true' || interested === 'yes') ? 'TRUE' : '',\n  callback_requested:   (callbackReq === 'true' || callbackReq === 'yes') ? 'TRUE' : '',\n  callback_date:        callbackDate,\n  account_opened:       (accountOpened === 'yes' || accountOpened === 'true') ? 'PENDING' : '',\n  duration_secs:        durationSecs,\n  transcript:           transcript.slice(0, 1000),\n  last_call_time:       new Date().toISOString()\n};\nif (callAttempts !== undefined && !Number.isNaN(callAttempts)) out.call_attempts = callAttempts;\nif (!out.full_name) delete out.full_name;\nif (!out.callback_date) delete out.callback_date;\n\nreturn [{ json: out }];"
+      },
+      "id": "4d85d64a-8298-481a-92a8-092748ce9f3a",
+      "name": "⚙️ Parse Post-Call Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        37376,
+        7472
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "lead-check",
+              "leftValue": "={{ $json.lead_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "route-check",
+              "leftValue": "={{ $json._source_sheet }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "26e6712f-fa3e-4d12-a400-48659a29e262",
+      "name": "🔍 Has lead + safe route?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        38048,
+        7472
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const d=$input.first().json||{};\nconsole.log('⚠️ Post-call skipped safely | lead_id:', d.lead_id || '(missing)', '| country:', d.country || '(unknown)', '| source_sheet:', d._source_sheet || '(missing)', '| conv_id:', d.elevenlabs_call_id || '');\nreturn [{json:{...d,_skipped:true,_skip_reason:!d.lead_id?'missing lead_id':'missing safe country route'}}];"
+      },
+      "id": "9165ae06-d938-4b18-9ec8-2d45cc6759a3",
+      "name": "📝 Log Missing Lead/Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38240,
+        7680
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconsole.log('✅ Post-call processed | lead_id:', d.lead_id, '| status:', d.status);\nreturn [{ json: { processed: true, lead_id: d.lead_id, status: d.status } }];"
+      },
+      "id": "851610b1-b85f-4526-907b-6fed4e6bcb1f",
+      "name": "📝 Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40240,
+        7680
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "24107e4e-5489-420d-8fd6-c62d1e32ad1c",
+      "name": "Polling Cada 5min (última hora)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        37536,
+        8272
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const KEY = 'sk_79048a9776812db4416e5c690d0c047132d565fee7d43acd';\n\nconst AGENT_IDS = [\n  'agent_5701kramx550e3qs2tm11661b48p',\n  'agent_7601m209ntj3fyrbg0dcq6w507yq'\n];\n\nconst WINDOW_MIN = 20;\nconst after = Math.floor(Date.now()/1000) - (WINDOW_MIN * 60);\nconst H = { 'xi-api-key': KEY };\nconst base = 'https://api.elevenlabs.io/v1/convai/conversations';\nconst byId = new Map();\n\nfor (const agentId of [...new Set(AGENT_IDS.filter(Boolean))]) {\n  let cursor = '';\n  let page = 0;\n  do {\n    let url = `${base}?page_size=100&summary_mode=include&call_start_after_unix=${after}&agent_id=${encodeURIComponent(agentId)}`;\n    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;\n    const res = await this.helpers.httpRequest({ method: 'GET', url, headers: H, json: true, timeout: 30000 });\n    const convos = res.conversations || [];\n    for (const c of convos) { if (c.conversation_id) byId.set(c.conversation_id, c); }\n    cursor = res.has_more ? (res.next_cursor || '') : '';\n    page++;\n    console.log(`📄 ${agentId} page ${page}: +${convos.length} | unique ${byId.size}`);\n  } while (cursor && page < 30);\n}\n\nconst todas = [...byId.values()];\nif (!todas.length) { console.log(`⚠️ No conversations in the last ${WINDOW_MIN} min`); return []; }\n\nconst CONCURRENCY = 10;\nconst out = [];\nfor (let i = 0; i < todas.length; i += CONCURRENCY) {\n  const chunk = todas.slice(i, i + CONCURRENCY);\n  const results = await Promise.allSettled(\n    chunk.map(c => this.helpers.httpRequest({ method: 'GET', url: `${base}/${c.conversation_id}`, headers: H, json: true, timeout: 20000 }).then(det => ({ json: { ...det, _lista: c } })))\n  );\n  for (let j = 0; j < results.length; j++) {\n    if (results[j].status === 'fulfilled') out.push(results[j].value);\n    else console.warn('⚠️ Failed to fetch detail ' + chunk[j].conversation_id + ': ' + results[j].reason?.message);\n  }\n}\nconsole.log(`✅ ${out.length}/${todas.length} details fetched`);\nreturn out;"
+      },
+      "id": "7747588e-a4d5-4f58-9a92-26f0ecd99bd1",
+      "name": "Traer Histórico ElevenLabs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        37744,
+        8272
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nif (!Array.isArray(staticData.processedConvIds)) staticData.processedConvIds = [];\nconst processedSet = new Set(staticData.processedConvIds);\n\nconst convos = $input.all().map(i => i.json);\nconst out = [];\nconst newlyProcessed = [];\n\nfor (const c of convos) {\n  const d = c.data || c;\n\n  const convId   = String(d.conversation_id || '');\n  if (convId && processedSet.has(convId)) continue;\n  const duration = Number(d.metadata?.call_duration_secs || 0);\n  const success  = String(d.analysis?.call_successful || '').toLowerCase();\n  const endedBy  = String(d.metadata?.termination_reason || '').toLowerCase();\n  const summary  = d.analysis?.transcript_summary || '';\n  const startTs  = Number(d.metadata?.start_time_unix_secs || 0);\n\n  const dyn     = d.conversation_initiation_client_data?.dynamic_variables || {};\n  const leadId  = String(dyn.lead_id || '').trim();\n  const phoneDyn = String(dyn.phone || '').replace(/[^0-9+]/g,'');\n  let country = String(dyn.country || '').trim().toLowerCase();\n  if (['in'].includes(country)) country = 'india';\n  if (['np'].includes(country)) country = 'nepal';\n  if (!country) {\n    if (phoneDyn.startsWith('+977') || phoneDyn.startsWith('977')) country = 'nepal';\n    else if (phoneDyn.startsWith('+91') || phoneDyn.startsWith('91')) country = 'india';\n  }\n  const sourceSheet = String(\n    dyn._source_sheet ||\n    ({india:'leads',nepal:'leads nepal',slot3:'leads slot3',slot4:'leads slot4'})[country] ||\n    ''\n  );\n  if (!leadId || leadId === 'TEST-MANUAL-001' || !sourceSheet) continue;\n\n  const dc = d.analysis?.data_collection_results || {};\n  const callbackReq = String(dc.callback_requested?.value || '').toLowerCase();\n  const fullName    = String(dc.full_name?.value || '').replace(/^=/,'').trim();\n  const callbackDt  = String(dc.callback_date?.value || '');\n\n  const isVoicemail =\n    endedBy.includes('voicemail') ||\n    String(summary).toLowerCase().includes('voicemail') ||\n    (duration > 0 && duration < 8 && success !== 'success');\n\n  let status, lastCall, notes;\n  if (!convId)                                    { status='FAILED';    lastCall='NO_CONV_ID';         notes='No conversation_id'; }\n  else if (duration === 0)                        { status='NO_ANSWER'; lastCall='NO_ANSWER';          notes='No answer | '+endedBy; }\n  else if (success==='failure'||success==='failed'){ status='FAILED';   lastCall='FAILED';             notes='Failed: '+endedBy; }\n  else if (isVoicemail)                           { status='VOICEMAIL'; lastCall='VOICEMAIL';          notes='📵 Voicemail | '+duration+'s'; }\n  else if (['true','yes'].includes(callbackReq))  { status='SCHEDULED'; lastCall='CALLBACK_REQUESTED'; notes='📅 Callback | '+String(summary).slice(0,200); }\n  else                                            { status='SUCCESSFUL';lastCall='COMPLETED';          notes='Answered | '+String(summary).slice(0,200); }\n\n  const row = {\n    lead_id:              leadId,\n    country,\n    _source_country: country,\n    _source_sheet: sourceSheet,\n    status,\n    last_call_status:     lastCall,\n    notes:                notes.slice(0, 500),\n    elevenlabs_call_id:   convId,\n    conversation_summary: String(summary).slice(0, 500),\n    duration_secs:        duration,\n    last_call_time:       startTs ? new Date(startTs*1000).toISOString() : new Date().toISOString()\n  };\n  if (fullName)    row.full_name    = fullName;\n  if (callbackDt)  row.callback_date = callbackDt;\n\n  out.push({ json: row });\n  if (convId) newlyProcessed.push(convId);\n}\n\nstaticData.processedConvIds = [...processedSet, ...newlyProcessed].slice(-3000);\n\nconsole.log(`🔀 Mapped for update: ${out.length} leads`);\nreturn out;"
+      },
+      "id": "00050574-12a8-4829-a792-cd14a0fd99fd",
+      "name": "🔀 Mapear para Sheet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38080,
+        8272
+      ],
+      "retryOnFail": false,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.18.0.1:8092/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "5c7ef289-a4e4-4d24-b92b-c34a832efd96",
+      "name": "🔐 Login LeadStudio (WF9)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        39120,
+        7680
+      ],
+      "retryOnFail": false,
+      "maxTries": 2,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recibe el resultado clasificado por Parse Post-Call Data4 (webhook) o Mapear para Sheet4 (polling).\n// Mapea al contrato de LeadStudio /followups y decide scheduleNextAt.\n//\n// IMPORTANTE — Asterisk vs Stringee:\n// Asterisk ya programa su propio scheduleNextAt de forma síncrona en WF2 (respuesta SIP inmediata).\n// Stringee es asíncrono: WF2 no sabe el resultado real hasta que ElevenLabs manda este webhook.\n// Por eso: si el teléfono es formato Stringee (dígitos sin '+'), WF9 SÍ programa scheduleNextAt.\n// Si es Asterisk (E.164 con '+'), WF9 NO reprograma el scheduleNextAt DEL FOLLOWUP (ya lo hizo WF2).\n// NOTA: esto es aparte del status del LEAD, que ahora computa 🧮 Build Lead Status Patch (WF9)\n// para AMBOS proveedores por igual (ver nota en ese nodo).\n\nconst d = $json;\n\nconst phone = String(d.phone || '');\nconst isStringee = phone !== '' && !phone.startsWith('+');\n\nconst STATUS_TO_OUTCOME = {\n  SUCCESSFUL: 'CONNECTED',\n  NO_ANSWER:  'NO_ANSWER',\n  FAILED:     'NO_ANSWER',\n  VOICEMAIL:  'NO_ANSWER',\n  SCHEDULED:  'CALLBACK'\n};\n\nconst STATUS_TO_CALLSTATUS = {\n  SUCCESSFUL: 'ANSWERED',\n  NO_ANSWER:  'NO_ANSWER',\n  FAILED:     'FAILED',\n  VOICEMAIL:  'NO_ANSWER',\n  SCHEDULED:  'ANSWERED'\n};\n\nconst outcome    = STATUS_TO_OUTCOME[d.status]    || 'NO_ANSWER';\nconst callStatus = STATUS_TO_CALLSTATUS[d.status] || 'FAILED';\n\nfunction addHours(date, h) { return new Date(date.getTime() + h * 3600 * 1000); }\n\n// FIX: parsear callback_date de forma segura — si viene un texto no parseable\n// (p.ej. extraído por el LLM tipo 'mañana a las 3pm'), new Date(...) puede dar\n// Invalid Date y .toISOString() tira excepción y rompe todo el nodo. Con\n// try/catch, si falla, caemos al fallback de +24h en vez de tumbar el workflow.\nfunction safeCallbackDate(raw, fallbackDate) {\n  if (!raw) return fallbackDate.toISOString();\n  try {\n    const dt = new Date(raw);\n    if (isNaN(dt.getTime())) return fallbackDate.toISOString();\n    return dt.toISOString();\n  } catch (e) {\n    return fallbackDate.toISOString();\n  }\n}\n\nlet scheduleNextAt = null;\n\nif (isStringee) {\n  const now = new Date();\n  if (d.status === 'NO_ANSWER' || d.status === 'FAILED' || d.status === 'VOICEMAIL') {\n    scheduleNextAt = addHours(now, 2).toISOString();\n  } else if (d.status === 'SCHEDULED') {\n    scheduleNextAt = safeCallbackDate(d.callback_date, addHours(now, 24));\n  }\n  // SUCCESSFUL -> sin reintento (scheduleNextAt queda null)\n}\n\nconsole.log('🧱 WF9 followup payload | lead:', d.lead_id, '| status:', d.status, '| stringee:', isStringee, '| scheduleNextAt:', scheduleNextAt);\n\nreturn [{ json: {\n  ...d,\n  outcome,\n  callStatus,\n  scheduleNextAt,\n  is_stringee: isStringee\n}}];"
+      },
+      "id": "569c46ce-1e19-4ba6-ac23-430c43c8985f",
+      "name": "🧱 Build Followup Payload (WF9)1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38720,
+        7680
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://lead-studio-9gnl.onrender.com/api/leads/' + $('🧱 Build Followup Payload (WF9)1').first().json.lead_id + '/followups' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.accessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify((() => { const d = $('🧱 Build Followup Payload (WF9)1').first().json; const body = { type: 'CALL', outcome: d.outcome, callStatus: d.callStatus, durationSeconds: d.duration_secs || 0, notes: (d.notes || '').slice(0, 900) }; if (d.scheduleNextAt) body.scheduleNextAt = d.scheduleNextAt; return body; })()) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "d7e942b9-0017-4b1f-806d-96829230b4fc",
+      "name": "📤 POST Followup — Call Result (WF9)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        39408,
+        7680
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "followup-id-check",
+              "leftValue": "={{ $json.followUp && $json.followUp.id ? $json.followUp.id : '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5ad5e0b9-fbc9-48df-b271-ea4f788dc266",
+      "name": "🔍 Followup Registrado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        39680,
+        7680
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wf_call_followups\n(\n phone,\n lead_id,\n followup_id,\n provider,\n outcome,\n call_status\n)\nVALUES\n(\n '{{ $(\"🧱 Build Followup Payload (WF9)1\").first().json.phone }}',\n '{{ $(\"🧱 Build Followup Payload (WF9)1\").first().json.lead_id }}',\n '{{ $json.followUp.id }}',\n '{{ $(\"🧱 Build Followup Payload (WF9)1\").first().json.is_stringee ? \"stringee\" : \"asterisk\" }}',\n '{{ $(\"🧱 Build Followup Payload (WF9)1\").first().json.outcome }}',\n '{{ $(\"🧱 Build Followup Payload (WF9)1\").first().json.callStatus }}'\n);",
+        "options": {}
+      },
+      "id": "843a7b0d-029e-4833-9932-e411b631ca1d",
+      "name": "💾 Save Followup ID (WF9)1",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        40000,
+        7472
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stringee-worker-callback",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "afc26f7f-7b46-40d4-b1f5-26e9d02b812d",
+      "name": "📥 Stringee Worker Callback",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        38000,
+        9808
+      ],
+      "webhookId": "128b23a8-ab01-5615-ab1d-ebadd7095acc"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================================\n// 🧾 BUILD INBOX SQL (STRINGEE CALLBACK) — vía rápida.\n// El worker hace UN solo POST (sin reintentos) al terminar el job. Aquí sólo se\n// guarda de forma durable \"el job X terminó\" y se responde 200 DESPUÉS del\n// INSERT. El contenido del callback NO se usa como verdad: el procesador vuelve\n// a leer el job con GET /calls/:job_id. Un callback falso sólo provoca una\n// consulta al worker. Si este callback se pierde, la reconciliación cada 3 min\n// (ledger que escribe WF2 al despachar) recupera el job igual.\n// ============================================================================\nconst UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '').replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\")\n    .replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n\nconst item = $input.first().json || {};\nconst b = (item.body && typeof item.body === 'object') ? item.body : {};\nconst jobId = String(b.job_id || '').trim();\nif (!UUID_RE.test(jobId)) {\n  console.warn('⚠️ Callback Stringee ignorado: job_id inválido', JSON.stringify(b).slice(0, 150));\n  return [{ json: { accepted: false, reason: 'invalid job_id', inbox_sql: 'SELECT 1 AS ignored' } }];\n}\nconst leadId = String(b.lead_id || '').trim().slice(0, 64) || null;\nconst phone = String(b.phone || '').replace(/\\D/g, '').slice(0, 32) || null;\nconst n = Number(b.call_attempts);\nconst attempts = Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;\nconst payload = JSON.stringify({\n  via: 'callback', received_at: new Date().toISOString(),\n  status: b.status || null, final_status: b.final_status || null, answered: b.answered === true,\n  sip_code: b.sip_code || null, finished_at: b.finished_at || null,\n  conversation_id: b.elevenlabs_conversation_id || null\n});\n\nconst inbox_sql = 'INSERT INTO wf_call_events (event_key, source, provider, external_id, lead_id, phone, call_attempts, ' +\n  'first_seen_at, state, next_attempt_at, payload) VALUES (' +\n  [q('stringee:' + jobId), q('stringee'), q('stringee'), q(jobId), q(leadId), q(phone), q(attempts),\n    'UTC_TIMESTAMP(3)', q('RECEIVED'), 'UTC_TIMESTAMP(3) + INTERVAL 30 SECOND', q(payload)].join(', ') +\n  ') ON DUPLICATE KEY UPDATE lead_id = COALESCE(lead_id, VALUES(lead_id)), phone = COALESCE(phone, VALUES(phone)), ' +\n  'call_attempts = COALESCE(call_attempts, VALUES(call_attempts)), payload = COALESCE(payload, VALUES(payload)), ' +\n  \"next_attempt_at = IF(state IN ('RECEIVED', 'FAILED'), LEAST(next_attempt_at, VALUES(next_attempt_at)), next_attempt_at)\";\n\nconsole.log('📨 Callback Stringee recibido | job:', jobId, '| lead:', leadId, '| final:', b.final_status, '| answered:', b.answered === true);\nreturn [{ json: { accepted: true, job_id: jobId, inbox_sql } }];\n"
+      },
+      "id": "84ba7a1f-a0c5-4da2-a719-695eea9ca9a2",
+      "name": "🧾 Build Inbox SQL (Stringee callback)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38208,
+        9808
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.inbox_sql }}",
+        "options": {}
+      },
+      "id": "cfe94621-fcff-415b-9593-7980dc80f844",
+      "name": "💾 Insert Inbox (Stringee callback)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        38432,
+        9808
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\":true}",
+        "options": {}
+      },
+      "id": "e99a45fc-cc30-409b-a1c4-b3eb007dde4d",
+      "name": "✅ Respond OK (Stringee callback)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        38640,
+        9808
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.inbox_sql }}",
+        "options": {}
+      },
+      "id": "6ad76969-dba3-4006-9c15-abfabdf5715c",
+      "name": "💾 Insert Inbox (ElevenLabs webhook)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        38432,
+        10352
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================================\n// 🧾 BUILD INBOX SQL (POLLING) — red de seguridad del webhook de ElevenLabs.\n// Cada 3 min se listan las conversaciones de los últimos 60 min y se registran\n// en wf_call_events (idempotente por event_key). NO se marca nada como\n// procesado aquí: sólo se ingresa. El procesador finaliza únicamente las\n// conversaciones con status terminal (done / failed).\n// ============================================================================\nfunction q(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '').replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\")\n    .replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\nconst CONV_RE = /^conv_[A-Za-z0-9]{8,64}$/;\nconst TERMINAL = new Set(['done', 'failed']);\nconst rowsSql = [];\nconst seen = new Set();\nlet terminal = 0;\nfor (const it of $input.all()) {\n  const c = it.json || {};\n  const lista = c._lista || {};\n  const convId = String(c.conversation_id || lista.conversation_id || '');\n  if (!CONV_RE.test(convId) || seen.has(convId)) continue;\n  seen.add(convId);\n  const status = String(c.status || lista.status || '').toLowerCase();\n  const isTerminal = TERMINAL.has(status);\n  if (isTerminal) terminal++;\n  const startSecs = Number((c.metadata && c.metadata.start_time_unix_secs) || lista.start_time_unix_secs || 0);\n  const eventAt = startSecs > 0 ? \"'\" + new Date(startSecs * 1000).toISOString().replace('T', ' ').replace('Z', '') + \"'\" : 'NULL';\n  const dyn = (c.conversation_initiation_client_data && c.conversation_initiation_client_data.dynamic_variables) || {};\n  const phone = String(dyn.phone || '').replace(/[^0-9+]/g, '');\n  const provRaw = String(dyn.provider || '').toUpperCase();\n  const provider = provRaw === 'STRINGEE' ? 'stringee' : (phone.startsWith('+') ? 'asterisk' : (/^\\d{8,15}$/.test(phone) ? 'stringee' : null));\n  const att = Number(dyn.call_attempts);\n  const attOk = Number.isInteger(att) && att >= 1 && att <= 99 ? att : null;\n  const leadId = String(dyn.lead_id || '').trim().slice(0, 64);\n  const payload = JSON.stringify({ via: 'polling', status: status || null, agent_id: lista.agent_id || null });\n  rowsSql.push('(' + [q('elevenlabs:' + convId), q('elevenlabs'), q(provider), q(convId), q(leadId), q(phone.slice(0, 32)), q(attOk),\n    eventAt, 'UTC_TIMESTAMP(3)', q('RECEIVED'),\n    isTerminal ? 'UTC_TIMESTAMP(3) + INTERVAL 30 SECOND' : 'UTC_TIMESTAMP(3) + INTERVAL 120 SECOND', q(payload)].join(', ') + ')');\n}\nif (!rowsSql.length) {\n  console.log('🧾 Polling: sin conversaciones para registrar');\n  return [{ json: { inbox_sql: 'SELECT 1 AS noop', rows: 0 } }];\n}\nconst out = [];\nfor (let i = 0; i < rowsSql.length; i += 200) {\n  const chunk = rowsSql.slice(i, i + 200);\n  out.push({ json: {\n    rows: chunk.length,\n    inbox_sql: 'INSERT INTO wf_call_events (event_key, source, provider, external_id, lead_id, phone, call_attempts, event_at, ' +\n      'first_seen_at, state, next_attempt_at, payload) VALUES ' + chunk.join(', ') +\n      ' ON DUPLICATE KEY UPDATE provider = COALESCE(provider, VALUES(provider)), lead_id = COALESCE(lead_id, VALUES(lead_id)), ' +\n      'phone = COALESCE(phone, VALUES(phone)), call_attempts = COALESCE(call_attempts, VALUES(call_attempts)), ' +\n      'event_at = COALESCE(event_at, VALUES(event_at)), ' +\n      \"next_attempt_at = IF(state = 'RECEIVED' AND (resolution IS NULL OR resolution = 'WAITING_CONVERSATION'), \" +\n      'LEAST(next_attempt_at, VALUES(next_attempt_at)), next_attempt_at)'\n  } });\n}\nconsole.log(`🧾 Polling: ${rowsSql.length} conversaciones (${terminal} terminales) -> inbox en ${out.length} sentencia(s)`);\nreturn out;\n"
+      },
+      "id": "55ad89cf-11a9-4d2f-9c22-cb5f27176757",
+      "name": "🧾 Build Inbox SQL (polling)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38912,
+        11168
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.inbox_sql }}",
+        "options": {}
+      },
+      "id": "ce43d44c-edcc-4bfa-a7fb-16664e4a9697",
+      "name": "💾 Insert Inbox (polling)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        39136,
+        11168
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "373ab974-68d8-4f60-afea-6188347e1674",
+      "name": "⏱️ Procesar Inbox (cada 1 min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        38000,
+        11744
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================================\n// 🔒 BUILD CLAIM SQL — reclama eventos del inbox con un token único + lease.\n// Un evento sólo lo procesa quien tiene su claim_token. Si esta ejecución se\n// cae a mitad de camino, el lease vence (10 min) y otro ciclo lo retoma; la\n// idempotencia contra el CRM (providerCallId / \"Ref:\") evita duplicados.\n// Nunca se reclama un evento de un lead que ya tiene otro evento en proceso.\n// Todas las horas en UTC explícito (UTC_TIMESTAMP).\n// ============================================================================\nconst BATCH = 100;\nconst LEASE_MIN = 10;\nlet execId = '';\ntry { execId = String($execution.id || ''); } catch (e) { execId = ''; }\nconst token = ('wf9-' + execId + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)).slice(0, 64);\nconst T = \"'\" + token.replace(/[^A-Za-z0-9_-]/g, '') + \"'\";\nconst MS = c => 'IF(' + c + ' IS NULL, NULL, TIMESTAMPDIFF(MICROSECOND, \\'1970-01-01 00:00:00\\', ' + c + ') DIV 1000)';\n\nconst claim_sql = [\n  'UPDATE wf_call_events SET state = \\'PROCESSING\\', claim_token = ' + T + ',',\n  'lease_until = UTC_TIMESTAMP(3) + INTERVAL ' + LEASE_MIN + ' MINUTE, process_attempts = process_attempts + 1',\n  'WHERE ((state IN (\\'RECEIVED\\', \\'FAILED\\') AND next_attempt_at <= UTC_TIMESTAMP(3))',\n  'OR (state = \\'PROCESSING\\' AND lease_until < UTC_TIMESTAMP(3)))',\n  'AND (lead_id IS NULL OR lead_id NOT IN (SELECT b.lead_id FROM (SELECT DISTINCT lead_id FROM wf_call_events',\n  'WHERE state = \\'PROCESSING\\' AND lease_until >= UTC_TIMESTAMP(3) AND lead_id IS NOT NULL) b))',\n  'ORDER BY next_attempt_at ASC, id ASC LIMIT ' + BATCH\n].join(' ');\n\nconst read_sql = [\n  'SELECT e.event_key, e.source, e.provider, e.external_id, e.lead_id, e.phone, e.call_attempts, e.crm_attempt,',\n  'e.followup_id, e.lifecycle_applied, e.error_count, e.process_attempts, e.resolution AS prev_resolution, e.claim_token,',\n  MS('e.event_at') + ' AS event_at_ms,',\n  MS('e.dispatched_at') + ' AS dispatched_at_ms,',\n  MS('e.first_seen_at') + ' AS first_seen_at_ms,',\n  '(SELECT ' + MS('MAX(x.event_at)') + ' FROM wf_call_events x WHERE x.lead_id = e.lead_id AND x.lifecycle_applied = 1 AND x.event_key <> e.event_key) AS lead_latest_lifecycle_at_ms,',\n  '(SELECT COUNT(*) FROM wf_call_events x WHERE x.lead_id = e.lead_id AND x.source = \\'stringee\\' AND x.state IN (\\'RECEIVED\\', \\'PROCESSING\\', \\'FAILED\\') AND x.event_key <> e.event_key) AS lead_unresolved_jobs,',\n  '(SELECT COUNT(*) FROM wf_call_events x WHERE x.lead_id = e.lead_id AND x.event_key <> e.event_key AND e.dispatched_at IS NOT NULL AND x.dispatched_at IS NOT NULL AND x.dispatched_at > e.dispatched_at) AS lead_newer_dispatch,',\n  '(SELECT GROUP_CONCAT(x.followup_id) FROM wf_call_events x WHERE x.lead_id = e.lead_id AND x.followup_id IS NOT NULL AND x.event_key <> e.event_key AND x.created_at > UTC_TIMESTAMP(3) - INTERVAL 14 DAY) AS lead_claimed_followups,',\n  'CASE WHEN e.source = \\'elevenlabs\\' THEN (SELECT x.event_key FROM wf_call_events x WHERE x.source = \\'stringee\\' AND (x.conversation_id = e.external_id',\n  'OR (e.provider = \\'stringee\\' AND e.lead_id IS NOT NULL AND x.lead_id = e.lead_id AND e.call_attempts IS NOT NULL AND x.call_attempts = e.call_attempts',\n  'AND e.event_at IS NOT NULL AND ABS(TIMESTAMPDIFF(SECOND, COALESCE(x.event_at, x.dispatched_at, x.first_seen_at), e.event_at)) <= 1800)) LIMIT 1) ELSE NULL END AS linked_job_key',\n  'FROM wf_call_events e WHERE e.claim_token = ' + T + ' AND e.state = \\'PROCESSING\\' ORDER BY e.lead_id, e.event_at, e.id'\n].join(' ');\n\n// Una sola query (UPDATE; SELECT) en un único nodo MySQL: no depende de referencias a otros\n// nodos dentro de la query (en el nodo MySQL de n8n esas referencias se resuelven como undefined).\nconst claim_read_sql = claim_sql + '; ' + read_sql;\nreturn [{ json: { claim_token: token, claim_sql, read_sql, claim_read_sql } }];\n"
+      },
+      "id": "9ea1be44-fb4a-4045-898a-e2650275ca3b",
+      "name": "🔒 Build Claim SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38208,
+        11744
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.claim_read_sql }}",
+        "options": {}
+      },
+      "id": "cab537ed-de41-4c2b-ba17-e2123798683f",
+      "name": "🔒 Claim + Leer Eventos (MySQL)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        38544,
+        11744
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ----------------------------------------------------------------------------\n// BLOQUE COMÚN (idéntico en Fase 1 y Fase 2). Comentarios en español.\n// Todo texto que se guarda en LeadStudio (notes) va en INGLÉS.\n// ----------------------------------------------------------------------------\nconst self = this;\nconst CFG = {\n  LS_BASE: 'https://lead-studio-9gnl.onrender.com/api',\n  TOKEN_URL: 'http://172.18.0.1:8092/token',          // mismo token service que usaba WF9\n  WORKER_BASE: 'http://172.18.0.1:8091',             // worker Stringee (GET /calls/:job_id)\n  EL_BASE: 'https://api.elevenlabs.io/v1/convai/conversations',\n  EL_KEY: 'sk_79048a9776812db4416e5c690d0c047132d565fee7d43acd',                                // misma key que \"Traer Histórico ElevenLabs\"\n  MAX_ATTEMPTS: 9,                                     // 3 ciclos x 3 intentos\n  EXHAUSTED_STAGE: 'UNRESPONSIVE',                     // enum real del backend (R7)\n  NOTE_MAX: 900\n};\nconst NOW = Date.now();\nconst UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst CONV_RE = /^conv_[A-Za-z0-9]{8,64}$/;\n\n// HTTP que nunca lanza: devuelve {ok,status,body}\nasync function http(method, url, opts = {}) {\n  try {\n    const r = await self.helpers.httpRequest({\n      method,\n      url,\n      body: opts.body,\n      json: true,\n      headers: Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {}),\n      returnFullResponse: true,\n      ignoreHttpStatusErrors: true,\n      timeout: opts.timeout || 20000\n    });\n    return { ok: r.statusCode >= 200 && r.statusCode < 300, status: r.statusCode, body: r.body };\n  } catch (e) {\n    return { ok: false, status: 0, body: { error: String((e && e.message) || e) } };\n  }\n}\n\nlet TOKEN = null;\nasync function getToken(force) {\n  if (TOKEN && !force) return TOKEN;\n  const r = await http('POST', CFG.TOKEN_URL, {});\n  const t = r.ok && r.body && r.body.accessToken;\n  if (!t) throw new Error('token service falló HTTP ' + r.status);\n  TOKEN = t;\n  return t;\n}\nasync function ls(method, path, body) {\n  let t = await getToken(false);\n  let r = await http(method, CFG.LS_BASE + path, { body, headers: { Authorization: 'Bearer ' + t } });\n  if (r.status === 401) {\n    t = await getToken(true);\n    r = await http(method, CFG.LS_BASE + path, { body, headers: { Authorization: 'Bearer ' + t } });\n  }\n  return r;\n}\n\n// Literales SQL seguros (MariaDB con escapes de backslash activos).\n// El nodo MySQL de n8n elimina los saltos de línea al separar sentencias,\n// por eso aquí nunca se dejan saltos de línea crudos dentro de un literal.\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  const s = String(v)\n    .replace(/\\u0000/g, '')\n    .replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\')\n    .replace(/'/g, \"''\")\n    .replace(/\\{\\{/g, '{ {')\n    .replace(/\\}\\}/g, '} }');\n  return \"'\" + s + \"'\";\n}\n// DATETIME(3) en UTC explícito\nfunction dt(msv) {\n  if (!msv || !Number.isFinite(Number(msv))) return 'NULL';\n  return \"'\" + new Date(Number(msv)).toISOString().replace('T', ' ').replace('Z', '') + \"'\";\n}\nfunction ms(v) {\n  if (v === null || v === undefined || v === '') return null;\n  if (typeof v === 'number') return Number.isFinite(v) ? v : null;\n  const t = new Date(v).getTime();\n  return Number.isFinite(t) ? t : null;\n}\nfunction iso(msv) { return new Date(msv).toISOString(); }\nfunction safeInt(v) { const n = Number(v); return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0; }\nfunction validAttempt(v) {\n  const n = Number(v);\n  return Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;\n}\n\n// Mismo cálculo que WF2 (Classify Dial Result Asterisk): días hábiles saltan sábado y domingo\nfunction addHours(d, h) { return new Date(d.getTime() + h * 3600000); }\nfunction addBusinessDays(d, days) {\n  const r = new Date(d.getTime());\n  let added = 0;\n  while (added < days) {\n    r.setDate(r.getDate() + 1);\n    const wd = r.getDay();\n    if (wd !== 0 && wd !== 6) added++;\n  }\n  return r;\n}\n\n// Política 3x3. attempt = número real de intento (1..9). >=9 => agotado.\nfunction planFor(attempt, baseMs) {\n  const a = Math.max(1, Math.trunc(attempt));\n  if (a >= CFG.MAX_ATTEMPTS) {\n    return { exhausted: true, text: 'Maximum of 9 call attempts reached. Lead closed as unresponsive.' };\n  }\n  const pos = ((a - 1) % 3) + 1;\n  const cycle = Math.ceil(a / 3);\n  const base = new Date(baseMs);\n  let at, text;\n  if (pos === 1) { at = addHours(base, 2); text = 'Next attempt in 2 hours.'; }\n  else if (pos === 2) { at = addHours(base, 3); text = 'Next attempt in 3 hours.'; }\n  else if (cycle === 1) { at = addBusinessDays(base, 2); text = 'End of cycle 1. Next cycle in 2 business days.'; }\n  else { at = addBusinessDays(base, 3); text = 'End of cycle 2. Next cycle in 3 business days.'; }\n  return { exhausted: false, atMs: at.getTime(), text, cycle, pos };\n}\nfunction attemptText(a) {\n  if (a <= CFG.MAX_ATTEMPTS) {\n    const pos = ((a - 1) % 3) + 1;\n    const cycle = Math.ceil(a / 3);\n    return 'Call attempt ' + a + ' of 9 (cycle ' + cycle + ', ' + pos + '/3).';\n  }\n  return 'Call attempt ' + a + ', beyond the configured maximum of 9.';\n}\n\nfunction unwrapLead(body) {\n  if (!body || typeof body !== 'object') return null;\n  if (body.lead && typeof body.lead === 'object') return body.lead;\n  return body.id ? body : null;\n}\nfunction listFollowups(body) {\n  if (Array.isArray(body)) return body;\n  if (body && Array.isArray(body.followUps)) return body.followUps;\n  if (body && Array.isArray(body.followups)) return body.followups;\n  return [];\n}\nfunction isCall(f) { return !!(f && f.outcome); }   // activities de llamada tienen outcome; tareas/cambios de stage no\n\n// ============================================================================\n// ⚙️ FASE 1 — ACTIVITY CRM (WF9 v3)\n//\n// Entrada: eventos reclamados de wf_call_events (claim atómico con lease).\n// Para cada evento decide UNA de estas salidas:\n//   RECEIVED  -> todavía no es terminal (llamada/conversación en curso) o falta\n//                enriquecer: se reintenta más tarde SIN tocar el CRM.\n//   FAILED    -> error técnico: reintento con backoff. Nunca se marca hecho.\n//   SKIPPED   -> no corresponde crear nada (enlazado a un job, Activity de\n//                Asterisk que ya registró WF2, lead legado, etc.). Queda auditado.\n//   DONE/STALE-> Activity creada/confirmada en LeadStudio (exactamente una).\n//                El ciclo de vida lo aplica la Fase 2 y recién ahí el evento\n//                queda finalizado.\n//\n// Reglas clave:\n//  - Stringee: la unidad de llamada es el JOB (stringee:<job_id>). El estado del\n//    worker (GET /calls/:job_id) es la verdad telefónica. La conversación de\n//    ElevenLabs sólo clasifica un job CONTESTADO; nunca crea otra Activity.\n//  - Asterisk CONTESTADA (ledger de WF2, dispatched_at): WF2 NO crea la Activity (LeadStudio\n//    fija durationSeconds en el POST y no lo deja editar). WF9 crea la ÚNICA Activity al terminar\n//    la llamada, con CDR.billsec (respaldo: duración de ElevenLabs) y el ciclo de vida final.\n//    Asterisk SIN ledger (WF2 anterior): WF2 es dueño de la Activity. WF9 sólo (a) corrige el ciclo de\n//    vida cuando WF2 marcó CONNECTED pero no hubo conversación real (buzón /\n//    silencio), sin crear Activity, o (b) registra la llamada si WF2 no dejó\n//    ninguna Activity para ella (hueco real).\n//  - Idempotencia en el CRM: cada Activity lleva providerCallId y \"Ref: <key>\"\n//    en notes; antes de crear se buscan en los followups del lead.\n//  - Máximo 9 intentos: el 9º sin contacto => CLOSED + stage UNRESPONSIVE.\n//  - Un evento viejo nunca pisa un estado más nuevo: crea la Activity histórica\n//    que falte y NO toca status / stage / nextFollowUpAt.\n// ============================================================================\n\nconst WAIT = {\n  JOB_SETTLE_SEC: 30,             // margen tras finished_at (WF2 termina su PATCH ATTEMPTING en segundos)\n  JOB_RECHECK_SEC: 180,           // reconciliación de jobs no terminales: cada 3 min\n  CONV_RECHECK_SEC: 120,          // conversación ElevenLabs aún no terminal\n  ENRICH_SEC: 45,                 // 1ª pasada de un evento ElevenLabs: sólo se enriquece\n  ASTERISK_READY_SEC: 20 * 60,    // WF2 (lotes de 5, timeout 60 s) ya registró su Activity\n  ASTERISK_MATCH_BEFORE_SEC: 120,\n  ASTERISK_MATCH_AFTER_SEC: 20 * 60,\n  ASTERISK_DEFER_SETTLE_SEC: 45,          // llamada contestada diferida por WF2: sólo se espera a que ElevenLabs/CDR se asienten tras colgar\n  ASTERISK_DEFER_GIVEUP_SEC: 6 * 3600,    // sin conversación terminal tras 6 h: se registra igual (una Activity, sin conversación confirmada)\n  CDR_TOL_START_S: 60,                    // la conversación EL empieza al marcar o al contestar (tolerancia)\n  CDR_TOL_END_S: 90,                      // tolerancia entre el fin de la conversación EL y el fin del CDR\n  CDR_UNALIGNED_TOL_S: 240,              // sin datos de la conversación: el CDR debe empezar a ±4 min del despacho\n  CDR_LATE_SEC: 150,                      // CDR tardío (escritura en lotes): hasta 150 s tras colgar se espera antes de usar la duración de ElevenLabs\n  CDR_AMBIGUITY_S: 15,                    // dos CDR igual de plausibles -> ambiguo -> se usa ElevenLabs\n  STRINGEE_CONV_LINK_SEC: 45 * 60,       // conversación Stringee sin job: esperar a que un job la enlace\n  STRINGEE_CONV_MAX_WAIT_SEC: 6 * 3600,\n  WORKER_404_GIVEUP_SEC: 2 * 3600,\n  CONV_404_GIVEUP_SEC: 2 * 3600,\n  TIME_BUDGET_MS: 150000,         // no empezar eventos nuevos pasados 150 s (lease = 10 min)\n  CONCURRENCY: 6                  // leads procesados en paralelo (mismo lead = secuencial)\n};\nconst HISTORICAL_NOTE =\n  'Historical call recovered during reconciliation. A newer lead status already exists, so this call does not change the current lead lifecycle.';\nconst SIP_TEXT = {\n  403: 'Forbidden', 404: 'Not Found', 408: 'Request Timeout', 480: 'Temporarily Unavailable',\n  484: 'Address Incomplete', 486: 'Busy Here', 487: 'Request Terminated', 488: 'Not Acceptable Here',\n  500: 'Server Internal Error', 502: 'Bad Gateway', 503: 'Service Unavailable', 600: 'Busy Everywhere',\n  603: 'Decline'\n};\nconst STATUS_TEXT = {\n  NO_ANSWER: 'Call not answered.',\n  UNAVAILABLE: 'Number temporarily unavailable.',\n  BUSY: 'Line busy.',\n  REJECTED: 'Call rejected by the recipient.',\n  FAILED: 'Call failed at the telephone network.'\n};\n// Mensajes de operador / buzón que la transcripción puede atribuir al \"usuario\"\nconst IVR_RE = /(voice ?mail|leave (a|your) message|after the (tone|beep)|not available|unavailable|switched off|not reachable|out of (network|coverage)|is busy|busy on another call|please try (again )?later|number (you have )?(dialled|dialed|are calling)|does not exist|mailbox|record your message|कृपया|स्विच ऑफ|पहुंच से बाहर|व्यस्त|उपलब्ध नहीं|नेटवर्क क्षेत्र)/i;\n\n// ---------- resultados ----------\nfunction res(ev, o) {\n  return Object.assign({\n    event_key: ev.event_key,\n    claim_token: ev.claim_token,\n    source: ev.source,\n    state: 'FAILED',\n    resolution: null,\n    lead_id: null,\n    provider: null,\n    phone: null,\n    call_attempts: null,\n    crm_attempt: null,\n    followup_id: null,\n    created_now: false,\n    conversation_id: null,\n    stringee_call_id: null,\n    event_at_ms: null,\n    next_attempt_ms: null,\n    next_retry_ms: null,\n    lifecycle: null,          // plan para Fase 2\n    lifecycle_applied: 0,     // 1 si este evento es el ciclo de vida vigente del lead\n    fcf: null,                // fila para wf_call_followups\n    error: null,\n    error_count: safeInt(ev.error_count),\n    log: ''\n  }, o);\n}\nfunction requeue(ev, delaySec, o) {\n  return res(ev, Object.assign({ state: 'RECEIVED', next_attempt_ms: NOW + Math.max(15, delaySec) * 1000 }, o));\n}\nfunction fail(ev, msg, o) {\n  const n = safeInt(ev.error_count) + 1;\n  const delay = Math.min(1800, 60 * Math.pow(2, Math.min(n - 1, 5)));\n  return res(ev, Object.assign({ state: 'FAILED', error: String(msg).slice(0, 900), next_attempt_ms: NOW + delay * 1000 }, o));\n}\nfunction skip(ev, resolution, o) {\n  return res(ev, Object.assign({ state: 'SKIPPED', resolution }, o));\n}\nfunction ageSec(fromMs) { return fromMs ? (NOW - fromMs) / 1000 : 0; }\n\n// ---------- clasificación ----------\nfunction userTurns(transcript) {\n  const turns = [];\n  for (const t of Array.isArray(transcript) ? transcript : []) {\n    if (!t || t.role !== 'user') continue;\n    const msg = String(t.message || '').trim();\n    if (msg.replace(/[\\p{P}\\p{S}\\s]/gu, '').length >= 2) turns.push(msg);\n  }\n  return turns;\n}\nfunction englishOnly(s) {\n  const txt = String(s || '').replace(/\\s+/g, ' ').trim();\n  if (!txt) return '';\n  // si trae escrituras no latinas (p.ej. devanagari), no se copia al CRM\n  if (/[^\\u0000-ɏ -⁯]/.test(txt)) return '';\n  return txt;\n}\nfunction parseCallbackMs(raw, fallbackMs) {\n  const v = String(raw || '').trim();\n  if (v) {\n    const t = new Date(v).getTime();\n    if (Number.isFinite(t) && t > NOW - 3600e3 && t < NOW + 60 * 86400e3) return t;\n  }\n  return fallbackMs;\n}\n// Clasifica una conversación ElevenLabs YA TERMINAL (done / failed)\nfunction classifyConversation(d, endMs) {\n  const meta = d.metadata || {};\n  const analysis = d.analysis || {};\n  const dur = Number(meta.call_duration_secs || 0);\n  const summary = String(analysis.transcript_summary || '');\n  const term = String(meta.termination_reason || '').toLowerCase();\n  const evalTxt = String(analysis.call_successful || 'unknown').toLowerCase();\n  const turns = userTurns(d.transcript);\n  const humanTurns = turns.filter(m => !IVR_RE.test(m));\n  const voicemail = term.includes('voicemail') || /voice ?mail/i.test(summary) || (turns.length > 0 && humanTurns.length === 0);\n  const tooShort = dur > 0 && dur < 8 && evalTxt !== 'success'; // mismo criterio que usaba WF9\n  const dc = analysis.data_collection_results || {};\n  const cbFlag = String((dc.callback_requested && dc.callback_requested.value) || '').toLowerCase();\n  const interest = String((dc.user_interest && dc.user_interest.value) || '').toLowerCase();\n  const callbackRequested = ['true', 'yes'].includes(cbFlag) || interest === 'callback_requested';\n\n  if (!voicemail && !tooShort && humanTurns.length >= 1) {\n    const parts = ['Call answered. Customer conversation took place.'];\n    let callbackAtMs = null;\n    if (callbackRequested) {\n      callbackAtMs = parseCallbackMs(dc.callback_date && dc.callback_date.value, endMs + 24 * 3600e3);\n      parts.push('Customer requested a callback for ' + iso(callbackAtMs) + ' (UTC).');\n    }\n    const sum = englishOnly(summary).slice(0, 300);\n    if (sum) parts.push('Summary: ' + sum);\n    parts.push('AI objective evaluation: ' + (['success', 'failure'].includes(evalTxt) ? evalTxt : 'unknown') + '.');\n    return {\n      kind: 'CONTACTED', sub: callbackRequested ? 'CALLBACK_REQUESTED' : 'CONVERSATION',\n      outcome: 'CONNECTED', callStatus: 'ANSWERED', durationSec: dur,\n      note: parts.join(' '), callbackAtMs, recordingSynced: 0\n    };\n  }\n  if (voicemail) {\n    return { kind: 'UNSUCCESSFUL', sub: 'VOICEMAIL', outcome: 'NO_ANSWER', callStatus: 'NO_ANSWER', durationSec: dur,\n      note: 'Call reached voicemail or an operator message. No customer conversation.', recordingSynced: dur > 0 ? 0 : 1 };\n  }\n  if (dur <= 0) {\n    return { kind: 'UNSUCCESSFUL', sub: 'NO_ANSWER', outcome: 'NO_ANSWER', callStatus: 'NO_ANSWER', durationSec: 0,\n      note: 'Call not answered. The AI conversation never started.', recordingSynced: 1 };\n  }\n  return { kind: 'UNSUCCESSFUL', sub: 'NO_INTERACTION', outcome: 'NO_ANSWER', callStatus: 'NO_ANSWER', durationSec: dur,\n    note: 'Call connected but no customer conversation was detected.', recordingSynced: 0 };\n}\nfunction classifyTelephony(job) {\n  const fs = String(job.final_status || 'FAILED').toUpperCase();\n  const code = Number(job.sip_code);\n  const hasCode = Number.isInteger(code) && code >= 100 && code <= 699;\n  const rawReason = String(job.sip_reason || '').trim();\n  const reason = (hasCode && SIP_TEXT[code]) || (/^[\\x20-\\x7E]{1,60}$/.test(rawReason) ? rawReason : '');\n  const head = STATUS_TEXT[fs] || STATUS_TEXT.FAILED;\n  const sip = hasCode ? ' SIP ' + code + (reason ? ' (' + reason + ').' : '.') : '';\n  return {\n    kind: 'UNSUCCESSFUL', sub: 'TELEPHONY_' + fs,\n    outcome: 'NO_ANSWER', callStatus: fs === 'FAILED' ? 'FAILED' : 'NO_ANSWER', durationSec: 0,\n    note: head + sip, recordingSynced: 1\n  };\n}\nfunction telephonyEvidence(job) {\n  const code = Number(job.sip_code);\n  return (Number.isInteger(code) && code >= 100 && code <= 699) ||\n    !!job.ringing_at || !!job.stringee_call_id || !!job.answered_at || job.answered === true;\n}\nfunction isJobTerminal(job) {\n  return !!job.final_status && !!job.finished_at && (job.status === 'completed' || job.status === 'failed');\n}\nfunction detectProvider(d) {\n  const dyn = (d.conversation_initiation_client_data && d.conversation_initiation_client_data.dynamic_variables) || {};\n  if (String(dyn.provider || '').toUpperCase() === 'STRINGEE') return 'stringee';\n  const phone = String(dyn.phone || '').trim();\n  if (phone.startsWith('+')) return 'asterisk';          // WF2 Asterisk manda E.164\n  if (/^\\d{8,15}$/.test(phone)) return 'stringee';       // worker Stringee manda sólo dígitos\n  return 'asterisk';\n}\n\n// ---------- Asterisk contestada: duración real (CDR.billsec) ----------\n// LeadStudio fija durationSeconds en el POST /followups y NO lo deja editar después.\n// Prioridad: 1) CDR.billsec (tiempo conectado real; NO cdr.duration, que incluye el timbrado)\n//            2) ElevenLabs metadata.call_duration_secs   3) 0 si no hubo conversación conectada.\n// El CDR se identifica por teléfono + hora del uniqueid y se ALINEA con la conversación (hora de\n// fin de la llamada). Sin una coincidencia única y clara se usa ElevenLabs: nunca se adivina.\nconst CDR_BY_EVENT = new Map();\nlet CDR_FAILED = false;   // el nodo CDR falló (tabla/permiso): no se espera a un CDR tardío\nfunction pickCdr(ev, startMs, endMs, durSecs) {\n  const rows = [];\n  const seen = new Set();\n  for (const r of (CDR_BY_EVENT.get(ev.event_key) || [])) {   // Asterisk puede escribir el MISMO registro dos veces (mismo uniqueid, misma duración): cuenta una vez\n    const k = [r.cdr_uniqueid, r.cdr_duration, r.cdr_billsec].join('|');\n    if (!seen.has(k)) { seen.add(k); rows.push(r); }\n  }\n  const cand = [];\n  for (const r of rows) {\n    const bill = Number(r.cdr_billsec);\n    const start = Number(r.cdr_start_s);\n    const total = Number(r.cdr_duration);\n    if (!(bill > 0) || !(start > 0) || !(total >= bill)) continue;\n    const answer = start + (total - bill);\n    let err;\n    if (startMs && endMs && durSecs > 0) {\n      const S = startMs / 1000;\n      const E = endMs / 1000;\n      // la conversación EL empieza al marcar o al contestar: ambos son válidos\n      if (S < start - WAIT.CDR_TOL_START_S || S > answer + WAIT.CDR_TOL_START_S) continue;\n      err = Math.abs(E - (start + total));\n      if (err > WAIT.CDR_TOL_END_S) continue;\n    } else {\n      // sin datos de la conversación: sólo la cercanía al despacho. Se exige que el CDR haya empezado a lo sumo\n      // 4 min antes/después del despacho: un CDR de otra llamada al mismo número (p. ej. de un agente) no sirve.\n      err = Math.abs(start - Math.floor((Number(ev.dispatched_at_ms) || Number(ev.event_at_ms) || 0) / 1000));\n      if (err > WAIT.CDR_UNALIGNED_TOL_S) continue;\n    }\n    cand.push({ err, r, bill, start });\n  }\n  if (!cand.length) return null;\n  cand.sort((a, b) => a.err - b.err);\n  // otro registro del MISMO tramo (pata Local / CDR repetido con otro uniqueid: mismo inicio ±2 s y billsec ±3 s) no es otra llamada\n  const rival = cand.slice(1).find(c => !(Math.abs(c.start - cand[0].start) <= 2 && Math.abs(c.bill - cand[0].bill) <= 3));\n  if (rival && rival.err - cand[0].err < WAIT.CDR_AMBIGUITY_S) return null;   // ambiguo -> ElevenLabs\n  return { billsec: Math.round(cand[0].bill), uniqueid: String(cand[0].r.cdr_uniqueid || ''), startMs: cand[0].start * 1000 };\n}\n// Devuelve { cls, source }: cls con la duración final de una Activity Asterisk creada por WF9.\nfunction withRealDuration(cls, cdr) {\n  const el = Math.max(0, Math.round(Number(cls.durationSec) || 0));\n  if (cdr && (el > 0 || cls.kind === 'CONTACTED')) return { cls: Object.assign({}, cls, { durationSec: cdr.billsec }), source: 'cdr' };\n  return { cls, source: 'el' };\n}\n\n// ---------- CRM ----------\nfunction claimedSet(ev, ctx) {\n  const s = new Set(String(ev.lead_claimed_followups || '').split(',').map(x => x.trim()).filter(Boolean));\n  for (const id of ctx.claimed) s.add(id);\n  return s;\n}\nfunction findOurs(fus, refs, savedId) {\n  if (savedId) {\n    const f = fus.find(x => String(x.id) === String(savedId));\n    return f || { id: String(savedId), _assumed: true, createdAt: null };\n  }\n  for (const f of fus) {\n    const pc = String(f.providerCallId || '');\n    const notes = String(f.notes || '');\n    for (const r of refs) {\n      if (r && (pc === r || notes.includes('Ref: ' + r))) return f;\n    }\n  }\n  return null;\n}\nasync function postFollowup(leadId, body) {\n  const path = '/leads/' + leadId + '/followups';\n  let r = await ls('POST', path, body);\n  if (r.status === 400) {\n    // si el backend rechaza un campo opcional, se reintenta sin él (nunca se pierde la Activity)\n    const txt = JSON.stringify(r.body || {});\n    const b2 = Object.assign({}, body);\n    let changed = false;\n    if (/providerCallId/i.test(txt) && 'providerCallId' in b2) { delete b2.providerCallId; changed = true; }\n    if (/nextActionAt/i.test(txt) && b2.nextActionAt === null) { delete b2.nextActionAt; changed = true; }\n    if (changed) {\n      console.log('⚠️ POST followup 400 por campo opcional; reintento sin él:', txt.slice(0, 200));\n      r = await ls('POST', path, b2);\n    }\n  }\n  const fu = r.ok && r.body && (r.body.followUp || r.body.followup);\n  if (!fu || !fu.id) return { ok: false, err: 'HTTP ' + r.status + ' ' + JSON.stringify(r.body || {}).slice(0, 300) };\n  return { ok: true, id: String(fu.id) };\n}\nfunction buildNotes(x, lifeAttempt, plan, stale) {\n  const parts = [];\n  if (stale) parts.push(HISTORICAL_NOTE);\n  parts.push(x.cls.note);\n  parts.push(attemptText(lifeAttempt));\n  if (!stale && x.cls.kind !== 'CONTACTED') parts.push(plan.text);\n  parts.push('Provider: ' + (x.provider === 'stringee' ? 'Stringee' : 'Asterisk') + '.');\n  if (x.extraNote) parts.push(x.extraNote);\n  const ref = ' Ref: ' + x.refs[0];\n  return parts.join(' ').slice(0, CFG.NOTE_MAX - ref.length) + ref;\n}\nfunction staleReasons(ev, lead, fus, ours, x, batchLatestMs) {\n  const reasons = [];\n  const status = String(lead.status || '').toUpperCase();\n  const upd = ms(lead.updatedAt) || 0;\n  const oursMs = ours ? (ms(ours.createdAt) || 0) : 0;\n  const newer = fus.find(f => isCall(f) && (!ours || String(f.id) !== String(ours.id)) && (ms(f.createdAt) || 0) > x.callEndMs + 120e3);\n  const heldDeferred = !!x.deferred && status === 'ATTEMPTING' && !(Number(ev.lead_newer_dispatch) > 0);\n  if (newer && !heldDeferred) reasons.push('newer_crm_call');\n  const latest = Math.max(Number(ev.lead_latest_lifecycle_at_ms) || 0, batchLatestMs || 0);\n  if (latest && latest > x.callStartMs + 1000 && !heldDeferred) reasons.push('newer_lifecycle_event');\n  // Mientras el evento está sin resolver nadie toca el lead (queda ATTEMPTING y el Mantenimiento\n  // no lo libera). Si el lead cambió DESPUÉS de terminar esta llamada (y no por nuestro propio POST),\n  // hubo un despacho o un estado más nuevo: esta llamada es histórica.\n  // Llamada Asterisk diferida por WF2: el lead sigue ATTEMPTING por nuestra retención (el Mantenimiento no lo libera).\n  // Mientras no exista un despacho MÁS NUEVO del mismo lead, un cambio posterior a la llamada (p. ej. una\n  // automatización post-llamada) no significa que exista un estado más nuevo: se aplica el ciclo de vida.\n  const heldByUs = !!x.deferred && status === 'ATTEMPTING' && !(Number(ev.lead_newer_dispatch) > 0);\n  if (x.deferred && Number(ev.lead_newer_dispatch) > 0) reasons.push('newer_dispatch');\n  if (!heldByUs && upd > Math.max(x.callEndMs, oursMs) + 120e3) reasons.push(status === 'ATTEMPTING' ? 'relocked_by_newer_dispatch' : 'lead_updated_after_call');\n  if (lead.doNotCall) reasons.push('do_not_call');\n  if (status === 'CLOSED' || status === 'UNREACHABLE') reasons.push('status_' + status);\n  if (status === 'CONTACTED' && x.cls.kind !== 'CONTACTED') reasons.push('newer_contact');\n  return reasons;\n}\n\n// Crea (o confirma) la Activity de UNA llamada real y planifica su ciclo de vida.\nasync function applyCall(ev, x, ctx) {\n  const baseFields = {\n    lead_id: x.leadId, provider: x.provider, phone: x.phone || null,\n    call_attempts: validAttempt(x.N), conversation_id: x.convId || null,\n    stringee_call_id: x.stringeeCallId || null, event_at_ms: x.callStartMs\n  };\n  const lr = await ls('GET', '/leads/' + x.leadId);\n  if (lr.status === 404) {\n    if (ageSec(x.callEndMs) > 3600) return skip(ev, 'LEAD_NOT_FOUND', baseFields);\n    return fail(ev, 'LeadStudio GET lead 404 (reintento)', baseFields);\n  }\n  if (!lr.ok) return fail(ev, 'LeadStudio GET lead HTTP ' + lr.status, baseFields);\n  const lead = unwrapLead(lr.body);\n  if (!lead) return fail(ev, 'LeadStudio GET lead: respuesta sin lead', baseFields);\n  const fr = await ls('GET', '/leads/' + x.leadId + '/followups');\n  if (!fr.ok) return fail(ev, 'LeadStudio GET followups HTTP ' + fr.status, baseFields);\n  const fus = listFollowups(fr.body);\n\n  const ours = findOurs(fus, x.refs, ev.followup_id);\n  if (!ours && x.legacyWindow) {\n    const taken = claimedSet(ev, ctx);\n    const legacy = fus.find(f => isCall(f) && !taken.has(String(f.id)) &&\n      (ms(f.createdAt) || 0) >= x.legacyWindow.from && (ms(f.createdAt) || 0) <= x.legacyWindow.to);\n    if (legacy) {\n      ctx.claimed.add(String(legacy.id));\n      return skip(ev, 'ALREADY_IN_CRM', Object.assign({}, baseFields, { followup_id: String(legacy.id) }));\n    }\n  }\n  if (!ours && ctx.leadsWritten.has(x.leadId)) {\n    // un solo write por lead por corrida: el siguiente evento del mismo lead espera\n    return requeue(ev, 20, Object.assign({}, baseFields, { resolution: 'WAITING_SAME_LEAD' }));\n  }\n\n  const A = safeInt(lead.attempts);\n  const crmAttempt = ours ? (safeInt(ev.crm_attempt) || A) : A + 1;\n  const lifeAttempt = Math.max(validAttempt(x.N) || 0, crmAttempt);\n  const plan = x.cls.kind === 'CONTACTED' ? null : planFor(lifeAttempt, x.callStartMs);\n  const target = x.cls.kind === 'CONTACTED'\n    ? { status: 'CONTACTED', stage: null }\n    : (plan.exhausted ? { status: 'CLOSED', stage: CFG.EXHAUSTED_STAGE } : { status: 'NO_ANSWER', stage: null });\n  const leadStatus = String(lead.status || '').toUpperCase();\n  const leadStage = String(lead.stage || '').toUpperCase();\n  const atTarget = leadStatus === target.status && (!target.stage || leadStage === target.stage);\n  const reasons = staleReasons(ev, lead, fus, ours, x, ctx.batchLatest.get(x.leadId));\n  // Si ya creamos esta Activity antes y la Fase 2 quedó a medias (p.ej. status aplicado\n  // pero stage no), el estado del lead lo puso ESTE evento: no es \"más nuevo\".\n  const selfPartial = !!ours && !!ev.followup_id && leadStatus === target.status;\n  const stale = reasons.length > 0 && !selfPartial;\n\n  let followupId = ours ? String(ours.id) : null;\n  let createdNow = false;\n  if (!followupId) {\n    const body = {\n      type: 'CALL',\n      outcome: x.cls.outcome,\n      callStatus: x.cls.callStatus,\n      durationSeconds: Math.max(0, Math.round(Number(x.cls.durationSec) || 0)),\n      // evento histórico: la nota muestra el número de intento con el que se despachó la llamada\n      notes: buildNotes(x, stale && validAttempt(x.N) ? validAttempt(x.N) : lifeAttempt, plan, stale),\n      providerCallId: x.refs[0]\n    };\n    if (!stale) {\n      if (x.cls.kind === 'CONTACTED') {\n        if (x.cls.callbackAtMs) body.nextActionAt = iso(Math.max(x.cls.callbackAtMs, NOW + 60e3));\n      } else if (!plan.exhausted) {\n        // nextActionAt es el campo que LeadStudio usa para lead.nextFollowUpAt (R3)\n        body.nextActionAt = iso(Math.max(plan.atMs, NOW + 60e3));\n      } else {\n        body.nextActionAt = null; // agotado: sin próximo contacto\n      }\n    }\n    const pr = await postFollowup(x.leadId, body);\n    if (!pr.ok) return fail(ev, 'POST followup falló: ' + pr.err, baseFields);\n    followupId = pr.id;\n    createdNow = true;\n  }\n  ctx.leadsWritten.add(x.leadId);\n  ctx.claimed.add(followupId);\n\n  let lifecycle = null;\n  let lifecycleApplied = 0;\n  if (!stale) {\n    lifecycleApplied = 1;\n    ctx.batchLatest.set(x.leadId, Math.max(ctx.batchLatest.get(x.leadId) || 0, x.callStartMs));\n    if (!atTarget) {\n      lifecycle = { status: target.status, stage: target.stage, from_status: leadStatus, from_stage: leadStage };\n    }\n  }\n  const state = stale ? 'STALE' : 'DONE';\n  let resolution;\n  if (createdNow) resolution = stale ? 'HISTORICAL_ACTIVITY_CREATED' : (target.stage ? 'ACTIVITY_CREATED_EXHAUSTED' : 'ACTIVITY_CREATED');\n  else resolution = stale ? 'HISTORICAL_ACTIVITY_PRESENT' : 'ACTIVITY_PRESENT';\n  if (x.resolutionPrefix) resolution = x.resolutionPrefix + '_' + resolution;\n  if (x.durationSource) resolution = resolution + ':' + x.durationSource;   // cdr | el (auditoría de la fuente de durationSeconds)\n\n  return res(ev, Object.assign({}, baseFields, {\n    state,\n    resolution: resolution.slice(0, 48),\n    crm_attempt: crmAttempt,\n    followup_id: followupId,\n    created_now: createdNow,\n    lifecycle,\n    lifecycle_applied: lifecycleApplied,\n    stale_reasons: reasons,\n    fcf: {\n      phone: String(x.phone || '').slice(0, 20),\n      lead_id: x.leadId,\n      followup_id: followupId,\n      provider: x.provider,\n      outcome: x.cls.outcome,\n      call_status: x.cls.callStatus,\n      recording_synced: x.cls.recordingSynced,\n      created_epoch: x.provider === 'asterisk' ? Math.floor((x.fcfEpochMs || x.callStartMs) / 1000) : null   // hora de INICIO de la llamada\n    },\n    log: `${x.provider} ${x.leadId} intento ${lifeAttempt} ${x.cls.kind}/${x.cls.sub} -> ${state}` +\n      (lifecycle ? ` (${lifecycle.status}${lifecycle.stage ? '/' + lifecycle.stage : ''})` : '') +\n      (reasons.length ? ' [' + reasons.join(',') + ']' : '')\n  }));\n}\n\n// ---------- fuentes ----------\nasync function fetchConversation(convId) {\n  return http('GET', CFG.EL_BASE + '/' + encodeURIComponent(convId), { headers: { 'xi-api-key': CFG.EL_KEY }, timeout: 20000 });\n}\n\nasync function processStringeeJob(ev, ctx) {\n  const jobId = String(ev.external_id || '');\n  if (!UUID_RE.test(jobId)) return skip(ev, 'INVALID_JOB_ID');\n  const firstSeen = Number(ev.dispatched_at_ms) || Number(ev.first_seen_at_ms) || NOW;\n  const w = await http('GET', CFG.WORKER_BASE + '/calls/' + jobId, { timeout: 15000 });\n  if (w.status === 404) {\n    // el worker no conoce el job: NO se consume intento; se reintenta y, pasado el margen, se audita\n    if (ageSec(firstSeen) > WAIT.WORKER_404_GIVEUP_SEC) {\n      console.error('🚨 Job Stringee desconocido para el worker tras 2 h (sin Activity, sin intento):', jobId);\n      return skip(ev, 'WORKER_JOB_NOT_FOUND');\n    }\n    return fail(ev, 'worker 404 call_not_found');\n  }\n  if (!w.ok) return fail(ev, 'worker HTTP ' + w.status + ' ' + JSON.stringify(w.body || {}).slice(0, 150));\n  const job = w.body || {};\n  if (String(job.job_id || '') !== jobId) return fail(ev, 'worker devolvió un job distinto');\n\n  const leadId = String(job.lead_id || '').trim();\n  const startMs = ms(job.started_at) || ms(job.created_at) || firstSeen;\n  const convId = CONV_RE.test(String(job.elevenlabs_conversation_id || '')) ? job.elevenlabs_conversation_id : null;\n  const base = {\n    lead_id: UUID_RE.test(leadId) ? leadId : null, provider: 'stringee', phone: job.phone || ev.phone || null,\n    call_attempts: validAttempt(job.call_attempts) || validAttempt(ev.call_attempts),\n    conversation_id: convId, stringee_call_id: job.stringee_call_id || null, event_at_ms: startMs\n  };\n\n  if (!isJobTerminal(job)) {\n    if (ageSec(ms(job.created_at) || firstSeen) > 3 * 3600) console.error('🚨 Job Stringee sin estado final hace >3 h:', jobId);\n    return requeue(ev, WAIT.JOB_RECHECK_SEC, Object.assign({}, base, { resolution: 'WAITING_JOB_FINAL' }));\n  }\n  const endMs = ms(job.finished_at) || NOW;\n  if (ageSec(endMs) < WAIT.JOB_SETTLE_SEC) return requeue(ev, WAIT.JOB_SETTLE_SEC, Object.assign({}, base, { resolution: 'WAITING_JOB_SETTLE' }));\n  if (!UUID_RE.test(leadId)) return skip(ev, 'LEGACY_OR_INVALID_LEAD_ID', base);\n\n  // Fallo del proveedor SIN evidencia telefónica: no es un intento real.\n  // Sin Activity, sin consumir intento; el lead vuelve a NOT_CONTACTED. Queda auditado.\n  if (String(job.final_status).toUpperCase() === 'FAILED' && !telephonyEvidence(job)) {\n    const lr = await ls('GET', '/leads/' + leadId);\n    if (!lr.ok) return fail(ev, 'LeadStudio GET lead HTTP ' + lr.status, base);\n    const lead = unwrapLead(lr.body) || {};\n    const st = String(lead.status || '').toUpperCase();\n    const upd = ms(lead.updatedAt) || 0;\n    const newer = Math.max(Number(ev.lead_latest_lifecycle_at_ms) || 0, ctx.batchLatest.get(leadId) || 0) > startMs + 1000;\n    if (st === 'ATTEMPTING' && upd <= endMs + 120e3 && !newer) {\n      return res(ev, Object.assign({}, base, {\n        state: 'DONE', resolution: 'PROVIDER_FAILURE_RELEASED',\n        lifecycle: { status: 'NOT_CONTACTED', stage: null, from_status: st, provider_failure: true },\n        log: 'stringee ' + leadId + ' fallo de proveedor sin evidencia telefónica -> NOT_CONTACTED (no consume intento)'\n      }));\n    }\n    return res(ev, Object.assign({}, base, { state: 'DONE', resolution: 'PROVIDER_FAILURE_NO_RELEASE',\n      log: 'stringee ' + leadId + ' fallo de proveedor sin evidencia; lead en ' + st + ' (no se toca)' }));\n  }\n\n  let cls;\n  let extraNote = null;\n  if (job.answered === true) {\n    if (convId) {\n      const c = await fetchConversation(convId);\n      if (c.status === 404) {\n        if (ageSec(endMs) <= WAIT.CONV_404_GIVEUP_SEC) return fail(ev, 'ElevenLabs 404 para ' + convId + ' (reintento)', base);\n        cls = { kind: 'UNSUCCESSFUL', sub: 'ANSWERED_CONVERSATION_MISSING', outcome: 'NO_ANSWER', callStatus: 'NO_ANSWER', durationSec: 0,\n          note: 'Call answered but the AI conversation record is not available. No customer conversation could be confirmed.', recordingSynced: 0 };\n      } else if (!c.ok) {\n        return fail(ev, 'ElevenLabs HTTP ' + c.status, base);\n      } else {\n        const d = c.body || {};\n        const status = String(d.status || '').toLowerCase();\n        if (status !== 'done' && status !== 'failed') {\n          if (ageSec(endMs) > 3 * 3600) console.error('🚨 Conversación sin estado terminal >3 h:', convId, status);\n          return requeue(ev, WAIT.CONV_RECHECK_SEC, Object.assign({}, base, { resolution: 'WAITING_CONVERSATION' }));\n        }\n        cls = classifyConversation(d, endMs);\n      }\n    } else {\n      // contestó pero el puente de IA no llegó a conectar: 1 Activity, ciclo 3x3\n      const ansMs = ms(job.answered_at) || endMs;\n      cls = { kind: 'UNSUCCESSFUL', sub: 'ANSWERED_NO_AI', outcome: 'NO_ANSWER', callStatus: 'NO_ANSWER',\n        durationSec: Math.max(0, Math.round((endMs - ansMs) / 1000)),\n        note: 'Call answered but the AI assistant could not connect (Stringee bridge). No customer conversation took place.', recordingSynced: 0 };\n    }\n  } else {\n    cls = classifyTelephony(job);\n    if (job.error === 'worker_restarted') extraNote = 'The dialer restarted during this call.';\n  }\n  return applyCall(ev, {\n    provider: 'stringee', leadId, phone: String(job.phone || ev.phone || ''), N: job.call_attempts,\n    refs: ['stringee:' + jobId].concat(convId ? ['elevenlabs:' + convId] : []),\n    cls, callStartMs: startMs, callEndMs: endMs, convId, stringeeCallId: job.stringee_call_id || null, extraNote\n  }, ctx);\n}\n\n// Asterisk contestada (ledger de WF2) cuya conversación de ElevenLabs no existe / no llega a estado terminal:\n// no se deja al lead colgado ni sin Activity. Se registra UNA Activity sin conversación confirmada\n// (misma política que Stringee \"contestó pero sin conversación\": NO_ANSWER, ciclo 3x3).\nasync function deferredWithoutConversation(ev, ctx, why) {\n  const leadId = String(ev.lead_id || '').trim();\n  if (!UUID_RE.test(leadId)) return skip(ev, 'MISSING_OR_LEGACY_LEAD_ID', { provider: 'asterisk' });\n  const startMs = Number(ev.event_at_ms) || Number(ev.dispatched_at_ms) || NOW;\n  const cdr = pickCdr(ev, null, null, 0);\n  const convId = String(ev.external_id || '');\n  const cls = { kind: 'UNSUCCESSFUL', sub: 'ANSWERED_CONVERSATION_MISSING', outcome: 'NO_ANSWER', callStatus: 'NO_ANSWER',\n    durationSec: cdr ? cdr.billsec : 0,\n    note: 'Call answered but the AI conversation record is not available. No customer conversation could be confirmed.', recordingSynced: cdr ? 0 : 1 };\n  console.error('⚠️ Asterisk diferida sin conversación utilizable (' + why + '): ' + convId + ' -> Activity sin conversación confirmada');\n  return applyCall(ev, { provider: 'asterisk', leadId, phone: String(ev.phone || ''), N: ev.call_attempts, refs: ['elevenlabs:' + convId],\n    cls, callStartMs: startMs, callEndMs: startMs + (cdr ? cdr.billsec * 1000 : 0), convId, resolutionPrefix: 'ASTERISK_DEFER',\n    deferred: true, durationSource: cdr ? 'cdr' : 'el', fcfEpochMs: cdr ? cdr.startMs : null }, ctx);\n}\n\nasync function processElevenLabs(ev, ctx) {\n  const convId = String(ev.external_id || '');\n  if (!CONV_RE.test(convId)) return skip(ev, 'INVALID_CONVERSATION_ID');\n  if (ev.linked_job_key) return skip(ev, 'LINKED_TO_STRINGEE_JOB', { provider: 'stringee', conversation_id: convId, lead_id: ev.lead_id || null });\n  // Asterisk CONTESTADA registrada por WF2 en el ledger (dispatched_at): WF2 NO creó la Activity, la crea WF9 al terminar\n  const deferred = ev.provider === 'asterisk' && Number(ev.dispatched_at_ms) > 0;\n  // Asterisk (sin ledger) ya enriquecido y todavía dentro de la espera de WF2: no hace falta llamar a ninguna API\n  if (!deferred && ev.provider === 'asterisk' && ev.lead_id && Number(ev.event_at_ms) > 0) {\n    const readyAt0 = Number(ev.event_at_ms) + WAIT.ASTERISK_READY_SEC * 1000;\n    if (NOW < readyAt0) return requeue(ev, (readyAt0 - NOW) / 1000, { resolution: 'WAITING_WF2_ACTIVITY', conversation_id: convId });\n  }\n\n  const c = await fetchConversation(convId);\n  if (c.status === 404) {\n    if (ageSec(Number(ev.first_seen_at_ms) || NOW) > WAIT.CONV_404_GIVEUP_SEC) return deferred ? deferredWithoutConversation(ev, ctx, 'conversation_404') : skip(ev, 'CONVERSATION_NOT_FOUND');\n    return fail(ev, 'ElevenLabs 404 ' + convId);\n  }\n  if (!c.ok) return fail(ev, 'ElevenLabs HTTP ' + c.status);\n  const d = c.body || {};\n  const meta = d.metadata || {};\n  const dyn = (d.conversation_initiation_client_data && d.conversation_initiation_client_data.dynamic_variables) || {};\n  const startMs = (Number(meta.start_time_unix_secs) || 0) * 1000 || Number(ev.event_at_ms) || NOW;\n  const dur = Number(meta.call_duration_secs || 0);\n  const endMs = startMs + dur * 1000;\n  const provider = detectProvider(d);\n  const leadId = String(dyn.lead_id || (deferred ? ev.lead_id : '') || '').trim();\n  const phone = String(dyn.phone || (deferred ? ev.phone : '') || '').replace(/[^0-9+]/g, '');\n  const base = { provider, conversation_id: convId, event_at_ms: startMs, phone: phone || null,\n    lead_id: UUID_RE.test(leadId) ? leadId : null, call_attempts: validAttempt(dyn.call_attempts) };\n\n  const status = String(d.status || '').toLowerCase();\n  if (status !== 'done' && status !== 'failed') {\n    if (ageSec(startMs) > 3 * 3600) console.error('🚨 Conversación sin estado terminal >3 h:', convId, status);\n    if (deferred && ageSec(startMs) > WAIT.ASTERISK_DEFER_GIVEUP_SEC) return deferredWithoutConversation(ev, ctx, 'conversation_not_terminal');\n    return requeue(ev, WAIT.CONV_RECHECK_SEC, Object.assign({}, base, { resolution: 'WAITING_CONVERSATION' }));\n  }\n  if (!UUID_RE.test(leadId)) return skip(ev, 'MISSING_OR_LEGACY_LEAD_ID', base);\n\n  // 1ª pasada: guardar lead / proveedor / intento para que el claim pueda enlazar\n  // esta conversación con su job Stringee o con las Activities ya tomadas.\n  if (ev.lead_id !== leadId || ev.provider !== provider || (base.call_attempts && Number(ev.call_attempts) !== base.call_attempts)) {\n    return requeue(ev, WAIT.ENRICH_SEC, Object.assign({}, base, { resolution: 'ENRICHED' }));\n  }\n\n  if (provider === 'stringee') {\n    // La Activity de Stringee la crea el JOB. Esta conversación sólo espera a que un job la enlace.\n    if (Number(ev.lead_unresolved_jobs) > 0 && ageSec(startMs) < WAIT.STRINGEE_CONV_MAX_WAIT_SEC) {\n      return requeue(ev, 300, Object.assign({}, base, { resolution: 'WAITING_STRINGEE_JOB' }));\n    }\n    if (ageSec(startMs) < WAIT.STRINGEE_CONV_LINK_SEC) {\n      return requeue(ev, WAIT.STRINGEE_CONV_LINK_SEC - ageSec(startMs), Object.assign({}, base, { resolution: 'WAITING_STRINGEE_JOB' }));\n    }\n    // Sin job en el ledger (dispatch anterior al despliegue o ledger fallido):\n    // se registra UNA Activity desde la conversación. El puente sólo abre\n    // ElevenLabs cuando el teléfono contestó (R2).\n    const cls = classifyConversation(d, endMs);\n    return applyCall(ev, {\n      provider: 'stringee', leadId, phone, N: dyn.call_attempts, refs: ['elevenlabs:' + convId],\n      cls, callStartMs: startMs, callEndMs: endMs, convId,\n      legacyWindow: { from: startMs - 120e3, to: endMs + 30 * 60e3 }, resolutionPrefix: 'STRINGEE_FALLBACK'\n    }, ctx);\n  }\n\n  // ---------------- Asterisk ----------------\n  // diferida: la conversación ya es terminal; sólo se espera a que ElevenLabs/CDR se asienten. Sin ledger: espera a WF2 (legado).\n  const readyAt = deferred ? endMs + WAIT.ASTERISK_DEFER_SETTLE_SEC * 1000 : startMs + Math.max(WAIT.ASTERISK_READY_SEC, dur + 180) * 1000;\n  if (NOW < readyAt) return requeue(ev, (readyAt - NOW) / 1000, Object.assign({}, base, { resolution: 'WAITING_WF2_ACTIVITY' }));\n\n  const lr = await ls('GET', '/leads/' + leadId);\n  if (lr.status === 404) {\n    if (ageSec(endMs) > 3600) return skip(ev, 'LEAD_NOT_FOUND', base);\n    return fail(ev, 'LeadStudio GET lead 404 (reintento)', base);\n  }\n  if (!lr.ok) return fail(ev, 'LeadStudio GET lead HTTP ' + lr.status, base);\n  const lead = unwrapLead(lr.body);\n  if (!lead) return fail(ev, 'LeadStudio GET lead: respuesta sin lead', base);\n  const fr = await ls('GET', '/leads/' + leadId + '/followups');\n  if (!fr.ok) return fail(ev, 'LeadStudio GET followups HTTP ' + fr.status, base);\n  const fus = listFollowups(fr.body);\n  const cls = classifyConversation(d, endMs);\n\n  // ¿Ya registramos antes esta llamada como hueco (Activity propia con Ref)?\n  const gapOurs = findOurs(fus, ['elevenlabs:' + convId], null);\n  if (!gapOurs) {\n    const taken = claimedSet(ev, ctx);\n    const from = startMs - WAIT.ASTERISK_MATCH_BEFORE_SEC * 1000;\n    const to = startMs + WAIT.ASTERISK_MATCH_AFTER_SEC * 1000;\n    // 1) Activity de WF2 ya enlazada en una pasada anterior (corrección que falló y se reintenta)\n    const saved = ev.followup_id ? fus.find(f => String(f.id) === String(ev.followup_id) && isCall(f)) : null;\n    // 2) WF2 escribe el conversation_id en las notes de CONNECTED: match exacto\n    const exact = fus.find(f => isCall(f) && String(f.notes || '').includes(convId));\n    // 3) ventana de tiempo, excluyendo Activities ya tomadas por otros eventos del lead\n    // diferida: la Activity de esta llamada NO puede existir todavía salvo por conversation_id / providerCallId / Ref (nunca por ventana de tiempo)\n    const inWin = deferred ? [] : fus.filter(f => isCall(f) && !taken.has(String(f.id)) && (ms(f.createdAt) || 0) >= from && (ms(f.createdAt) || 0) <= to);\n    const matched = saved || exact || inWin.slice().sort((a, b) => (ms(a.createdAt) || 0) - (ms(b.createdAt) || 0))[0];\n    if (matched) {\n      ctx.claimed.add(String(matched.id));\n      const matchedMs = ms(matched.createdAt) || startMs;\n      if (String(matched.outcome).toUpperCase() === 'CONNECTED' && cls.kind !== 'CONTACTED') {\n        // WF2 marcó CONNECTED pero no hubo conversación real (buzón / silencio / operador):\n        // se corrige SÓLO el ciclo de vida, sin crear otra Activity.\n        const st = String(lead.status || '').toUpperCase();\n        const newerCall = fus.find(f => isCall(f) && String(f.id) !== String(matched.id) && (ms(f.createdAt) || 0) > matchedMs + 5000);\n        const newerLife = Math.max(Number(ev.lead_latest_lifecycle_at_ms) || 0, ctx.batchLatest.get(leadId) || 0) > startMs + 1000;\n        const updMs = ms(lead.updatedAt) || 0;\n        // sólo si el lead sigue exactamente como lo dejó WF2 (nadie lo tocó después de su Activity)\n        if (st === 'CONTACTED' && !newerCall && !newerLife && updMs <= matchedMs + 600e3 && !lead.doNotCall && !ctx.leadsWritten.has(leadId)) {\n          ctx.leadsWritten.add(leadId);\n          ctx.batchLatest.set(leadId, Math.max(ctx.batchLatest.get(leadId) || 0, startMs));\n          const A = safeInt(lead.attempts); // WF2 ya contó esta llamada\n          const plan = planFor(Math.max(A, validAttempt(dyn.call_attempts) || 0), startMs);\n          const retryMs = plan.exhausted ? null : Math.max(plan.atMs, NOW + 60e3);\n          return res(ev, Object.assign({}, base, {\n            state: 'DONE',\n            resolution: plan.exhausted ? 'ASTERISK_CORRECTED_EXHAUSTED' : 'ASTERISK_LIFECYCLE_CORRECTED',\n            followup_id: String(matched.id),\n            crm_attempt: A,\n            lifecycle: plan.exhausted\n              ? { status: 'CLOSED', stage: CFG.EXHAUSTED_STAGE, from_status: st }\n              : { status: 'NO_ANSWER', stage: null, from_status: st },\n            lifecycle_applied: 1,\n            // LeadStudio no permite fijar nextFollowUpAt sin crear otra Activity (R3):\n            // el próximo reintento queda retenido aquí y lo respeta el Mantenimiento de WF2.\n            next_retry_ms: retryMs,\n            log: 'asterisk ' + leadId + ' WF2=CONNECTED pero ' + cls.sub + ' -> ' +\n              (plan.exhausted ? 'CLOSED/UNRESPONSIVE' : 'NO_ANSWER (reintento retenido ' + iso(retryMs) + ')')\n          }));\n        }\n        return skip(ev, 'ASTERISK_CORRECTION_NOT_APPLICABLE', Object.assign({}, base, { followup_id: String(matched.id) }));\n      }\n      return skip(ev, 'ASTERISK_OWNED_BY_WF2', Object.assign({}, base, { followup_id: String(matched.id) }));\n    }\n  }\n  // Hueco: WF2 no dejó ninguna Activity para esta llamada Asterisk (p.ej. timeout\n  // del dial clasificado como error de proveedor). Se registra UNA.\n  const evGap = Object.assign({}, ev, { followup_id: gapOurs ? String(gapOurs.id) : null });\n  // Duración real: CDR.billsec -> ElevenLabs -> 0 (LeadStudio no permite corregirla después del POST)\n  const cdr = pickCdr(ev, startMs, endMs, dur);\n  // CDR tardío (p. ej. Asterisk escribe el CDR en lotes): sólo diferidas con conversación real, y sólo unos segundos tras colgar\n  if (deferred && !cdr && dur > 0 && !CDR_FAILED && ageSec(endMs) < WAIT.CDR_LATE_SEC) return requeue(ev, 45, Object.assign({}, base, { resolution: 'WAITING_CDR' }));\n  const dd = withRealDuration(cls, cdr);\n  return applyCall(evGap, {\n    provider: 'asterisk', leadId, phone, N: dyn.call_attempts, refs: ['elevenlabs:' + convId],\n    cls: dd.cls, callStartMs: startMs, callEndMs: endMs, convId, resolutionPrefix: deferred ? 'ASTERISK_DEFER' : 'ASTERISK_GAP',\n    deferred, durationSource: (deferred || dd.source === 'cdr') ? dd.source : null, fcfEpochMs: cdr ? cdr.startMs : null\n  }, ctx);\n}\n\n// ---------- SQL de wf_call_followups ----------\nfunction fcfSql(r) {\n  if (!r.fcf || !r.followup_id || !(r.state === 'DONE' || r.state === 'STALE')) {\n    return 'SELECT 1 AS noop';\n  }\n  const f = r.fcf;\n  // Asterisk: la fila se marca con la hora de INICIO de la llamada (no con la de este INSERT). WF10 empareja la\n  // grabación con la fila creada entre el inicio de la llamada y +15 min; esta Activity se crea al terminar la llamada.\n  const ce = Number(f.created_epoch);\n  const withTime = f.provider === 'asterisk' && Number.isFinite(ce) && ce > 1e9;\n  return 'INSERT INTO wf_call_followups (phone, lead_id, followup_id, provider, outcome, call_status, recording_synced' + (withTime ? ', created_at' : '') + ') ' +\n    'SELECT ' + [q(f.phone || ''), q(f.lead_id), q(f.followup_id), q(f.provider), q(f.outcome), q(f.call_status), q(Number(f.recording_synced) ? 1 : 0)]\n      .concat(withTime ? ['FROM_UNIXTIME(' + Math.trunc(ce) + ')'] : []).join(', ') +\n    ' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM wf_call_followups WHERE followup_id = ' + q(f.followup_id) + ')';\n}\n\n// ============================================================================\n// MAIN\n// ============================================================================\nconst START = Date.now();\n// Los eventos vienen del claim; el CDR (billsec) del nodo MySQL intermedio. Si ese nodo falló, se usa la duración de ElevenLabs.\nconst rows = $('🔒 Claim + Leer Eventos (MySQL)').all().map(i => i.json || {});\n{\n  let cdrErr = null;\n  for (const it of $input.all()) {\n    const r = (it && it.json) || {};\n    if (r.error || (r.message && !r.ref)) { cdrErr = r.message || r.error; continue; }\n    if (!r.ref) continue;\n    if (!CDR_BY_EVENT.has(r.ref)) CDR_BY_EVENT.set(r.ref, []);\n    CDR_BY_EVENT.get(r.ref).push(r);\n  }\n  if (cdrErr) CDR_FAILED = true;\n  if (cdrErr) console.error('🚨 CDR no disponible (' + JSON.stringify(cdrErr).slice(0, 200) + '): las llamadas Asterisk usarán la duración de ElevenLabs');\n}\nconst events = rows.filter(r => r && r.event_key && r.claim_token);\nconst bad = rows.filter(r => r && Object.keys(r).some(k => k !== 'success') && !(r.event_key && r.claim_token));\nif (bad.length) console.error('🚨 Fase 1: filas sin event_key/claim_token (¿error MySQL?):', JSON.stringify(bad).slice(0, 300));\n\n// agrupar por lead (mismo lead = secuencial y en orden cronológico; leads distintos = en paralelo)\nconst groups = new Map();\nfor (const ev of events) {\n  const k = ev.lead_id ? 'lead:' + ev.lead_id : 'ev:' + ev.event_key;\n  if (!groups.has(k)) groups.set(k, []);\n  groups.get(k).push(ev);\n}\nfor (const g of groups.values()) g.sort((a, b) => (Number(a.event_at_ms) || Number(a.first_seen_at_ms) || 0) - (Number(b.event_at_ms) || Number(b.first_seen_at_ms) || 0));\n\nconst ctx = { leadsWritten: new Set(), batchLatest: new Map(), claimed: new Set() };\nconst results = new Map();\nasync function runOne(ev) {\n  let r;\n  if (Date.now() - START > WAIT.TIME_BUDGET_MS) {\n    r = requeue(ev, 15, { resolution: 'DEFERRED_TIME_BUDGET' });\n  } else {\n    try {\n      if (ev.source === 'stringee') r = await processStringeeJob(ev, ctx);\n      else if (ev.source === 'elevenlabs') r = await processElevenLabs(ev, ctx);\n      else r = skip(ev, 'UNKNOWN_SOURCE');\n    } catch (e) {\n      r = fail(ev, 'excepción: ' + String((e && e.message) || e));\n    }\n  }\n  r.fcf_sql = fcfSql(r);\n  if (r.log) console.log('📞 ' + r.log);\n  if (r.state === 'FAILED') console.error('❌ ' + r.event_key + ': ' + r.error);\n  results.set(ev.event_key, r);\n}\nconst queue = [...groups.values()];\nasync function worker() {\n  while (queue.length) {\n    const g = queue.shift();\n    for (const ev of g) await runOne(ev);\n  }\n}\nawait Promise.all(Array.from({ length: Math.min(WAIT.CONCURRENCY, queue.length) }, worker));\n\nconst out = events.map(ev => ({ json: results.get(ev.event_key) }));\nconsole.log(`⚙️ Fase 1: ${out.length} eventos | ` + ['DONE', 'STALE', 'SKIPPED', 'RECEIVED', 'FAILED'].map(s => s + '=' + out.filter(o => o.json.state === s).length).join(' '));\nreturn out;\n"
+      },
+      "id": "f767ffd4-43c9-4256-8d46-73ed2075115c",
+      "name": "⚙️ Fase 1 — Activity CRM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38864,
+        11744
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ----------------------------------------------------------------------------\n// BLOQUE COMÚN (idéntico en Fase 1 y Fase 2). Comentarios en español.\n// Todo texto que se guarda en LeadStudio (notes) va en INGLÉS.\n// ----------------------------------------------------------------------------\nconst self = this;\nconst CFG = {\n  LS_BASE: 'https://lead-studio-9gnl.onrender.com/api',\n  TOKEN_URL: 'http://172.18.0.1:8092/token',          // mismo token service que usaba WF9\n  WORKER_BASE: 'http://172.18.0.1:8091',             // worker Stringee (GET /calls/:job_id)\n  EL_BASE: 'https://api.elevenlabs.io/v1/convai/conversations',\n  EL_KEY: '',                                // misma key que \"Traer Histórico ElevenLabs\"\n  MAX_ATTEMPTS: 9,                                     // 3 ciclos x 3 intentos\n  EXHAUSTED_STAGE: 'UNRESPONSIVE',                     // enum real del backend (R7)\n  NOTE_MAX: 900\n};\nconst NOW = Date.now();\nconst UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst CONV_RE = /^conv_[A-Za-z0-9]{8,64}$/;\n\n// HTTP que nunca lanza: devuelve {ok,status,body}\nasync function http(method, url, opts = {}) {\n  try {\n    const r = await self.helpers.httpRequest({\n      method,\n      url,\n      body: opts.body,\n      json: true,\n      headers: Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {}),\n      returnFullResponse: true,\n      ignoreHttpStatusErrors: true,\n      timeout: opts.timeout || 20000\n    });\n    return { ok: r.statusCode >= 200 && r.statusCode < 300, status: r.statusCode, body: r.body };\n  } catch (e) {\n    return { ok: false, status: 0, body: { error: String((e && e.message) || e) } };\n  }\n}\n\nlet TOKEN = null;\nasync function getToken(force) {\n  if (TOKEN && !force) return TOKEN;\n  const r = await http('POST', CFG.TOKEN_URL, {});\n  const t = r.ok && r.body && r.body.accessToken;\n  if (!t) throw new Error('token service falló HTTP ' + r.status);\n  TOKEN = t;\n  return t;\n}\nasync function ls(method, path, body) {\n  let t = await getToken(false);\n  let r = await http(method, CFG.LS_BASE + path, { body, headers: { Authorization: 'Bearer ' + t } });\n  if (r.status === 401) {\n    t = await getToken(true);\n    r = await http(method, CFG.LS_BASE + path, { body, headers: { Authorization: 'Bearer ' + t } });\n  }\n  return r;\n}\n\n// Literales SQL seguros (MariaDB con escapes de backslash activos).\n// El nodo MySQL de n8n elimina los saltos de línea al separar sentencias,\n// por eso aquí nunca se dejan saltos de línea crudos dentro de un literal.\nfunction q(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  const s = String(v)\n    .replace(/\\u0000/g, '')\n    .replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '')\n    .replace(/\\\\/g, '\\\\\\\\')\n    .replace(/'/g, \"''\")\n    .replace(/\\{\\{/g, '{ {')\n    .replace(/\\}\\}/g, '} }');\n  return \"'\" + s + \"'\";\n}\n// DATETIME(3) en UTC explícito\nfunction dt(msv) {\n  if (!msv || !Number.isFinite(Number(msv))) return 'NULL';\n  return \"'\" + new Date(Number(msv)).toISOString().replace('T', ' ').replace('Z', '') + \"'\";\n}\nfunction ms(v) {\n  if (v === null || v === undefined || v === '') return null;\n  if (typeof v === 'number') return Number.isFinite(v) ? v : null;\n  const t = new Date(v).getTime();\n  return Number.isFinite(t) ? t : null;\n}\nfunction iso(msv) { return new Date(msv).toISOString(); }\nfunction safeInt(v) { const n = Number(v); return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0; }\nfunction validAttempt(v) {\n  const n = Number(v);\n  return Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;\n}\n\n// Mismo cálculo que WF2 (Classify Dial Result Asterisk): días hábiles saltan sábado y domingo\nfunction addHours(d, h) { return new Date(d.getTime() + h * 3600000); }\nfunction addBusinessDays(d, days) {\n  const r = new Date(d.getTime());\n  let added = 0;\n  while (added < days) {\n    r.setDate(r.getDate() + 1);\n    const wd = r.getDay();\n    if (wd !== 0 && wd !== 6) added++;\n  }\n  return r;\n}\n\n// Política 3x3. attempt = número real de intento (1..9). >=9 => agotado.\nfunction planFor(attempt, baseMs) {\n  const a = Math.max(1, Math.trunc(attempt));\n  if (a >= CFG.MAX_ATTEMPTS) {\n    return { exhausted: true, text: 'Maximum of 9 call attempts reached. Lead closed as unresponsive.' };\n  }\n  const pos = ((a - 1) % 3) + 1;\n  const cycle = Math.ceil(a / 3);\n  const base = new Date(baseMs);\n  let at, text;\n  if (pos === 1) { at = addHours(base, 2); text = 'Next attempt in 2 hours.'; }\n  else if (pos === 2) { at = addHours(base, 3); text = 'Next attempt in 3 hours.'; }\n  else if (cycle === 1) { at = addBusinessDays(base, 2); text = 'End of cycle 1. Next cycle in 2 business days.'; }\n  else { at = addBusinessDays(base, 3); text = 'End of cycle 2. Next cycle in 3 business days.'; }\n  return { exhausted: false, atMs: at.getTime(), text, cycle, pos };\n}\nfunction attemptText(a) {\n  if (a <= CFG.MAX_ATTEMPTS) {\n    const pos = ((a - 1) % 3) + 1;\n    const cycle = Math.ceil(a / 3);\n    return 'Call attempt ' + a + ' of 9 (cycle ' + cycle + ', ' + pos + '/3).';\n  }\n  return 'Call attempt ' + a + ', beyond the configured maximum of 9.';\n}\n\nfunction unwrapLead(body) {\n  if (!body || typeof body !== 'object') return null;\n  if (body.lead && typeof body.lead === 'object') return body.lead;\n  return body.id ? body : null;\n}\nfunction listFollowups(body) {\n  if (Array.isArray(body)) return body;\n  if (body && Array.isArray(body.followUps)) return body.followUps;\n  if (body && Array.isArray(body.followups)) return body.followups;\n  return [];\n}\nfunction isCall(f) { return !!(f && f.outcome); }   // activities de llamada tienen outcome; tareas/cambios de stage no\n\n// ============================================================================\n// ⚙️ FASE 2 — CICLO DE VIDA + CIERRE DEL EVENTO (WF9 v3)\n//\n// Corre DESPUÉS de que la Activity quedó creada en LeadStudio (Fase 1) y de que\n// su followup_id quedó guardado en wf_call_followups.\n//  - Aplica status (y stage UNRESPONSIVE en el intento 9) con PATCH separados,\n//    igual que WF2: primero status, después stage.\n//  - Si un PATCH falla, el evento queda FAILED (reintento con backoff) y conserva\n//    el followup_id: el reintento NO crea otra Activity.\n//  - Genera el UPDATE final de wf_call_events, protegido por claim_token.\n// ============================================================================\n\nconst P1 = $('⚙️ Fase 1 — Activity CRM').all().map(i => i.json || {}).filter(r => r.event_key && r.claim_token);\n\nasync function patchLead(leadId, body) {\n  let r = await ls('PATCH', '/leads/' + leadId, body);\n  if (!r.ok && r.status === 400 && 'nextFollowUpAt' in body) {\n    // si el backend no acepta nextFollowUpAt=null, el status se aplica igual sin ese campo\n    const b2 = Object.assign({}, body); delete b2.nextFollowUpAt;\n    r = await ls('PATCH', '/leads/' + leadId, b2);\n  }\n  if (!r.ok && r.status !== 400 && r.status !== 404) r = await ls('PATCH', '/leads/' + leadId, body); // 1 reintento inmediato\n  return r;\n}\n\nfunction finalizeSql(r) {\n  const finalStates = ['DONE', 'STALE', 'SKIPPED'];\n  const isFinal = finalStates.includes(r.state);\n  const sets = [\n    'state = ' + q(r.state),\n    'resolution = ' + q(r.resolution ? String(r.resolution).slice(0, 48) : null),\n    'lead_id = COALESCE(' + q(r.lead_id) + ', lead_id)',\n    'provider = COALESCE(' + q(r.provider) + ', provider)',\n    'phone = COALESCE(' + q(r.phone ? String(r.phone).slice(0, 32) : null) + ', phone)',\n    'call_attempts = COALESCE(' + q(validAttempt(r.call_attempts)) + ', call_attempts)',\n    'crm_attempt = COALESCE(' + q(r.crm_attempt ? safeInt(r.crm_attempt) : null) + ', crm_attempt)',\n    'event_at = COALESCE(' + dt(r.event_at_ms) + ', event_at)',\n    'conversation_id = COALESCE(' + q(r.conversation_id) + ', conversation_id)',\n    'stringee_call_id = COALESCE(' + q(r.stringee_call_id ? String(r.stringee_call_id).slice(0, 128) : null) + ', stringee_call_id)',\n    'followup_id = COALESCE(' + q(r.followup_id) + ', followup_id)',\n    'lifecycle_applied = GREATEST(lifecycle_applied, ' + (r.lifecycle_applied ? 1 : 0) + ')',\n    'claim_token = NULL',\n    'lease_until = NULL'\n  ];\n  if (r.state === 'DONE' && r.lifecycle_applied) sets.push('next_retry_at = ' + dt(r.next_retry_ms));\n  if (!isFinal) sets.push('next_attempt_at = ' + dt(r.next_attempt_ms || (NOW + 60000)));\n  if (r.state === 'FAILED') {\n    sets.push('error_count = error_count + 1');\n    sets.push('last_error = ' + q(String(r.error || 'error').slice(0, 1000)));\n  }\n  if (isFinal) sets.push('processed_at = UTC_TIMESTAMP(3)');\n  return 'UPDATE wf_call_events SET ' + sets.join(', ') +\n    ' WHERE event_key = ' + q(r.event_key) + ' AND claim_token = ' + q(r.claim_token);\n}\n\nconst out = [];\nlet patched = 0, patchFail = 0;\nfor (const r0 of P1) {\n  const r = Object.assign({}, r0);\n  if (r.state === 'DONE' && r.lifecycle && r.lead_id) {\n    const L = r.lifecycle;\n    const body = { status: L.status };\n    if (L.status === 'CLOSED') body.nextFollowUpAt = null;\n    const s1 = await patchLead(r.lead_id, body);\n    if (!s1.ok) {\n      patchFail++;\n      r.state = 'FAILED';\n      r.lifecycle_applied = 0;\n      r.error = 'PATCH status ' + L.status + ' HTTP ' + s1.status + ' ' + JSON.stringify(s1.body || {}).slice(0, 200);\n      const n = safeInt(r.error_count) + 1;\n      r.next_attempt_ms = NOW + Math.min(1800, 60 * Math.pow(2, Math.min(n - 1, 5))) * 1000;\n    } else if (L.stage) {\n      const s2 = await patchLead(r.lead_id, { stage: L.stage });\n      if (!s2.ok) {\n        // el status CLOSED ya quedó aplicado (no hay riesgo de otra llamada); se reintenta el stage\n        patchFail++;\n        r.state = 'FAILED';\n        r.lifecycle_applied = 0;\n        r.error = 'PATCH stage ' + L.stage + ' HTTP ' + s2.status + ' ' + JSON.stringify(s2.body || {}).slice(0, 200);\n        const n = safeInt(r.error_count) + 1;\n        r.next_attempt_ms = NOW + Math.min(1800, 60 * Math.pow(2, Math.min(n - 1, 5))) * 1000;\n      } else {\n        patched++;\n      }\n    } else {\n      patched++;\n    }\n    if (r.state === 'DONE') {\n      r.lifecycle_applied = 1;\n      console.log('🏁 ' + r.lead_id + ' -> ' + L.status + (L.stage ? ' / ' + L.stage : '') + ' (' + r.resolution + ')');\n    } else {\n      console.error('❌ ' + r.event_key + ': ' + r.error + ' — la Activity ' + (r.followup_id || '-') + ' ya existe; se reintenta sólo el ciclo de vida');\n    }\n  }\n  out.push({ json: {\n    event_key: r.event_key,\n    state: r.state,\n    resolution: r.resolution,\n    lead_id: r.lead_id,\n    followup_id: r.followup_id,\n    created_now: !!r.created_now,\n    lifecycle: r.lifecycle ? (r.lifecycle.status + (r.lifecycle.stage ? '/' + r.lifecycle.stage : '')) : null,\n    error: r.state === 'FAILED' ? r.error : null,\n    sql: finalizeSql(r)\n  } });\n}\nconsole.log(`⚙️ Fase 2: ${out.length} eventos | ciclo de vida aplicado=${patched} | PATCH fallidos=${patchFail}`);\nreturn out;\n"
+      },
+      "id": "4aa96a14-be55-447d-bb83-c687e03bb1d0",
+      "name": "⚙️ Fase 2 — Ciclo de vida + cierre",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        39312,
+        11744
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "ae97fc00-b563-4994-a1b9-166c4c81378f",
+      "name": "💾 Finalizar Eventos (MySQL)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        39536,
+        11744
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "elevenlabs-postcall-webhook",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "4ef4221d-5f88-4485-bfa7-4e153991669f",
+      "name": "📥 ElevenLabs Post-Call Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        38000,
+        10368
+      ],
+      "webhookId": "elevenlabs-call-webhook"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "id": "1710576d-3d4a-43d8-9411-b6c5b1c67fdf",
+      "name": "✅ Respond OK1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        38208,
+        10208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst raw = item.json;\n\n// ── 1. Retrieve the RAW body if the webhook has \"Raw Body\" enabled ──────\n// (needed to reliably verify the HMAC signature)\nlet rawStr = '';\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    rawStr = Buffer.from(item.binary.data.data, 'base64').toString('utf8');\n  }\n} catch (e) { /* no rawBody, continue with the parsed body */ }\n\nlet body = raw.body || raw;\nif (rawStr) { try { body = JSON.parse(rawStr); } catch (e) {} }\n\n// ── 2. HMAC verification (ElevenLabs format: t=timestamp,v0=signature) ─────────\nlet crypto = null;\ntry { crypto = require('crypto'); } catch (e) { console.warn('⚠️ El módulo crypto no está permitido en este n8n: la firma HMAC no se puede verificar (se procesa igual, como antes con firma inválida).'); }\nconst secret = 'wsec_98c0a66b3f1df7af8eaf22503381cb78ce648dc63da8eead8ce3dafc7a95b630';\nconst headers = raw.headers || {};\nconst sigHeader = String(headers['elevenlabs-signature'] || headers['ElevenLabs-Signature'] || '');\nif (sigHeader) {\n  const parts = Object.fromEntries(sigHeader.split(',').map(p => p.split('=')));\n  const timestamp = parts['t'] || '';\n  const receivedSig = parts['v0'] || parts['v1'] || '';\n  if (timestamp && Math.abs(Date.now() / 1000 - Number(timestamp)) > 1800) {\n    throw new Error('Webhook timestamp too old (>30min) — possible replay');\n  }\n  if (crypto && rawStr && receivedSig) {\n    const expected = crypto.createHmac('sha256', secret).update(timestamp + '.' + rawStr).digest('hex');\n    if (receivedSig !== expected) {\n      console.warn('⚠️ HMAC mismatch — processing anyway. expected=' + expected + ' received=' + receivedSig + ' rawLen=' + rawStr.length);\n    }\n  } else if (receivedSig) {\n    console.warn('⚠️ HMAC not verifiable without Raw Body — processing anyway. Enable \"Raw Body\" in the Webhook node.');\n  }\n}\n\nconst d = body.data || body;\n\nconst conversationId = String(d.conversation_id || d.conversationId || '');\nconst callSuccessful = String(d.analysis?.call_successful || d.call_successful || '').toLowerCase();\nconst summary        = d.analysis?.transcript_summary || d.summary || d.conversation_summary || '';\nconst durationSecs   = Number(d.metadata?.call_duration_secs || d.duration_secs || 0);\nconst callEndedBy    = String(d.metadata?.termination_reason || d.call_ended_by || '').toLowerCase();\n\nlet transcript = '';\nif (Array.isArray(d.transcript)) {\n  transcript = d.transcript.map(t => `${t.role === 'agent' ? '🤖' : '👤'} ${t.message || ''}`).join(' | ');\n} else {\n  transcript = typeof d.transcript === 'string' ? d.transcript : JSON.stringify(d.transcript || '');\n}\n\nconst dc = d.analysis?.data_collection_results\n        || d.analysis?.data_collection\n        || d.data_collection_results\n        || d.data_collection\n        || {};\n\nconst interested    = String(dc.user_interest?.value      || '').toLowerCase();\nconst fullName      = String(dc.full_name?.value           || '').replace(/^=/, '').trim();\nconst callbackReq   = String(dc.callback_requested?.value  || '').toLowerCase();\nconst callbackDate  = String(dc.callback_date?.value       || '');\nconst accountOpened = String(dc.account_requested?.value   || '').toLowerCase();\n\nconst dynVars = d.conversation_initiation_client_data?.dynamic_variables\n             || d.metadata?.dynamic_variables\n             || body.conversation_initiation_client_data?.dynamic_variables\n             || {};\nconst leadId = String(dynVars.lead_id || d.lead_id || body.lead_id || '');\nconst phone  = String(dynVars.phone   || d.phone   || '').replace(/[^0-9+]/g, '');\n\nfunction canonicalCountry(rawCountry, rawPhone='') {\n  const c = String(rawCountry || '').trim().toLowerCase();\n  if (['india','in'].includes(c)) return 'india';\n  if (['nepal','np'].includes(c)) return 'nepal';\n  if (['slot3'].includes(c)) return 'slot3';\n  if (['slot4'].includes(c)) return 'slot4';\n  const p = String(rawPhone || '').replace(/[^0-9+]/g,'');\n  if (p.startsWith('+977') || p.startsWith('977')) return 'nepal';\n  if (p.startsWith('+91') || p.startsWith('91')) return 'india';\n  return '';\n}\nconst country = canonicalCountry(dynVars.country || d.country || body.country, phone);\nconst sourceSheet = String(\n  dynVars._source_sheet ||\n  ({india:'leads',nepal:'leads nepal',slot3:'leads slot3',slot4:'leads slot4'})[country] ||\n  ''\n);\n\nconst callAttempts = dynVars.call_attempts !== undefined ? Number(dynVars.call_attempts) : undefined;\n\nconst isVoicemail =\n  callEndedBy.includes('voicemail') ||\n  String(summary).toLowerCase().includes('voicemail') ||\n  (durationSecs > 0 && durationSecs < 8 && callSuccessful !== 'success');\n\nlet status, last_call_status, notes;\n\nif (!conversationId) {\n  status = 'FAILED'; last_call_status = 'NO_CONV_ID';\n  notes = 'Webhook without conversation_id';\n} else if (durationSecs === 0) {\n  status = 'NO_ANSWER'; last_call_status = 'NO_ANSWER';\n  notes = 'No answer (0s duration) | ended: ' + callEndedBy;\n} else if (callSuccessful === 'failure' || callSuccessful === 'failed') {\n  status = 'FAILED'; last_call_status = 'FAILED';\n  notes = 'Call failed: ' + (callEndedBy || 'no reason given');\n} else if (isVoicemail) {\n  status = 'VOICEMAIL'; last_call_status = 'VOICEMAIL';\n  notes = '📵 Voicemail | duration: ' + durationSecs + 's';\n} else if (callbackReq === 'true' || callbackReq === 'yes') {\n  status = 'SCHEDULED'; last_call_status = 'CALLBACK_REQUESTED';\n  notes = '📅 Requested callback | ' + String(summary).slice(0, 200);\n} else {\n  status = 'SUCCESSFUL'; last_call_status = 'COMPLETED';\n  notes = 'Answered, full conversation | ' + String(summary).slice(0, 200);\n}\n\nconsole.log('📞 Post-call | lead:', leadId, '| status:', status, '| dur:', durationSecs + 's', '| conv:', conversationId);\n\nconst out = {\n  lead_id:              leadId,\n  country,\n  _source_country: country,\n  _source_sheet: sourceSheet,\n  phone,\n  status,\n  last_call_status,\n  notes,\n  elevenlabs_call_id:   conversationId,\n  conversation_summary: String(summary).slice(0, 500),\n  full_name:            fullName || null,\n  interested:           (interested === 'interested' || interested === 'true' || interested === 'yes') ? 'TRUE' : '',\n  callback_requested:   (callbackReq === 'true' || callbackReq === 'yes') ? 'TRUE' : '',\n  callback_date:        callbackDate,\n  account_opened:       (accountOpened === 'yes' || accountOpened === 'true') ? 'PENDING' : '',\n  duration_secs:        durationSecs,\n  transcript:           transcript.slice(0, 1000),\n  last_call_time:       new Date().toISOString()\n};\nif (callAttempts !== undefined && !Number.isNaN(callAttempts)) out.call_attempts = callAttempts;\nif (!out.full_name) delete out.full_name;\nif (!out.callback_date) delete out.callback_date;\n\n// ── 3. WF9 v3: inbox durable (wf_call_events) ─────────────────────────────\n// Este webhook YA NO crea Activities ni cambia el lead. Sólo registra\n// \"la conversación X terminó\" en el inbox; el procesador (cada 1 min) la\n// clasifica leyendo la conversación completa desde la API de ElevenLabs.\n// Si este INSERT fallara, el polling (cada 3 min, ventana 60 min) la ingresa igual.\n{\n  const qv = v => {\n    if (v === null || v === undefined || v === '') return 'NULL';\n    if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n    return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '').replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\")\n      .replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n  };\n  const convOk = /^conv_[A-Za-z0-9]{8,64}$/.test(conversationId);\n  const provRaw = String(dynVars.provider || '').toUpperCase();\n  const provider = provRaw === 'STRINGEE' ? 'stringee'\n    : (phone.startsWith('+') ? 'asterisk' : (/^\\d{8,15}$/.test(phone) ? 'stringee' : null));\n  const startSecs = Number(d.metadata?.start_time_unix_secs || 0);\n  const eventAt = startSecs > 0 ? \"'\" + new Date(startSecs * 1000).toISOString().replace('T', ' ').replace('Z', '') + \"'\" : 'NULL';\n  const att = Number(dynVars.call_attempts);\n  const attOk = Number.isInteger(att) && att >= 1 && att <= 99 ? att : null;\n  const payload = JSON.stringify({ via: 'webhook', type: body.type || null, received_at: new Date().toISOString(), status: d.status || null });\n  out.inbox_sql = !convOk ? 'SELECT 1 AS ignored' :\n    'INSERT INTO wf_call_events (event_key, source, provider, external_id, lead_id, phone, call_attempts, event_at, ' +\n    'first_seen_at, state, next_attempt_at, payload) VALUES (' +\n    [qv('elevenlabs:' + conversationId), qv('elevenlabs'), qv(provider), qv(conversationId), qv(leadId.slice(0, 64)),\n      qv(phone.slice(0, 32)), qv(attOk), eventAt, 'UTC_TIMESTAMP(3)', qv('RECEIVED'),\n      'UTC_TIMESTAMP(3) + INTERVAL 60 SECOND', qv(payload)].join(', ') +\n    ') ON DUPLICATE KEY UPDATE provider = COALESCE(provider, VALUES(provider)), lead_id = COALESCE(lead_id, VALUES(lead_id)), ' +\n    'phone = COALESCE(phone, VALUES(phone)), call_attempts = COALESCE(call_attempts, VALUES(call_attempts)), ' +\n    'event_at = COALESCE(event_at, VALUES(event_at)), ' +\n    \"next_attempt_at = IF(state = 'RECEIVED' AND (resolution IS NULL OR resolution = 'WAITING_CONVERSATION'), \" +\n    'LEAST(next_attempt_at, VALUES(next_attempt_at)), next_attempt_at)';\n  if (!convOk) console.warn('⚠️ Post-call sin conversation_id válido: no se registra en el inbox');\n}\n\nreturn [{ json: out }];\n"
+      },
+      "id": "9d8102e5-aeb5-48bb-9146-90365dfe1237",
+      "name": "⚙️ Parse Post-Call Data1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38208,
+        10368
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vincular conversation_id de ElevenLabs a stringee_calls (solo Stringee = bare digits)\nconst d = $input.first().json;\n\n// Stringee usa bare digits (sin +), Asterisk usa E.164 (con +)\nconst isStringee = d.phone && !String(d.phone).startsWith('+');\n\nif (d.country !== 'india' || !isStringee || !d.elevenlabs_call_id) {\n  return [{ json: { skip: true, reason: 'no es Stringee o no aplica (country=' + d.country + ', phone_format=' + (String(d.phone).startsWith('+') ? 'E164' : 'bare') + ')' } }];\n}\n\nconst phoneDigits = String(d.phone).replace(/[^0-9]/g, '');\nconst last10 = phoneDigits.slice(-10);\nconst convId = String(d.elevenlabs_call_id).replace(/'/g, \"''\");\n\nconst sql = `UPDATE stringee_calls\n  SET conversation_id = '${convId}'\n  WHERE RIGHT(phone,10) = '${last10}'\n    AND conversation_id IS NULL\n    AND answered = 1\n  ORDER BY start_time DESC\n  LIMIT 1;`;\n\nconsole.log('🔗 Stringee Conv-ID SQL (webhook):', sql.slice(0, 150));\nreturn [{ json: { sql, phone: d.phone, last10, convId, provider: 'stringee' } }];"
+      },
+      "id": "19f40607-d481-4522-9971-bf3016d7ef97",
+      "name": "🔗 Build Stringee Conv-ID SQL (webhook)2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38432,
+        10560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "28e89493-8b09-4aa8-a527-9c010f1e4561",
+      "name": "💾 Update stringee_calls conv_id (webhook)2",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        38640,
+        10560
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "2ad8a9c0-9ba8-4647-8994-13ebe3d4c75f",
+      "name": "Polling Cada 5min (última hora)1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        38368,
+        11168
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const KEY = 'sk_79048a9776812db4416e5c690d0c047132d565fee7d43acd';\n\nconst AGENT_IDS = [\n  'agent_5701kramx550e3qs2tm11661b48p',\n  'agent_7601m209ntj3fyrbg0dcq6w507yq'\n];\n\n// WF9 v3: ventana de reconciliación de 60 min (polling cada 3 min).\nconst WINDOW_MIN = 60;\n// El detalle completo sólo se trae para los últimos 20 min (mismo alcance que antes: lo usa\n// la rama de enlace conv-id de Stringee). El procesador del inbox lee el detalle por su cuenta.\nconst DETAIL_WINDOW_MIN = 20;\nconst after = Math.floor(Date.now()/1000) - (WINDOW_MIN * 60);\nconst H = { 'xi-api-key': KEY };\nconst base = 'https://api.elevenlabs.io/v1/convai/conversations';\nconst byId = new Map();\n\nfor (const agentId of [...new Set(AGENT_IDS.filter(Boolean))]) {\n  let cursor = '';\n  let page = 0;\n  do {\n    let url = `${base}?page_size=100&summary_mode=include&call_start_after_unix=${after}&agent_id=${encodeURIComponent(agentId)}`;\n    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;\n    const res = await this.helpers.httpRequest({ method: 'GET', url, headers: H, json: true, timeout: 30000 });\n    const convos = res.conversations || [];\n    for (const c of convos) { if (c.conversation_id) byId.set(c.conversation_id, c); }\n    cursor = res.has_more ? (res.next_cursor || '') : '';\n    page++;\n    console.log(`📄 ${agentId} page ${page}: +${convos.length} | unique ${byId.size}`);\n  } while (cursor && page < 30);\n}\n\nconst todas = [...byId.values()];\nif (!todas.length) { console.log(`⚠️ No conversations in the last ${WINDOW_MIN} min`); return []; }\n\nconst detailAfter = Math.floor(Date.now()/1000) - (DETAIL_WINDOW_MIN * 60);\nconst recientes = todas.filter(c => Number(c.start_time_unix_secs || 0) >= detailAfter);\nconst CONCURRENCY = 10;\nconst out = [];\n// conversaciones más viejas: sólo datos de la lista (el inbox las registra igual)\nfor (const c of todas) { if (Number(c.start_time_unix_secs || 0) < detailAfter) out.push({ json: { conversation_id: c.conversation_id, status: c.status, _lista: c, _detail: false } }); }\nfor (let i = 0; i < recientes.length; i += CONCURRENCY) {\n  const chunk = recientes.slice(i, i + CONCURRENCY);\n  const results = await Promise.allSettled(\n    chunk.map(c => this.helpers.httpRequest({ method: 'GET', url: `${base}/${c.conversation_id}`, headers: H, json: true, timeout: 20000 }).then(det => ({ json: { ...det, _lista: c } })))\n  );\n  for (let j = 0; j < results.length; j++) {\n    if (results[j].status === 'fulfilled') out.push(results[j].value);\n    else { console.warn('⚠️ Failed to fetch detail ' + chunk[j].conversation_id + ': ' + results[j].reason?.message); out.push({ json: { conversation_id: chunk[j].conversation_id, status: chunk[j].status, _lista: chunk[j], _detail: false } }); }\n  }\n}\nconsole.log(`✅ ${todas.length} conversaciones en ${WINDOW_MIN} min | detalle traído para ${recientes.length} (últimos ${DETAIL_WINDOW_MIN} min)`);\nreturn out;"
+      },
+      "id": "38114333-5934-46fc-ab11-972a7e8d7600",
+      "name": "Traer Histórico ElevenLabs1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38576,
+        11168
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vincula conversation_id a stringee_calls — consume RAW de ElevenLabs (sin filtro de lead_id)\n// Esto es independiente del filtro de Sheet (que descarta calls sin lead_id/sourceSheet)\nconst convos = $input.all().map(i => i.json);\nconst results = [];\n\nfor (const c of convos) {\n  const d = c.data || c;\n\n  const convId = String(d.conversation_id || '');\n  if (!convId) continue;\n\n  const dyn = d.conversation_initiation_client_data?.dynamic_variables || {};\n  const phone = String(dyn.phone || '').replace(/[^0-9+]/g, '');\n  let country = String(dyn.country || '').trim().toLowerCase();\n  if (['in'].includes(country)) country = 'india';\n  if (['np'].includes(country)) country = 'nepal';\n  if (!country) {\n    if (phone.startsWith('+977') || phone.startsWith('977')) country = 'nepal';\n    else if (phone.startsWith('+91') || phone.startsWith('91')) country = 'india';\n  }\n\n  // Stringee = bare digits (sin +), Asterisk = E.164 (con +)\n  const isStringee = phone && !phone.startsWith('+');\n\n  if (country !== 'india' || !isStringee || !phone) continue;\n\n  const phoneDigits = phone.replace(/[^0-9]/g, '');\n  const last10 = phoneDigits.slice(-10);\n  const convIdEscaped = convId.replace(/'/g, \"''\");\n\n  const sql = `UPDATE stringee_calls\n    SET conversation_id = '${convIdEscaped}'\n    WHERE RIGHT(phone,10) = '${last10}'\n      AND conversation_id IS NULL\n      AND answered = 1\n    ORDER BY start_time DESC\n    LIMIT 1;`;\n\n  results.push({ json: { sql, phone, last10, convId, provider: 'stringee' } });\n}\n\nif (results.length) console.log(`🔗 Stringee Conv-ID SQL (polling): ${results.length} filas a vincular`);\nreturn results.length ? results : [{ json: { skip: true, reason: 'ninguna conversación raw es Stringee sin vincular' } }];"
+      },
+      "id": "9e7533b1-8c15-4fe2-99a5-26be2d7eddd1",
+      "name": "🔗 Build Stringee Conv-ID SQL (polling)2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38832,
+        11392
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "9ed4864e-1929-45b9-a205-8d2e6a1dba67",
+      "name": "💾 Update stringee_calls conv_id (polling)2",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        39104,
+        11392
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.fcf_sql }}",
+        "options": {}
+      },
+      "id": "1900088b-4e83-42d0-99e4-198ad9ea6348",
+      "name": "💾 Save Followup ID (WF9)2",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        39088,
+        11744
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "alwaysOutputData": true,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 📝 Resumen de la corrida del procesador (sólo logs; no escribe nada).\nconst rows = $('⚙️ Fase 2 — Ciclo de vida + cierre').all().map(i => i.json || {});\nconst count = s => rows.filter(r => r.state === s).length;\nconst created = rows.filter(r => r.created_now).length;\nconst failed = rows.filter(r => r.state === 'FAILED');\nconsole.log(`✅ WF9 procesador | eventos=${rows.length} | DONE=${count('DONE')} STALE=${count('STALE')} SKIPPED=${count('SKIPPED')} ` +\n  `EN_ESPERA=${count('RECEIVED')} FAILED=${failed.length} | Activities nuevas=${created}`);\nfor (const f of failed.slice(0, 10)) console.error('❌', f.event_key, '→', String(f.error || '').slice(0, 200));\nreturn [{ json: { processed: rows.length, done: count('DONE'), stale: count('STALE'), skipped: count('SKIPPED'),\n  waiting: count('RECEIVED'), failed: failed.length, activities_created: created } }];\n"
+      },
+      "id": "d1050f46-2d9d-4d0b-b8b8-1e096ce1694c",
+      "name": "📝 Log Success1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        39760,
+        11744
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🧭 WF9 v3 — Post-Call durable (Stringee confiable + idempotencia)\n**Entradas (sólo registran en `wf_call_events`, nunca tocan el CRM):**\n- `📥 Stringee Worker Callback` (vía rápida; responde 200 después del INSERT)\n- `📥 ElevenLabs Post-Call Webhook` (como antes, responde OK al instante)\n- `Polling` cada 3 min, ventana 60 min (red de seguridad)\n- WF2 escribe el ledger de cada job Stringee despachado (reconciliación cada 3 min vía `GET /calls/:job_id`).\n\n**Procesador (cada 1 min):** claim con token + lease → Fase 1 (UNA Activity por llamada real, con `providerCallId` y `Ref:`) → `wf_call_followups` → Fase 2 (status / stage) → cierre del evento. Un POST o PATCH fallido deja el evento FAILED y se reintenta: nunca se marca hecho antes de que LeadStudio lo acepte.\n\n**Reglas:** Stringee = 1 job = 1 Activity. Asterisk = la Activity es de WF2 (WF9 sólo corrige buzón sin crear Activity, o registra un hueco real). Máximo 9 intentos: el 9º sin contacto → CLOSED + UNRESPONSIVE. Evento viejo → Activity histórica sin tocar el ciclo de vida. Texto del CRM en inglés.",
+        "height": 520,
+        "width": 640,
+        "color": 4
+      },
+      "id": "b5a60eaf-731a-42bc-b134-2b649a69f57d",
+      "name": "🧭 Nota — Fix Status del Lead (WF9)1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        39216,
+        10000
+      ],
+      "height": 300,
+      "width": 560
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================================\n// 🧾 BUILD CDR SQL (ASTERISK) — billsec real de las llamadas Asterisk del lote.\n//\n// LeadStudio fija durationSeconds en el POST /followups y no lo deja editar después,\n// por eso la Activity de una llamada Asterisk contestada la crea WF9 al TERMINAR, con\n// CDR.billsec (tiempo conectado; NO cdr.duration, que incluye el timbrado).\n//\n// Sólo lectura. Una consulta (UNION ALL) para los eventos Asterisk reclamados; cada fila\n// lleva \"ref\" = event_key. La ventana se calcula con la hora del UNIQUEID del CDR\n// (epoch de inicio del canal), que no depende de la zona horaria de MySQL.\n//  - llamada diferida por WF2 (dispatched_at): [despacho - 45 min, despacho + 2 min]\n//  - resto (webhook/polling): [inicio de la conversación - 15 min, + 2 min]\n// El teléfono se compara con los últimos 10 dígitos de dst.\n// Si el CDR no existe / no hay permiso, el nodo MySQL siguiente falla en modo \"continuar\"\n// y ⚙️ Fase 1 usa la duración de ElevenLabs (nunca se detiene el procesador).\n// ============================================================================\nconst CDR_TABLE = 'cdr';   // si el CDR está en otra base: 'asteriskcdrdb.cdr' (ver PROBE_CDR_READONLY.sh)\nconst CLAIM = 'claim_token';\nfunction q(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';\n  return \"'\" + String(v).replace(/\\u0000/g, '').replace(/[\\r\\n]+/g, ' ').replace(/\\$/g, '').replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\")\n    .replace(/\\{\\{/g, '{ {').replace(/\\}\\}/g, '} }') + \"'\";\n}\n// uniqueid = \"<epoch>.<seq>\" o \"<systemname>-<epoch>.<seq>\" (systemname puede llevar '-' o '.'): se toma el penúltimo tramo entre puntos\nconst EPOCH = \"CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(c.uniqueid, '.', -2), '.', 1), '-', -1) AS UNSIGNED)\";\nconst parts = [];\nfor (const it of $input.all()) {\n  const ev = it.json || {};\n  if (!ev.event_key || !ev[CLAIM] || ev.source !== 'elevenlabs' || ev.provider !== 'asterisk') continue;\n  const digits = String(ev.phone || '').replace(/\\D/g, '');\n  if (digits.length < 8) continue;\n  const deferred = Number(ev.dispatched_at_ms) > 0;\n  const anchor = deferred ? Number(ev.dispatched_at_ms) : Number(ev.event_at_ms);\n  if (!(anchor > 0)) continue;\n  const lo = Math.floor(anchor / 1000) - (deferred ? 45 * 60 : 15 * 60);\n  const hi = Math.floor(anchor / 1000) + 120;\n  parts.push('SELECT ' + q(ev.event_key) + ' AS ref, c.uniqueid AS cdr_uniqueid, ' + EPOCH + ' AS cdr_start_s, c.duration AS cdr_duration, c.billsec AS cdr_billsec ' +\n    'FROM ' + CDR_TABLE + ' c WHERE c.calldate >= UTC_TIMESTAMP() - INTERVAL 2 DAY AND c.disposition = ' + q('ANSWERED') + ' AND c.billsec > 0 ' +\n    \"AND RIGHT(REPLACE(REPLACE(c.dst, '+', ''), ' ', ''), 10) = \" + q(digits.slice(-10)) + ' AND ' + EPOCH + ' BETWEEN ' + lo + ' AND ' + hi);\n}\nif (!parts.length) return [{ json: { cdr_rows: 0, cdr_sql: 'SELECT 1 AS noop' } }];\nconsole.log(`🧾 CDR Asterisk: consulta para ${parts.length} llamada(s)`);\nreturn [{ json: { cdr_rows: parts.length, cdr_sql: parts.join(' UNION ALL ') } }];\n"
+      },
+      "name": "🧾 Build CDR SQL (Asterisk)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        38664,
+        11964
+      ],
+      "id": "21249da3-6e11-5513-af2a-41a4b75e9b3f"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.cdr_sql }}",
+        "options": {}
+      },
+      "name": "🗄️ CDR Asterisk (billsec)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        38904,
+        11964
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "4NiWyzzJ4JbMkIjT",
+          "name": "MySQL account"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "id": "c5c7bcc3-befe-5fa2-a98a-51c51c0752a1"
+    }
+  ],
+  "connections": {
+    "🔗 Build Stringee Conv-ID SQL (webhook)": {
+      "main": [
+        [
+          {
+            "node": "💾 Update stringee_calls conv_id (webhook)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Build Stringee Conv-ID SQL (polling)": {
+      "main": [
+        [
+          {
+            "node": "💾 Update stringee_calls conv_id (polling)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 ElevenLabs Post-Call Webhook4": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond OK4",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⚙️ Parse Post-Call Data4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Parse Post-Call Data4": {
+      "main": [
+        [
+          {
+            "node": "🔍 Has lead + safe route?4",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔗 Build Stringee Conv-ID SQL (webhook)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Has lead + safe route?4": {
+      "main": [
+        [
+          {
+            "node": "🧱 Build Followup Payload (WF9)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📝 Log Missing Lead/Route4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Polling Cada 5min (última hora)4": {
+      "main": [
+        [
+          {
+            "node": "Traer Histórico ElevenLabs4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer Histórico ElevenLabs4": {
+      "main": [
+        [
+          {
+            "node": "🔀 Mapear para Sheet4",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔗 Build Stringee Conv-ID SQL (polling)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Mapear para Sheet4": {
+      "main": [
+        [
+          {
+            "node": "🧱 Build Followup Payload (WF9)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧱 Build Followup Payload (WF9)": {
+      "main": [
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF9)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF9)": {
+      "main": [
+        [
+          {
+            "node": "📤 POST Followup — Call Result (WF9)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📤 POST Followup — Call Result (WF9)": {
+      "main": [
+        [
+          {
+            "node": "🔍 Followup Registrado?4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Followup Registrado?4": {
+      "main": [
+        [
+          {
+            "node": "💾 Save Followup ID (WF9)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📝 Log Success4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Save Followup ID (WF9)": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Success4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏁 PATCH Lead Status (WF9)": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Lead Patch Result (WF9)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Build Stringee Conv-ID SQL (webhook)1": {
+      "main": [
+        [
+          {
+            "node": "💾 Update stringee_calls conv_id (webhook)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Build Stringee Conv-ID SQL (polling)1": {
+      "main": [
+        [
+          {
+            "node": "💾 Update stringee_calls conv_id (polling)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 ElevenLabs Post-Call Webhook": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⚙️ Parse Post-Call Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Parse Post-Call Data": {
+      "main": [
+        [
+          {
+            "node": "🔍 Has lead + safe route?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔗 Build Stringee Conv-ID SQL (webhook)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Has lead + safe route?": {
+      "main": [
+        [
+          {
+            "node": "🧱 Build Followup Payload (WF9)1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📝 Log Missing Lead/Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Polling Cada 5min (última hora)": {
+      "main": [
+        [
+          {
+            "node": "Traer Histórico ElevenLabs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer Histórico ElevenLabs": {
+      "main": [
+        [
+          {
+            "node": "🔀 Mapear para Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔗 Build Stringee Conv-ID SQL (polling)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Mapear para Sheet": {
+      "main": [
+        [
+          {
+            "node": "🧱 Build Followup Payload (WF9)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Login LeadStudio (WF9)1": {
+      "main": [
+        [
+          {
+            "node": "📤 POST Followup — Call Result (WF9)1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🏁 PATCH Lead Status (WF9)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧱 Build Followup Payload (WF9)1": {
+      "main": [
+        [
+          {
+            "node": "🧮 Build Lead Status Patch (WF9)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📤 POST Followup — Call Result (WF9)1": {
+      "main": [
+        [
+          {
+            "node": "🔍 Followup Registrado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Followup Registrado?": {
+      "main": [
+        [
+          {
+            "node": "💾 Save Followup ID (WF9)1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📝 Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Save Followup ID (WF9)1": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧮 Build Lead Status Patch (WF9)": {
+      "main": [
+        [
+          {
+            "node": "🔐 Login LeadStudio (WF9)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Stringee Worker Callback": {
+      "main": [
+        [
+          {
+            "node": "🧾 Build Inbox SQL (Stringee callback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧾 Build Inbox SQL (Stringee callback)": {
+      "main": [
+        [
+          {
+            "node": "💾 Insert Inbox (Stringee callback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Insert Inbox (Stringee callback)": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond OK (Stringee callback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧾 Build Inbox SQL (polling)": {
+      "main": [
+        [
+          {
+            "node": "💾 Insert Inbox (polling)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏱️ Procesar Inbox (cada 1 min)": {
+      "main": [
+        [
+          {
+            "node": "🔒 Build Claim SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔒 Build Claim SQL": {
+      "main": [
+        [
+          {
+            "node": "🔒 Claim + Leer Eventos (MySQL)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔒 Claim + Leer Eventos (MySQL)": {
+      "main": [
+        [
+          {
+            "node": "🧾 Build CDR SQL (Asterisk)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Fase 1 — Activity CRM": {
+      "main": [
+        [
+          {
+            "node": "💾 Save Followup ID (WF9)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Fase 2 — Ciclo de vida + cierre": {
+      "main": [
+        [
+          {
+            "node": "💾 Finalizar Eventos (MySQL)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Finalizar Eventos (MySQL)": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Success1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 ElevenLabs Post-Call Webhook1": {
+      "main": [
+        [
+          {
+            "node": "✅ Respond OK1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "⚙️ Parse Post-Call Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Parse Post-Call Data1": {
+      "main": [
+        [
+          {
+            "node": "💾 Insert Inbox (ElevenLabs webhook)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔗 Build Stringee Conv-ID SQL (webhook)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Build Stringee Conv-ID SQL (webhook)2": {
+      "main": [
+        [
+          {
+            "node": "💾 Update stringee_calls conv_id (webhook)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Polling Cada 5min (última hora)1": {
+      "main": [
+        [
+          {
+            "node": "Traer Histórico ElevenLabs1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traer Histórico ElevenLabs1": {
+      "main": [
+        [
+          {
+            "node": "🧾 Build Inbox SQL (polling)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔗 Build Stringee Conv-ID SQL (polling)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Build Stringee Conv-ID SQL (polling)2": {
+      "main": [
+        [
+          {
+            "node": "💾 Update stringee_calls conv_id (polling)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Save Followup ID (WF9)2": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Fase 2 — Ciclo de vida + cierre",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧾 Build CDR SQL (Asterisk)": {
+      "main": [
+        [
+          {
+            "node": "🗄️ CDR Asterisk (billsec)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗄️ CDR Asterisk (billsec)": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Fase 1 — Activity CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

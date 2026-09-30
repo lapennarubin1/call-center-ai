@@ -1,0 +1,20 @@
+{% extends "base_bare.html" %}
+{% block body %}
+<div class="login-wrap">
+  <form class="login-card" method="post">
+    <span class="mark" aria-hidden="true"></span>
+    <h1>Operations center</h1>
+    <p class="lead">Landmark Markets · India</p>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    <div class="field">
+      <label for="u">Username</label>
+      <input id="u" name="user" autocomplete="username" autofocus required>
+    </div>
+    <div class="field">
+      <label for="p">Password</label>
+      <input id="p" name="pass" type="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit">Sign in</button>
+  </form>
+</div>
+{% endblock %}

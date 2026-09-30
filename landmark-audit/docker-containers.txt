@@ -1,0 +1,8 @@
+NAMES                                                   IMAGE                        PORTS
+easypanel.1.93bq82ycce09ouvwc6t60zyln                   easypanel/easypanel:latest   0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+landmarket_n8n.1.ylhkjh1n11bfikr4gn9ashfv6              n8nio/n8n:latest             5678/tcp
+easypanel-traefik.1.zebwcijles5l4ttdsv1y4yp53           traefik:3.6.7                0.0.0.0:80->80/tcp, [::]:80->80/tcp, 0.0.0.0:443->443/tcp, [::]:443->443/tcp
+landmarket_n8n-db.1.z84wks4dk29klvuhgdrahwtfv           postgres:17                  5432/tcp
+saas_backend                                            docker-backend               8000/tcp
+saas_nginx                                              docker-nginx                 127.0.0.1:8100->80/tcp
+landmarket_n8n-landmarket.1.eqvaf6bjek1vo2ejbwh3tztid   a426e44bac0b                 5432/tcp

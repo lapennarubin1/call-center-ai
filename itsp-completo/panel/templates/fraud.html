@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% set active='fraud' %}
+{% block heading %}Eventos de fraude{% endblock %}
+{% block content %}
+<div class="panel">
+  <div class="panel-h"><h2>Historial de cortes automáticos</h2></div>
+  <div class="panel-b flush">
+    {% if events %}
+    <table>
+      <thead><tr><th>Fecha</th><th>Cliente</th><th>Regla</th><th>Detalle</th><th>Acción</th></tr></thead>
+      <tbody>
+      {% for e in events %}
+        <tr>
+          <td class="mono">{{ e.ts }}</td>
+          <td class="mono">{{ e.client }}</td>
+          <td><span class="pill pill-warn">{{ e.rule }}</span></td>
+          <td>{{ e.detail }}</td>
+          <td><span class="pill pill-off">{{ e.action }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">Sin eventos. El monitor antifraude no ha tenido que cortar nada.</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

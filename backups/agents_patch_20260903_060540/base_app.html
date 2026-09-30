@@ -1,0 +1,98 @@
+{% extends "base_auth.html" %}
+{% import "_icons.html" as ic %}
+{% block body %}
+<div class="app-shell">
+  <div class="sidebar-overlay" data-sidebar-overlay></div>
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark">AI</div>
+      <div class="name">AI Business Platform</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <a class="nav-item {{ 'active' if active_page == 'dashboard' }}" href="{{ url_for('web.dashboard') }}">
+          {{ ic.icon('grid') }}<span>Dashboard</span>
+        </a>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-label">AI Voice</div>
+        {% if 'voice_ai' in enabled_modules %}
+          <a class="nav-item {{ 'active' if active_page == 'voice_campaigns' }}" href="{{ url_for('web.voice_campaigns') }}">
+            {{ ic.icon('megaphone') }}<span>Campañas</span>
+          </a>
+          <a class="nav-item {{ 'active' if active_page == 'voice_calls' }}" href="{{ url_for('web.placeholder', section='voice_calls') }}">
+            {{ ic.icon('phone') }}<span>Llamadas</span>
+          </a>
+        {% else %}
+          <div class="nav-item disabled" title="Módulo no habilitado para este tenant">
+            {{ ic.icon('megaphone') }}<span>Campañas</span><span class="nav-badge">off</span>
+          </div>
+          <div class="nav-item disabled" title="Módulo no habilitado para este tenant">
+            {{ ic.icon('phone') }}<span>Llamadas</span><span class="nav-badge">off</span>
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-label">CRM</div>
+        {% if 'crm' in enabled_modules %}
+          <a class="nav-item {{ 'active' if active_page == 'crm_contacts' }}" href="{{ url_for('web.placeholder', section='crm_contacts') }}">
+            {{ ic.icon('users') }}<span>Contactos</span>
+          </a>
+          <a class="nav-item {{ 'active' if active_page == 'crm_leads' }}" href="{{ url_for('web.crm_leads') }}">
+            {{ ic.icon('target') }}<span>Leads</span>
+          </a>
+        {% else %}
+          <div class="nav-item disabled" title="Módulo no habilitado para este tenant">
+            {{ ic.icon('users') }}<span>Contactos</span><span class="nav-badge">off</span>
+          </div>
+          <div class="nav-item disabled" title="Módulo no habilitado para este tenant">
+            {{ ic.icon('target') }}<span>Leads</span><span class="nav-badge">off</span>
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-label">Plataforma</div>
+        <a class="nav-item {{ 'active' if active_page == 'integrations' }}" href="{{ url_for('web.placeholder', section='integrations') }}">
+          {{ ic.icon('plug') }}<span>Integraciones</span>
+        </a>
+        <a class="nav-item {{ 'active' if active_page == 'agents' }}" href="{{ url_for('web.placeholder', section='agents') }}">
+          {{ ic.icon('bot') }}<span>Agentes IA</span>
+        </a>
+        <a class="nav-item {{ 'active' if active_page == 'settings' }}" href="{{ url_for('web.placeholder', section='settings') }}">
+          {{ ic.icon('settings') }}<span>Configuración</span>
+        </a>
+      </div>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-toggle" data-menu-toggle aria-label="Abrir menu">{{ ic.icon('menu') }}</button>
+        <div class="tenant-chip">
+          <span class="name">{{ current_tenant.name if current_tenant else '—' }}</span>
+          <span class="env">workspace · {{ current_tenant.slug if current_tenant else '' }}</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="user-chip">
+          <div class="user-avatar">{{ (current_user.username or '?')[:1]|upper }}</div>
+          <div class="user-meta">
+            <div class="uname">{{ current_user.username }}</div>
+            <div class="urole">{{ current_user.role }}</div>
+          </div>
+        </div>
+        <button class="logout-btn" data-logout>{{ ic.icon('logout') }}<span>Salir</span></button>
+      </div>
+    </header>
+
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% endblock %}

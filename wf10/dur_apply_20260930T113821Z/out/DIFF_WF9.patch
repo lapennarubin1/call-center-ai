@@ -1,0 +1,333 @@
+--- WF9 :: 🔒 Build Claim SQL :: jsCode (ANTES)
++++ WF9 :: 🔒 Build Claim SQL :: jsCode (DESPUÉS)
+@@ -32,6 +32,7 @@
+   MS('e.first_seen_at') + ' AS first_seen_at_ms,',
+   '(SELECT ' + MS('MAX(x.event_at)') + ' FROM wf_call_events x WHERE x.lead_id = e.lead_id AND x.lifecycle_applied = 1 AND x.event_key <> e.event_key) AS lead_latest_lifecycle_at_ms,',
+   '(SELECT COUNT(*) FROM wf_call_events x WHERE x.lead_id = e.lead_id AND x.source = \'stringee\' AND x.state IN (\'RECEIVED\', \'PROCESSING\', \'FAILED\') AND x.event_key <> e.event_key) AS lead_unresolved_jobs,',
++  '(SELECT COUNT(*) FROM wf_call_events x WHERE x.lead_id = e.lead_id AND x.event_key <> e.event_key AND e.dispatched_at IS NOT NULL AND x.dispatched_at IS NOT NULL AND x.dispatched_at > e.dispatched_at) AS lead_newer_dispatch,',
+   '(SELECT GROUP_CONCAT(x.followup_id) FROM wf_call_events x WHERE x.lead_id = e.lead_id AND x.followup_id IS NOT NULL AND x.event_key <> e.event_key AND x.created_at > UTC_TIMESTAMP(3) - INTERVAL 14 DAY) AS lead_claimed_followups,',
+   'CASE WHEN e.source = \'elevenlabs\' THEN (SELECT x.event_key FROM wf_call_events x WHERE x.source = \'stringee\' AND (x.conversation_id = e.external_id',
+   'OR (e.provider = \'stringee\' AND e.lead_id IS NOT NULL AND x.lead_id = e.lead_id AND e.call_attempts IS NOT NULL AND x.call_attempts = e.call_attempts',
+
+--- WF9 :: ⚙️ Fase 1 — Activity CRM :: jsCode (ANTES)
++++ WF9 :: ⚙️ Fase 1 — Activity CRM :: jsCode (DESPUÉS)
+@@ -157,7 +157,10 @@
+ //  - Stringee: la unidad de llamada es el JOB (stringee:<job_id>). El estado del
+ //    worker (GET /calls/:job_id) es la verdad telefónica. La conversación de
+ //    ElevenLabs sólo clasifica un job CONTESTADO; nunca crea otra Activity.
+-//  - Asterisk: WF2 es dueño de la Activity. WF9 sólo (a) corrige el ciclo de
++//  - Asterisk CONTESTADA (ledger de WF2, dispatched_at): WF2 NO crea la Activity (LeadStudio
++//    fija durationSeconds en el POST y no lo deja editar). WF9 crea la ÚNICA Activity al terminar
++//    la llamada, con CDR.billsec (respaldo: duración de ElevenLabs) y el ciclo de vida final.
++//    Asterisk SIN ledger (WF2 anterior): WF2 es dueño de la Activity. WF9 sólo (a) corrige el ciclo de
+ //    vida cuando WF2 marcó CONNECTED pero no hubo conversación real (buzón /
+ //    silencio), sin crear Activity, o (b) registra la llamada si WF2 no dejó
+ //    ninguna Activity para ella (hueco real).
+@@ -176,6 +179,13 @@
+   ASTERISK_READY_SEC: 20 * 60,    // WF2 (lotes de 5, timeout 60 s) ya registró su Activity
+   ASTERISK_MATCH_BEFORE_SEC: 120,
+   ASTERISK_MATCH_AFTER_SEC: 20 * 60,
++  ASTERISK_DEFER_SETTLE_SEC: 45,          // llamada contestada diferida por WF2: sólo se espera a que ElevenLabs/CDR se asienten tras colgar
++  ASTERISK_DEFER_GIVEUP_SEC: 6 * 3600,    // sin conversación terminal tras 6 h: se registra igual (una Activity, sin conversación confirmada)
++  CDR_TOL_START_S: 60,                    // la conversación EL empieza al marcar o al contestar (tolerancia)
++  CDR_TOL_END_S: 90,                      // tolerancia entre el fin de la conversación EL y el fin del CDR
++  CDR_UNALIGNED_TOL_S: 240,              // sin datos de la conversación: el CDR debe empezar a ±4 min del despacho
++  CDR_LATE_SEC: 150,                      // CDR tardío (escritura en lotes): hasta 150 s tras colgar se espera antes de usar la duración de ElevenLabs
++  CDR_AMBIGUITY_S: 15,                    // dos CDR igual de plausibles -> ambiguo -> se usa ElevenLabs
+   STRINGEE_CONV_LINK_SEC: 45 * 60,       // conversación Stringee sin job: esperar a que un job la enlace
+   STRINGEE_CONV_MAX_WAIT_SEC: 6 * 3600,
+   WORKER_404_GIVEUP_SEC: 2 * 3600,
+@@ -342,6 +352,58 @@
+   return 'asterisk';
+ }
+ 
++// ---------- Asterisk contestada: duración real (CDR.billsec) ----------
++// LeadStudio fija durationSeconds en el POST /followups y NO lo deja editar después.
++// Prioridad: 1) CDR.billsec (tiempo conectado real; NO cdr.duration, que incluye el timbrado)
++//            2) ElevenLabs metadata.call_duration_secs   3) 0 si no hubo conversación conectada.
++// El CDR se identifica por teléfono + hora del uniqueid y se ALINEA con la conversación (hora de
++// fin de la llamada). Sin una coincidencia única y clara se usa ElevenLabs: nunca se adivina.
++const CDR_BY_EVENT = new Map();
++let CDR_FAILED = false;   // el nodo CDR falló (tabla/permiso): no se espera a un CDR tardío
++function pickCdr(ev, startMs, endMs, durSecs) {
++  const rows = [];
++  const seen = new Set();
++  for (const r of (CDR_BY_EVENT.get(ev.event_key) || [])) {   // Asterisk puede escribir el MISMO registro dos veces (mismo uniqueid, misma duración): cuenta una vez
++    const k = [r.cdr_uniqueid, r.cdr_duration, r.cdr_billsec].join('|');
++    if (!seen.has(k)) { seen.add(k); rows.push(r); }
++  }
++  const cand = [];
++  for (const r of rows) {
++    const bill = Number(r.cdr_billsec);
++    const start = Number(r.cdr_start_s);
++    const total = Number(r.cdr_duration);
++    if (!(bill > 0) || !(start > 0) || !(total >= bill)) continue;
++    const answer = start + (total - bill);
++    let err;
++    if (startMs && endMs && durSecs > 0) {
++      const S = startMs / 1000;
++      const E = endMs / 1000;
++      // la conversación EL empieza al marcar o al contestar: ambos son válidos
++      if (S < start - WAIT.CDR_TOL_START_S || S > answer + WAIT.CDR_TOL_START_S) continue;
++      err = Math.abs(E - (start + total));
++      if (err > WAIT.CDR_TOL_END_S) continue;
++    } else {
++      // sin datos de la conversación: sólo la cercanía al despacho. Se exige que el CDR haya empezado a lo sumo
++      // 4 min antes/después del despacho: un CDR de otra llamada al mismo número (p. ej. de un agente) no sirve.
++      err = Math.abs(start - Math.floor((Number(ev.dispatched_at_ms) || Number(ev.event_at_ms) || 0) / 1000));
++      if (err > WAIT.CDR_UNALIGNED_TOL_S) continue;
++    }
++    cand.push({ err, r, bill, start });
++  }
++  if (!cand.length) return null;
++  cand.sort((a, b) => a.err - b.err);
++  // otro registro del MISMO tramo (pata Local / CDR repetido con otro uniqueid: mismo inicio ±2 s y billsec ±3 s) no es otra llamada
++  const rival = cand.slice(1).find(c => !(Math.abs(c.start - cand[0].start) <= 2 && Math.abs(c.bill - cand[0].bill) <= 3));
++  if (rival && rival.err - cand[0].err < WAIT.CDR_AMBIGUITY_S) return null;   // ambiguo -> ElevenLabs
++  return { billsec: Math.round(cand[0].bill), uniqueid: String(cand[0].r.cdr_uniqueid || ''), startMs: cand[0].start * 1000 };
++}
++// Devuelve { cls, source }: cls con la duración final de una Activity Asterisk creada por WF9.
++function withRealDuration(cls, cdr) {
++  const el = Math.max(0, Math.round(Number(cls.durationSec) || 0));
++  if (cdr && (el > 0 || cls.kind === 'CONTACTED')) return { cls: Object.assign({}, cls, { durationSec: cdr.billsec }), source: 'cdr' };
++  return { cls, source: 'el' };
++}
++
+ // ---------- CRM ----------
+ function claimedSet(ev, ctx) {
+   const s = new Set(String(ev.lead_claimed_followups || '').split(',').map(x => x.trim()).filter(Boolean));
+@@ -398,13 +460,19 @@
+   const upd = ms(lead.updatedAt) || 0;
+   const oursMs = ours ? (ms(ours.createdAt) || 0) : 0;
+   const newer = fus.find(f => isCall(f) && (!ours || String(f.id) !== String(ours.id)) && (ms(f.createdAt) || 0) > x.callEndMs + 120e3);
+-  if (newer) reasons.push('newer_crm_call');
++  const heldDeferred = !!x.deferred && status === 'ATTEMPTING' && !(Number(ev.lead_newer_dispatch) > 0);
++  if (newer && !heldDeferred) reasons.push('newer_crm_call');
+   const latest = Math.max(Number(ev.lead_latest_lifecycle_at_ms) || 0, batchLatestMs || 0);
+-  if (latest && latest > x.callStartMs + 1000) reasons.push('newer_lifecycle_event');
++  if (latest && latest > x.callStartMs + 1000 && !heldDeferred) reasons.push('newer_lifecycle_event');
+   // Mientras el evento está sin resolver nadie toca el lead (queda ATTEMPTING y el Mantenimiento
+   // no lo libera). Si el lead cambió DESPUÉS de terminar esta llamada (y no por nuestro propio POST),
+   // hubo un despacho o un estado más nuevo: esta llamada es histórica.
+-  if (upd > Math.max(x.callEndMs, oursMs) + 120e3) reasons.push(status === 'ATTEMPTING' ? 'relocked_by_newer_dispatch' : 'lead_updated_after_call');
++  // Llamada Asterisk diferida por WF2: el lead sigue ATTEMPTING por nuestra retención (el Mantenimiento no lo libera).
++  // Mientras no exista un despacho MÁS NUEVO del mismo lead, un cambio posterior a la llamada (p. ej. una
++  // automatización post-llamada) no significa que exista un estado más nuevo: se aplica el ciclo de vida.
++  const heldByUs = !!x.deferred && status === 'ATTEMPTING' && !(Number(ev.lead_newer_dispatch) > 0);
++  if (x.deferred && Number(ev.lead_newer_dispatch) > 0) reasons.push('newer_dispatch');
++  if (!heldByUs && upd > Math.max(x.callEndMs, oursMs) + 120e3) reasons.push(status === 'ATTEMPTING' ? 'relocked_by_newer_dispatch' : 'lead_updated_after_call');
+   if (lead.doNotCall) reasons.push('do_not_call');
+   if (status === 'CLOSED' || status === 'UNREACHABLE') reasons.push('status_' + status);
+   if (status === 'CONTACTED' && x.cls.kind !== 'CONTACTED') reasons.push('newer_contact');
+@@ -505,6 +573,7 @@
+   if (createdNow) resolution = stale ? 'HISTORICAL_ACTIVITY_CREATED' : (target.stage ? 'ACTIVITY_CREATED_EXHAUSTED' : 'ACTIVITY_CREATED');
+   else resolution = stale ? 'HISTORICAL_ACTIVITY_PRESENT' : 'ACTIVITY_PRESENT';
+   if (x.resolutionPrefix) resolution = x.resolutionPrefix + '_' + resolution;
++  if (x.durationSource) resolution = resolution + ':' + x.durationSource;   // cdr | el (auditoría de la fuente de durationSeconds)
+ 
+   return res(ev, Object.assign({}, baseFields, {
+     state,
+@@ -522,7 +591,8 @@
+       provider: x.provider,
+       outcome: x.cls.outcome,
+       call_status: x.cls.callStatus,
+-      recording_synced: x.cls.recordingSynced
++      recording_synced: x.cls.recordingSynced,
++      created_epoch: x.provider === 'asterisk' ? Math.floor((x.fcfEpochMs || x.callStartMs) / 1000) : null   // hora de INICIO de la llamada
+     },
+     log: `${x.provider} ${x.leadId} intento ${lifeAttempt} ${x.cls.kind}/${x.cls.sub} -> ${state}` +
+       (lifecycle ? ` (${lifecycle.status}${lifecycle.stage ? '/' + lifecycle.stage : ''})` : '') +
+@@ -627,19 +697,39 @@
+   }, ctx);
+ }
+ 
++// Asterisk contestada (ledger de WF2) cuya conversación de ElevenLabs no existe / no llega a estado terminal:
++// no se deja al lead colgado ni sin Activity. Se registra UNA Activity sin conversación confirmada
++// (misma política que Stringee "contestó pero sin conversación": NO_ANSWER, ciclo 3x3).
++async function deferredWithoutConversation(ev, ctx, why) {
++  const leadId = String(ev.lead_id || '').trim();
++  if (!UUID_RE.test(leadId)) return skip(ev, 'MISSING_OR_LEGACY_LEAD_ID', { provider: 'asterisk' });
++  const startMs = Number(ev.event_at_ms) || Number(ev.dispatched_at_ms) || NOW;
++  const cdr = pickCdr(ev, null, null, 0);
++  const convId = String(ev.external_id || '');
++  const cls = { kind: 'UNSUCCESSFUL', sub: 'ANSWERED_CONVERSATION_MISSING', outcome: 'NO_ANSWER', callStatus: 'NO_ANSWER',
++    durationSec: cdr ? cdr.billsec : 0,
++    note: 'Call answered but the AI conversation record is not available. No customer conversation could be confirmed.', recordingSynced: cdr ? 0 : 1 };
++  console.error('⚠️ Asterisk diferida sin conversación utilizable (' + why + '): ' + convId + ' -> Activity sin conversación confirmada');
++  return applyCall(ev, { provider: 'asterisk', leadId, phone: String(ev.phone || ''), N: ev.call_attempts, refs: ['elevenlabs:' + convId],
++    cls, callStartMs: startMs, callEndMs: startMs + (cdr ? cdr.billsec * 1000 : 0), convId, resolutionPrefix: 'ASTERISK_DEFER',
++    deferred: true, durationSource: cdr ? 'cdr' : 'el', fcfEpochMs: cdr ? cdr.startMs : null }, ctx);
++}
++
+ async function processElevenLabs(ev, ctx) {
+   const convId = String(ev.external_id || '');
+   if (!CONV_RE.test(convId)) return skip(ev, 'INVALID_CONVERSATION_ID');
+   if (ev.linked_job_key) return skip(ev, 'LINKED_TO_STRINGEE_JOB', { provider: 'stringee', conversation_id: convId, lead_id: ev.lead_id || null });
+-  // Asterisk ya enriquecido y todavía dentro de la espera de WF2: no hace falta llamar a ninguna API
+-  if (ev.provider === 'asterisk' && ev.lead_id && Number(ev.event_at_ms) > 0) {
++  // Asterisk CONTESTADA registrada por WF2 en el ledger (dispatched_at): WF2 NO creó la Activity, la crea WF9 al terminar
++  const deferred = ev.provider === 'asterisk' && Number(ev.dispatched_at_ms) > 0;
++  // Asterisk (sin ledger) ya enriquecido y todavía dentro de la espera de WF2: no hace falta llamar a ninguna API
++  if (!deferred && ev.provider === 'asterisk' && ev.lead_id && Number(ev.event_at_ms) > 0) {
+     const readyAt0 = Number(ev.event_at_ms) + WAIT.ASTERISK_READY_SEC * 1000;
+     if (NOW < readyAt0) return requeue(ev, (readyAt0 - NOW) / 1000, { resolution: 'WAITING_WF2_ACTIVITY', conversation_id: convId });
+   }
+ 
+   const c = await fetchConversation(convId);
+   if (c.status === 404) {
+-    if (ageSec(Number(ev.first_seen_at_ms) || NOW) > WAIT.CONV_404_GIVEUP_SEC) return skip(ev, 'CONVERSATION_NOT_FOUND');
++    if (ageSec(Number(ev.first_seen_at_ms) || NOW) > WAIT.CONV_404_GIVEUP_SEC) return deferred ? deferredWithoutConversation(ev, ctx, 'conversation_404') : skip(ev, 'CONVERSATION_NOT_FOUND');
+     return fail(ev, 'ElevenLabs 404 ' + convId);
+   }
+   if (!c.ok) return fail(ev, 'ElevenLabs HTTP ' + c.status);
+@@ -650,14 +740,15 @@
+   const dur = Number(meta.call_duration_secs || 0);
+   const endMs = startMs + dur * 1000;
+   const provider = detectProvider(d);
+-  const leadId = String(dyn.lead_id || '').trim();
+-  const phone = String(dyn.phone || '').replace(/[^0-9+]/g, '');
++  const leadId = String(dyn.lead_id || (deferred ? ev.lead_id : '') || '').trim();
++  const phone = String(dyn.phone || (deferred ? ev.phone : '') || '').replace(/[^0-9+]/g, '');
+   const base = { provider, conversation_id: convId, event_at_ms: startMs, phone: phone || null,
+     lead_id: UUID_RE.test(leadId) ? leadId : null, call_attempts: validAttempt(dyn.call_attempts) };
+ 
+   const status = String(d.status || '').toLowerCase();
+   if (status !== 'done' && status !== 'failed') {
+     if (ageSec(startMs) > 3 * 3600) console.error('🚨 Conversación sin estado terminal >3 h:', convId, status);
++    if (deferred && ageSec(startMs) > WAIT.ASTERISK_DEFER_GIVEUP_SEC) return deferredWithoutConversation(ev, ctx, 'conversation_not_terminal');
+     return requeue(ev, WAIT.CONV_RECHECK_SEC, Object.assign({}, base, { resolution: 'WAITING_CONVERSATION' }));
+   }
+   if (!UUID_RE.test(leadId)) return skip(ev, 'MISSING_OR_LEGACY_LEAD_ID', base);
+@@ -688,7 +779,8 @@
+   }
+ 
+   // ---------------- Asterisk ----------------
+-  const readyAt = startMs + Math.max(WAIT.ASTERISK_READY_SEC, dur + 180) * 1000;
++  // diferida: la conversación ya es terminal; sólo se espera a que ElevenLabs/CDR se asienten. Sin ledger: espera a WF2 (legado).
++  const readyAt = deferred ? endMs + WAIT.ASTERISK_DEFER_SETTLE_SEC * 1000 : startMs + Math.max(WAIT.ASTERISK_READY_SEC, dur + 180) * 1000;
+   if (NOW < readyAt) return requeue(ev, (readyAt - NOW) / 1000, Object.assign({}, base, { resolution: 'WAITING_WF2_ACTIVITY' }));
+ 
+   const lr = await ls('GET', '/leads/' + leadId);
+@@ -715,7 +807,8 @@
+     // 2) WF2 escribe el conversation_id en las notes de CONNECTED: match exacto
+     const exact = fus.find(f => isCall(f) && String(f.notes || '').includes(convId));
+     // 3) ventana de tiempo, excluyendo Activities ya tomadas por otros eventos del lead
+-    const inWin = fus.filter(f => isCall(f) && !taken.has(String(f.id)) && (ms(f.createdAt) || 0) >= from && (ms(f.createdAt) || 0) <= to);
++    // diferida: la Activity de esta llamada NO puede existir todavía salvo por conversation_id / providerCallId / Ref (nunca por ventana de tiempo)
++    const inWin = deferred ? [] : fus.filter(f => isCall(f) && !taken.has(String(f.id)) && (ms(f.createdAt) || 0) >= from && (ms(f.createdAt) || 0) <= to);
+     const matched = saved || exact || inWin.slice().sort((a, b) => (ms(a.createdAt) || 0) - (ms(b.createdAt) || 0))[0];
+     if (matched) {
+       ctx.claimed.add(String(matched.id));
+@@ -758,9 +851,15 @@
+   // Hueco: WF2 no dejó ninguna Activity para esta llamada Asterisk (p.ej. timeout
+   // del dial clasificado como error de proveedor). Se registra UNA.
+   const evGap = Object.assign({}, ev, { followup_id: gapOurs ? String(gapOurs.id) : null });
++  // Duración real: CDR.billsec -> ElevenLabs -> 0 (LeadStudio no permite corregirla después del POST)
++  const cdr = pickCdr(ev, startMs, endMs, dur);
++  // CDR tardío (p. ej. Asterisk escribe el CDR en lotes): sólo diferidas con conversación real, y sólo unos segundos tras colgar
++  if (deferred && !cdr && dur > 0 && !CDR_FAILED && ageSec(endMs) < WAIT.CDR_LATE_SEC) return requeue(ev, 45, Object.assign({}, base, { resolution: 'WAITING_CDR' }));
++  const dd = withRealDuration(cls, cdr);
+   return applyCall(evGap, {
+     provider: 'asterisk', leadId, phone, N: dyn.call_attempts, refs: ['elevenlabs:' + convId],
+-    cls, callStartMs: startMs, callEndMs: endMs, convId, resolutionPrefix: 'ASTERISK_GAP'
++    cls: dd.cls, callStartMs: startMs, callEndMs: endMs, convId, resolutionPrefix: deferred ? 'ASTERISK_DEFER' : 'ASTERISK_GAP',
++    deferred, durationSource: (deferred || dd.source === 'cdr') ? dd.source : null, fcfEpochMs: cdr ? cdr.startMs : null
+   }, ctx);
+ }
+ 
+@@ -770,8 +869,13 @@
+     return 'SELECT 1 AS noop';
+   }
+   const f = r.fcf;
+-  return 'INSERT INTO wf_call_followups (phone, lead_id, followup_id, provider, outcome, call_status, recording_synced) ' +
+-    'SELECT ' + [q(f.phone || ''), q(f.lead_id), q(f.followup_id), q(f.provider), q(f.outcome), q(f.call_status), q(Number(f.recording_synced) ? 1 : 0)].join(', ') +
++  // Asterisk: la fila se marca con la hora de INICIO de la llamada (no con la de este INSERT). WF10 empareja la
++  // grabación con la fila creada entre el inicio de la llamada y +15 min; esta Activity se crea al terminar la llamada.
++  const ce = Number(f.created_epoch);
++  const withTime = f.provider === 'asterisk' && Number.isFinite(ce) && ce > 1e9;
++  return 'INSERT INTO wf_call_followups (phone, lead_id, followup_id, provider, outcome, call_status, recording_synced' + (withTime ? ', created_at' : '') + ') ' +
++    'SELECT ' + [q(f.phone || ''), q(f.lead_id), q(f.followup_id), q(f.provider), q(f.outcome), q(f.call_status), q(Number(f.recording_synced) ? 1 : 0)]
++      .concat(withTime ? ['FROM_UNIXTIME(' + Math.trunc(ce) + ')'] : []).join(', ') +
+     ' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM wf_call_followups WHERE followup_id = ' + q(f.followup_id) + ')';
+ }
+ 
+@@ -779,7 +883,20 @@
+ // MAIN
+ // ============================================================================
+ const START = Date.now();
+-const rows = $input.all().map(i => i.json || {});
++// Los eventos vienen del claim; el CDR (billsec) del nodo MySQL intermedio. Si ese nodo falló, se usa la duración de ElevenLabs.
++const rows = $('🔒 Claim + Leer Eventos (MySQL)').all().map(i => i.json || {});
++{
++  let cdrErr = null;
++  for (const it of $input.all()) {
++    const r = (it && it.json) || {};
++    if (r.error || (r.message && !r.ref)) { cdrErr = r.message || r.error; continue; }
++    if (!r.ref) continue;
++    if (!CDR_BY_EVENT.has(r.ref)) CDR_BY_EVENT.set(r.ref, []);
++    CDR_BY_EVENT.get(r.ref).push(r);
++  }
++  if (cdrErr) CDR_FAILED = true;
++  if (cdrErr) console.error('🚨 CDR no disponible (' + JSON.stringify(cdrErr).slice(0, 200) + '): las llamadas Asterisk usarán la duración de ElevenLabs');
++}
+ const events = rows.filter(r => r && r.event_key && r.claim_token);
+ const bad = rows.filter(r => r && Object.keys(r).some(k => k !== 'success') && !(r.event_key && r.claim_token));
+ if (bad.length) console.error('🚨 Fase 1: filas sin event_key/claim_token (¿error MySQL?):', JSON.stringify(bad).slice(0, 300));
+
+### NODO NUEVO: 🧾 Build CDR SQL (Asterisk)
+--- WF9 :: 🧾 Build CDR SQL (Asterisk) :: jsCode (ANTES)
++++ WF9 :: 🧾 Build CDR SQL (Asterisk) :: jsCode (DESPUÉS)
+@@ -1 +1,45 @@
++// ============================================================================
++// 🧾 BUILD CDR SQL (ASTERISK) — billsec real de las llamadas Asterisk del lote.
++//
++// LeadStudio fija durationSeconds en el POST /followups y no lo deja editar después,
++// por eso la Activity de una llamada Asterisk contestada la crea WF9 al TERMINAR, con
++// CDR.billsec (tiempo conectado; NO cdr.duration, que incluye el timbrado).
++//
++// Sólo lectura. Una consulta (UNION ALL) para los eventos Asterisk reclamados; cada fila
++// lleva "ref" = event_key. La ventana se calcula con la hora del UNIQUEID del CDR
++// (epoch de inicio del canal), que no depende de la zona horaria de MySQL.
++//  - llamada diferida por WF2 (dispatched_at): [despacho - 45 min, despacho + 2 min]
++//  - resto (webhook/polling): [inicio de la conversación - 15 min, + 2 min]
++// El teléfono se compara con los últimos 10 dígitos de dst.
++// Si el CDR no existe / no hay permiso, el nodo MySQL siguiente falla en modo "continuar"
++// y ⚙️ Fase 1 usa la duración de ElevenLabs (nunca se detiene el procesador).
++// ============================================================================
++const CDR_TABLE = 'cdr';   // si el CDR está en otra base: 'asteriskcdrdb.cdr' (ver PROBE_CDR_READONLY.sh)
++const CLAIM = 'claim_token';
++function q(v) {
++  if (v === null || v === undefined || v === '') return 'NULL';
++  if (typeof v === 'number') return Number.isFinite(v) ? String(Math.trunc(v)) : 'NULL';
++  return "'" + String(v).replace(/\u0000/g, '').replace(/[\r\n]+/g, ' ').replace(/\$/g, '').replace(/\\/g, '\\\\').replace(/'/g, "''")
++    .replace(/\{\{/g, '{ {').replace(/\}\}/g, '} }') + "'";
++}
++// uniqueid = "<epoch>.<seq>" o "<systemname>-<epoch>.<seq>" (systemname puede llevar '-' o '.'): se toma el penúltimo tramo entre puntos
++const EPOCH = "CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(c.uniqueid, '.', -2), '.', 1), '-', -1) AS UNSIGNED)";
++const parts = [];
++for (const it of $input.all()) {
++  const ev = it.json || {};
++  if (!ev.event_key || !ev[CLAIM] || ev.source !== 'elevenlabs' || ev.provider !== 'asterisk') continue;
++  const digits = String(ev.phone || '').replace(/\D/g, '');
++  if (digits.length < 8) continue;
++  const deferred = Number(ev.dispatched_at_ms) > 0;
++  const anchor = deferred ? Number(ev.dispatched_at_ms) : Number(ev.event_at_ms);
++  if (!(anchor > 0)) continue;
++  const lo = Math.floor(anchor / 1000) - (deferred ? 45 * 60 : 15 * 60);
++  const hi = Math.floor(anchor / 1000) + 120;
++  parts.push('SELECT ' + q(ev.event_key) + ' AS ref, c.uniqueid AS cdr_uniqueid, ' + EPOCH + ' AS cdr_start_s, c.duration AS cdr_duration, c.billsec AS cdr_billsec ' +
++    'FROM ' + CDR_TABLE + ' c WHERE c.calldate >= UTC_TIMESTAMP() - INTERVAL 2 DAY AND c.disposition = ' + q('ANSWERED') + ' AND c.billsec > 0 ' +
++    "AND RIGHT(REPLACE(REPLACE(c.dst, '+', ''), ' ', ''), 10) = " + q(digits.slice(-10)) + ' AND ' + EPOCH + ' BETWEEN ' + lo + ' AND ' + hi);
++}
++if (!parts.length) return [{ json: { cdr_rows: 0, cdr_sql: 'SELECT 1 AS noop' } }];
++console.log(`🧾 CDR Asterisk: consulta para ${parts.length} llamada(s)`);
++return [{ json: { cdr_rows: parts.length, cdr_sql: parts.join(' UNION ALL ') } }];
+ 
+
+### NODO NUEVO: 🗄️ CDR Asterisk (billsec)
+--- WF9 :: 🗄️ CDR Asterisk (billsec) :: query (ANTES)
++++ WF9 :: 🗄️ CDR Asterisk (billsec) :: query (DESPUÉS)
+@@ -1 +1 @@
+-
++{{ $json.cdr_sql }}
+

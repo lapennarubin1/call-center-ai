@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}Panel · SIP Balance{% endblock %}
+
+{% block content %}
+
+<!-- ══ SELECTOR DE PROVEEDOR ═══════════════════════════════════════ -->
+<nav class="countries" aria-label="Provider">
+  {% for pr in providers %}
+    <a class="chip {{ 'on' if selected_id == pr.id }}" href="/sip?provider={{ pr.id }}">{{ pr.name }}</a>
+  {% endfor %}
+  <a class="chip" href="#new-provider-form" onclick="toggleNewProvider()">+ New provider</a>
+  <a class="chip" href="/sip/extensions" style="margin-left:auto">Extensions</a>
+  <a class="chip" href="/callcenter">Call Center</a>
+</nav>
+
+{% if error %}
+<p class="notice stale-warn">{{ error }}</p>
+{% endif %}
+
+{% if not providers %}
+<p class="empty">No SIP providers configured yet. Add one below.</p>
+{% endif %}
+
+<!-- ══ FORMULARIO: NUEVO PROVEEDOR ═════════════════════════════════ -->
+<section class="panel" id="new-provider-form" style="{{ '' if not providers else 'display:none' }}">
+  <header class="panel-head">
+    <div><span class="eyebrow">SIP Balance</span><h2>New provider</h2></div>
+    {% if providers %}<button type="button" class="btn ghost" onclick="toggleNewProvider()">Cancel</button>{% endif %}
+  </header>
+  <form method="post" action="/sip/provider/new" id="new-provider-body">
+    <div class="field">
+      <label for="np-name">Provider name (billing account — e.g. "650098 @ 2.28.59.175")</label>
+      <input id="np-name" name="name" required placeholder="Account / provider identity">
+    </div>
+
+    <p class="cap" style="margin: 12px 0 8px">
+      Price per country. <b>Trunk name</b> must match the exact pjsip endpoint name in Asterisk
+      (e.g. <code>proveedor1</code>, <code>proveedor-mx</code>) — this is what keeps the balance
+      tied to what's actually connected in the VPS.
+    </p>
+    <div id="np-pricing-rows"></div>
+    <button type="button" class="btn ghost" onclick="addPricingRow('np-pricing-rows')" style="margin: 6px 0 14px">+ Add country</button>
+    <br>
+    <button type="submit" class="btn">Save provider</button>
+  </form>
+</section>
+
+{% if balance %}
+<!-- ══ BALANCE ══════════════════════════════════════════════════════ -->
+{% if balance.billing_start_date %}
+<p class="cap" style="margin: 0 0 8px">Counting since {{ balance.billing_start_date }} — anything before that (previous balance) is excluded.</p>
+{% endif %}
+<div class="kpis">
+  <div class="kpi accent-ok">
+    <span class="k-label">Total deposited</span>
+    <span class="k-val">${{ balance.total_deposits|m }}</span>
+  </div>
+  <div class="kpi accent-cost">
+    <span class="k-label">Total consumed</span>
+    <span class="k-val">${{ balance.total_consumption|m }}</span>
+  </div>
+  <div class="kpi {{ 'accent-ok' if balance.balance >= 0 else 'accent-bad' }}">
+    <span class="k-label">Balance available</span>
+    <span class="k-val">${{ balance.balance|m }}</span>
+    <span class="k-foot">{{ 'Deposits cover consumption' if balance.balance >= 0 else 'Consumption exceeds deposits — top up' }}</span>
+  </div>
+</div>
+
+<div class="grid-2">
+
+  <!-- ══ CONSUMO POR PAÍS ═══════════════════════════════════════════ -->
+  <section class="panel">
+    <header class="panel-head">
+      <div>
+        <span class="eyebrow">{{ balance.provider.name }}</span>
+        <h2>Consumption by country</h2>
+      </div>
+    </header>
+
+    <!-- Fecha de corte: todo antes de esta fecha (saldo/consumo previo
+         a usar este proveedor) queda fuera de la suma, en consumo y
+         en depósitos por igual. -->
+    <form method="post" action="/sip/provider/{{ balance.provider.id }}/billing-start" class="pricing-row" style="margin-bottom: 14px">
+      <span class="cap" style="margin:0">Count from</span>
+      <input name="billing_start_date" type="date" value="{{ balance.billing_start_date or '' }}">
+      <button type="submit" class="btn ghost">Save</button>
+      {% if balance.billing_start_date %}
+        <span class="cap" style="margin:0">excludes everything before {{ balance.billing_start_date }}</span>
+      {% else %}
+        <span class="cap" style="margin:0">counting all-time (no cutoff set)</span>
+      {% endif %}
+    </form>
+
+    {% if balance.consumption %}
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Country</th><th>Trunk (pjsip)</th><th class="r">Price/min</th>
+            <th class="r">Minutes</th><th class="r">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in balance.consumption %}
+          <tr>
+            <td>{{ c.country_label }}</td>
+            <td class="mono muted">{{ c.trunk_name }}</td>
+            <td class="r mono">${{ c.price_per_minute|usd4 }}</td>
+            <td class="r mono">{{ c.billed_minutes|n }}</td>
+            <td class="r mono">${{ c.total|m }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr><td colspan="4">Total consumed</td><td class="r">${{ balance.total_consumption|m }}</td></tr>
+        </tfoot>
+      </table>
+    </div>
+    {% else %}
+      <p class="empty">This provider has no country pricing yet.</p>
+    {% endif %}
+
+    <!-- Agregar país a este proveedor -->
+    <form method="post" action="/sip/provider/{{ balance.provider.id }}/pricing" class="pricing-add-form">
+      <p class="cap" style="margin: 14px 0 8px">Add or update a country for this provider</p>
+      <div class="pricing-row">
+        <select name="country" required>
+          <option value="">Country…</option>
+          {% for k, lbl in valid_countries %}
+            <option value="{{ k }}">{{ lbl }}</option>
+          {% endfor %}
+        </select>
+        <input name="trunk_name" placeholder="Trunk name (pjsip)" required>
+        <input name="price" type="number" step="0.0001" min="0.0001" placeholder="Price/min" required>
+        <button type="submit" class="btn ghost">Save</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ══ DEPÓSITOS ════════════════════════════════════════════════ -->
+  <section class="panel">
+    <header class="panel-head">
+      <div><span class="eyebrow">Account</span><h2>Deposits</h2></div>
+    </header>
+    {% if balance.deposits %}
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>Date</th><th>Reference</th><th class="r">Amount</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for d in balance.deposits %}
+          <tr>
+            <td class="mono">{{ d.deposit_date }}</td>
+            <td class="muted">{{ d.reference or '—' }}</td>
+            <td class="r mono">${{ d.amount_usd|m }}</td>
+            <td class="r">
+              <form method="post" action="/sip/deposit/{{ d.id }}/delete" style="display:inline"
+                    onsubmit="return confirm('Delete this deposit?')">
+                <input type="hidden" name="provider_id" value="{{ balance.provider.id }}">
+                <button type="submit" class="btn ghost" style="padding:2px 8px;font-size:11px">×</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr><td colspan="2">Total deposited</td><td class="r">${{ balance.total_deposits|m }}</td><td></td></tr>
+        </tfoot>
+      </table>
+    </div>
+    {% else %}
+      <p class="empty">No deposits registered yet for this provider.</p>
+    {% endif %}
+
+    <!-- Registrar depósito -->
+    <form method="post" action="/sip/deposit/new" style="margin-top: 14px">
+      <input type="hidden" name="provider_id" value="{{ balance.provider.id }}">
+      <p class="cap" style="margin: 0 0 8px">Register a new deposit</p>
+      <div class="pricing-row">
+        <input name="date" type="date" required value="{{ today }}">
+        <input name="amount" type="number" step="0.01" min="0.01" placeholder="Amount USD" required>
+        <input name="reference" placeholder="Reference (USDT txid, etc.)">
+        <button type="submit" class="btn">Register deposit</button>
+      </div>
+    </form>
+  </section>
+
+</div>
+{% endif %}
+
+<script>
+function addPricingRow(containerId) {
+    var container = document.getElementById(containerId);
+    var row = document.createElement('div');
+    row.className = 'pricing-row';
+    row.innerHTML =
+        '<select name="country[]" required>' +
+        '<option value="">Country…</option>' +
+        {% for k, lbl in valid_countries %}
+        '<option value="{{ k }}">{{ lbl }}</option>' +
+        {% endfor %}
+        '</select>' +
+        '<input name="trunk_name[]" placeholder="Trunk name (pjsip)" required>' +
+        '<input name="price[]" type="number" step="0.0001" min="0.0001" placeholder="Price/min" required>' +
+        '<button type="button" class="btn ghost" onclick="this.parentNode.remove()">Remove</button>';
+    container.appendChild(row);
+}
+
+function toggleNewProvider() {
+    var el = document.getElementById('new-provider-form');
+    el.style.display = (el.style.display === 'none') ? '' : 'none';
+}
+
+// Al cargar: si el formulario de nuevo proveedor está visible (sin
+// proveedores todavía, o el usuario volvió con un error), siempre
+// arranca con una fila de precio lista para completar.
+document.addEventListener('DOMContentLoaded', function() {
+    var rows = document.getElementById('np-pricing-rows');
+    if (rows && rows.children.length === 0) addPricingRow('np-pricing-rows');
+});
+</script>
+
+{% endblock %}

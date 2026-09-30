@@ -1,0 +1,50 @@
+{% extends "base_app.html" %}
+{% import "_icons.html" as ic %}
+{% block title %}Campañas — AI Business Platform{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Campañas de Voice AI</h1>
+  <p>Campañas de llamadas configuradas en este workspace</p>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <div>
+      <h2>Campañas</h2>
+      <div class="hint">{{ campaigns|length }} campaña{{ '' if campaigns|length == 1 else 's' }}</div>
+    </div>
+  </div>
+
+  {% if campaigns %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Nombre</th><th>Estado</th><th>País</th><th>Agente</th><th>Creada</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in campaigns %}
+        <tr>
+          <td><strong>{{ c.name }}</strong></td>
+          <td><span class="badge badge-{{ c.status }}"><span class="badge-dot"></span>{{ c.status }}</span></td>
+          <td>{{ c.country }}</td>
+          <td>{{ c.agent_name or ('#' ~ c.agent_id) }}</td>
+          <td class="mono">{{ c.created_at }}</td>
+          <td class="row-actions">
+            <span class="icon-btn" title="Ver (proximamente)">{{ ic.icon('eye') }}</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="icon-wrap">{{ ic.icon('megaphone') }}</div>
+    <h3>Todavía no hay campañas</h3>
+    <p>Cuando se cree la primera campaña de Voice AI para este workspace, va a aparecer aquí.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

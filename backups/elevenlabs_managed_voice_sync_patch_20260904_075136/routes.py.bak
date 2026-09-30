@@ -1,0 +1,591 @@
+"""Modulo voice_ai — Sprint 1: lectura de campanas y llamadas del tenant.
+No dispara llamadas: eso sigue en el sistema actual (Asterisk + n8n) hasta
+Fase B. Solo depende del core.
+
+Bloque "Campañas real" (post Sprint 1): administracion de campanas dentro
+de saas_platform unicamente. Ninguna ruta de este archivo toca Asterisk,
+dispara llamadas ni activa n8n — crear/editar una campana es una operacion
+100% de base de datos."""
+from flask import Blueprint, jsonify, g, request, abort
+from sqlalchemy import text
+import json
+from ...db import saas_session
+from ...core.auth.rbac import requires_role, requires_module
+from ...core.events.outbox import publish
+from . import countries, locales, elevenlabs, markets, languages, voice_engines, voice_catalog
+
+bp = Blueprint("voice_ai", __name__, url_prefix="/api/v1/voice")
+
+# Estados permitidos por operacion. 'active' y 'finished' quedan fuera de
+# este bloque a proposito: activar una campana implica futura integracion
+# con n8n/Asterisk, explicitamente fuera de alcance ahora.
+CREATE_ALLOWED_STATUS = {"draft"}
+EDIT_ALLOWED_STATUS = {"draft", "paused", "archived"}
+
+# Agents: mismo criterio — 'active' bloqueado en este bloque completo
+# (ni al crear ni al editar), no solo al crear.
+AGENT_CREATE_ALLOWED_STATUS = {"draft"}
+AGENT_EDIT_ALLOWED_STATUS = {"draft", "disabled"}
+NAME_MAX_LEN = 120
+DESCRIPTION_MAX_LEN = 500
+EXTERNAL_AGENT_ID_MAX_LEN = 120  # sin regex rigido: ElevenLabs no garantiza un formato estable
+# SYSTEM_PROMPT y FIRST_MESSAGE ya NO tienen un limite fijo aca: se
+# calculan dinamicamente por motor via voice_engines.get_system_prompt_limit()
+# / get_first_message_limit() — una sola fuente de verdad (punto D del bloque).
+
+
+@bp.get("/campaigns")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def list_campaigns():
+    with saas_session() as s:
+        rows = s.execute(text("""
+            SELECT id, name, country, timezone, status, daily_limit, created_at
+            FROM voice_campaigns WHERE tenant_id=:t ORDER BY id DESC
+        """), {"t": g.tenant_id}).mappings().all()
+    return jsonify(items=[dict(r) for r in rows])
+
+
+@bp.get("/calls")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def list_calls():
+    with saas_session() as s:
+        rows = s.execute(text("""
+            SELECT id, campaign_id, contact_id, direction, phone_e164, started_at, billsec, status, outcome
+            FROM voice_calls WHERE tenant_id=:t ORDER BY id DESC LIMIT 100
+        """), {"t": g.tenant_id}).mappings().all()
+    return jsonify(items=[dict(r) for r in rows])
+
+
+# ------------------------------------------------------- helpers privados --
+
+def _agent_belongs_to_tenant(session, agent_id: int, tenant_id: int) -> bool:
+    return session.execute(text(
+        "SELECT 1 FROM agents WHERE id=:a AND tenant_id=:t"
+    ), {"a": agent_id, "t": tenant_id}).first() is not None
+
+
+def _campaign_row(session, campaign_id: int, tenant_id: int):
+    """SIEMPRE filtrado por tenant_id. Una campana de otro tenant no existe
+    para esta consulta — nunca se distingue "no existe" de "es de otro
+    tenant" en la respuesta, para no filtrar informacion."""
+    return session.execute(text("""
+        SELECT c.id, c.tenant_id, c.name, c.description, c.status, c.country, c.timezone,
+               c.daily_limit, c.created_at, c.updated_at,
+               a.id AS agent_id, a.name AS agent_name
+        FROM voice_campaigns c
+        LEFT JOIN agents a ON a.id = c.agent_id
+        WHERE c.id = :id AND c.tenant_id = :t
+    """), {"id": campaign_id, "t": tenant_id}).mappings().first()
+
+
+def _campaign_or_404(session, campaign_id: int, tenant_id: int):
+    row = _campaign_row(session, campaign_id, tenant_id)
+    if not row:
+        abort(404, description="Campaña no encontrada")
+    return row
+
+
+# --------------------------------------------------------------- endpoints --
+
+@bp.get("/campaigns/<int:campaign_id>")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def get_campaign(campaign_id):
+    with saas_session() as s:
+        row = _campaign_or_404(s, campaign_id, g.tenant_id)
+    return jsonify(dict(row))
+
+
+@bp.post("/campaigns")
+@requires_module("voice_ai")
+@requires_role("operator", "admin", "owner")
+def create_campaign():
+    d = request.get_json(silent=True) or {}
+    name = (d.get("name") or "").strip()
+    country = (d.get("country") or "").strip().upper()
+    description = (d.get("description") or "").strip() or None
+    agent_id = d.get("agent_id")
+    status = (d.get("status") or "draft").strip().lower()
+
+    if not name:
+        return jsonify(error="name es obligatorio"), 400
+    if not countries.is_valid_country(country):
+        return jsonify(error=f"country invalido. Valores permitidos: {', '.join(c for c, _ in countries.country_choices())}"), 400
+    if status not in CREATE_ALLOWED_STATUS:
+        return jsonify(error=f"status invalido para creacion. Permitido: {', '.join(sorted(CREATE_ALLOWED_STATUS))}"), 400
+    if not agent_id:
+        return jsonify(error="agent_id es obligatorio (el esquema actual no permite campañas sin agente)"), 400
+
+    with saas_session() as s:
+        if not _agent_belongs_to_tenant(s, agent_id, g.tenant_id):
+            return jsonify(error="agent_id no pertenece a este tenant"), 400
+
+        timezone = countries.default_timezone(country)
+        res = s.execute(text("""
+            INSERT INTO voice_campaigns (tenant_id, agent_id, name, description, country, timezone, status)
+            VALUES (:t, :a, :n, :d, :c, :tz, :st)
+        """), {"t": g.tenant_id, "a": agent_id, "n": name, "d": description,
+               "c": country, "tz": timezone, "st": status})
+        campaign_id = res.lastrowid
+
+        publish(s, g.tenant_id, "voice_ai", "voice.campaign.created", "voice_campaign", campaign_id, {
+            "name": name, "country": country, "agent_id": agent_id, "status": status,
+        })
+        row = _campaign_row(s, campaign_id, g.tenant_id)
+    return jsonify(dict(row)), 201
+
+
+@bp.patch("/campaigns/<int:campaign_id>")
+@requires_module("voice_ai")
+@requires_role("operator", "admin", "owner")
+def update_campaign(campaign_id):
+    d = request.get_json(silent=True) or {}
+
+    with saas_session() as s:
+        current = _campaign_or_404(s, campaign_id, g.tenant_id)
+
+        fields, params = [], {"id": campaign_id, "t": g.tenant_id}
+        changed = {}
+
+        if "name" in d:
+            name = (d.get("name") or "").strip()
+            if not name:
+                return jsonify(error="name no puede quedar vacio"), 400
+            fields.append("name=:name"); params["name"] = name; changed["name"] = name
+
+        if "description" in d:
+            description = (d.get("description") or "").strip() or None
+            fields.append("description=:description"); params["description"] = description
+            changed["description"] = description
+
+        if "country" in d:
+            country = (d.get("country") or "").strip().upper()
+            if not countries.is_valid_country(country):
+                return jsonify(error=f"country invalido. Valores permitidos: {', '.join(c for c, _ in countries.country_choices())}"), 400
+            fields.append("country=:country"); params["country"] = country
+            fields.append("timezone=:timezone"); params["timezone"] = countries.default_timezone(country)
+            changed["country"] = country
+
+        if "agent_id" in d:
+            agent_id = d.get("agent_id")
+            if not agent_id or not _agent_belongs_to_tenant(s, agent_id, g.tenant_id):
+                return jsonify(error="agent_id invalido o no pertenece a este tenant"), 400
+            fields.append("agent_id=:agent_id"); params["agent_id"] = agent_id; changed["agent_id"] = agent_id
+
+        if "status" in d:
+            status = (d.get("status") or "").strip().lower()
+            if status not in EDIT_ALLOWED_STATUS:
+                return jsonify(error=f"status invalido. Permitido en este bloque: {', '.join(sorted(EDIT_ALLOWED_STATUS))}"), 400
+            fields.append("status=:status"); params["status"] = status; changed["status"] = status
+
+        if not fields:
+            return jsonify(error="no se envio ningun campo para actualizar"), 400
+
+        s.execute(text(f"UPDATE voice_campaigns SET {', '.join(fields)} WHERE id=:id AND tenant_id=:t"), params)
+        publish(s, g.tenant_id, "voice_ai", "voice.campaign.updated", "voice_campaign", campaign_id, changed)
+        row = _campaign_row(s, campaign_id, g.tenant_id)
+    return jsonify(dict(row))
+
+
+
+# ============================================================= AGENTS =====
+
+def _agent_row(session, agent_id: int, tenant_id: int):
+    """SIEMPRE filtrado por tenant_id — mismo criterio que _campaign_row:
+    un agente de otro tenant no existe para esta consulta."""
+    return session.execute(text("""
+        SELECT a.id, a.tenant_id, a.name, a.description, a.type, a.language, a.locale, a.country,
+               a.voice_provider, a.voice_id, a.voice_catalog_id, a.voice_provider_account_id,
+               a.conversation_provider, a.conversation_provider_account_id,
+               a.system_prompt, a.first_message, a.channel_config, a.status,
+               a.created_at, a.updated_at,
+               vc.platform_voice_id, vc.name AS voice_name,
+               (SELECT COUNT(*) FROM voice_campaigns c WHERE c.agent_id = a.id AND c.tenant_id = a.tenant_id) AS campaigns_count
+        FROM agents a
+        LEFT JOIN voice_catalog vc ON vc.id = a.voice_catalog_id
+        WHERE a.id = :id AND a.tenant_id = :t
+    """), {"id": agent_id, "t": tenant_id}).mappings().first()
+
+
+def _agent_or_404(session, agent_id: int, tenant_id: int):
+    row = _agent_row(session, agent_id, tenant_id)
+    if not row:
+        abort(404, description="Agente no encontrado")
+    return row
+
+
+def _agent_dict(row) -> dict:
+    """Convierte la fila de _agent_row a JSON de respuesta.
+
+    SEGURIDAD (punto T del bloque): esta funcion es el UNICO lugar donde se
+    arma la respuesta publica de un agente — nunca debe incluir:
+      - external_agent_id (ni siquiera derivado): el cliente ya no lo ve.
+      - voice_id / provider_voice_id crudo: es interno, cache del backend.
+      - voice_catalog_id, provider_key, provider_account_id: internos.
+    Lo que SI se expone: platform_voice_id (publico) y voice_name, para que
+    la UI muestre que voz esta asignada sin revelar el proveedor real.
+    channel_config crudo tampoco se expone — puede contener external_agent_id."""
+    d = dict(row)
+    d.pop("channel_config", None)
+    d.pop("voice_id", None)
+    d.pop("voice_catalog_id", None)
+    d.pop("voice_provider_account_id", None)
+    d.pop("conversation_provider_account_id", None)
+    d["system_prompt_limit"] = voice_engines.get_system_prompt_limit(d.get("voice_provider"))["limit"]
+    d["first_message_limit"] = voice_engines.get_first_message_limit(d.get("voice_provider"))["limit"]
+    return d
+
+
+def _validate_agent_fields(d: dict, partial: bool = False, current_voice_provider: str | None = None):
+    """Validaciones compartidas por POST y PATCH. Devuelve (errors:list, clean:dict).
+    partial=True permite que un campo este ausente (no se valida si no vino).
+    current_voice_provider: motor efectivo YA guardado (para PATCH que no
+    cambia voice_provider en este request) — se usa para calcular el
+    limite dinamico de system_prompt/first_message. En create siempre se
+    resuelve solo, porque voice_provider es obligatorio en ese caso.
+
+    IMPORTANTE (punto F del bloque): nunca se normaliza, minifica, ni
+    reescribe el contenido de system_prompt/first_message. El unico
+    tratamiento es .strip() de espacios/saltos de linea en los BORDES —
+    jamas se toca el contenido interno (saltos de linea, tags tipo XML,
+    comillas, etc. se preservan byte a byte)."""
+    clean = {}
+
+    if "name" in d or not partial:
+        name = (d.get("name") or "").strip()
+        if not name:
+            return "name es obligatorio", None
+        if len(name) > NAME_MAX_LEN:
+            return f"name supera el maximo de {NAME_MAX_LEN} caracteres", None
+        clean["name"] = name
+
+    if "description" in d:
+        description = (d.get("description") or "").strip() or None
+        if description and len(description) > DESCRIPTION_MAX_LEN:
+            return f"description supera el maximo de {DESCRIPTION_MAX_LEN} caracteres", None
+        clean["description"] = description
+
+    if "country" in d or not partial:
+        country = (d.get("country") or "").strip().upper()
+        if not markets.is_valid_country(country):
+            return "country invalido. Consultar el catalogo de mercados soportados", None
+        clean["country"] = country
+
+    if "language" in d or not partial:
+        language = (d.get("language") or "").strip().lower()
+        if not languages.is_valid_language(language):
+            return f"language invalido. Permitidos: {', '.join(c for c, _ in languages.language_choices())}", None
+        clean["language"] = language
+
+    if "voice_provider" in d or not partial:
+        voice_provider = (d.get("voice_provider") or "").strip().lower()
+        if not voice_engines.is_allowed_engine(voice_provider):
+            return "voice_provider invalido. Motor no disponible en este bloque", None
+        clean["voice_provider"] = voice_provider
+
+    if "voice_id" in d:
+        # Punto G/T: el cliente NUNCA elige un voice_id/provider_voice_id
+        # directo — se rechaza explicitamente para no aceptar IDs externos
+        # arbitrarios. La seleccion es SIEMPRE por platform_voice_id.
+        return "voice_id no se acepta directamente. Usar platform_voice_id para elegir una voz del catalogo", None
+
+    if "external_agent_id" in d:
+        # Punto A/T: el cliente ya no configura el enlace externo
+        # manualmente — la plataforma lo resuelve automaticamente cuando
+        # exista sincronizacion real con el proveedor (fuera de este bloque).
+        return "external_agent_id ya no se acepta desde la API del tenant — la plataforma lo resuelve automaticamente", None
+
+    if "platform_voice_id" in d:
+        clean["_platform_voice_id_requested"] = (d.get("platform_voice_id") or "").strip() or None
+        # La resolucion real (existe? esta disponible? a que provider
+        # account corresponde?) requiere sesion de BD — se hace en el
+        # caller (create_agent/update_agent), no aca, porque esta funcion
+        # no recibe la sesion. Ver _resolve_voice_selection().
+
+    # Motor efectivo para calcular limites dinamicos: el que viene en este
+    # request si cambia, si no el que ya tenia el agente (PATCH), si no el
+    # default (create sin voice_provider explicito no deberia pasar, pero
+    # nunca se cae a un limite arbitrariamente chico).
+    effective_provider = clean.get("voice_provider", current_voice_provider) or voice_engines.DEFAULT_ENGINE
+
+    if "system_prompt" in d:
+        system_prompt = (d.get("system_prompt") or "").strip() or None
+        limit_info = voice_engines.get_system_prompt_limit(effective_provider)
+        if system_prompt and len(system_prompt) > limit_info["limit"]:
+            return f"system_prompt supera el limite de {limit_info['limit']} caracteres", None
+        clean["system_prompt"] = system_prompt
+
+    if "first_message" in d:
+        first_message = (d.get("first_message") or "").strip() or None
+        limit_info = voice_engines.get_first_message_limit(effective_provider)
+        if first_message and len(first_message) > limit_info["limit"]:
+            return f"first_message supera el limite de {limit_info['limit']} caracteres", None
+        clean["first_message"] = first_message
+
+    return None, clean
+
+
+def _resolve_voice_selection(session, tenant_id: int, clean: dict, current_voice_provider: str | None):
+    """Si el request incluyo platform_voice_id, lo resuelve contra
+    voice_catalog (punto G): agrega voice_catalog_id, voice_id (cache
+    interno del provider_voice_id real) y voice_provider_account_id a
+    clean. Nunca acepta ni expone el provider_voice_id crudo del cliente.
+    Devuelve un mensaje de error (str) o None si todo OK / no se pidio voz."""
+    requested = clean.pop("_platform_voice_id_requested", None)
+    if requested is None:
+        return None
+    voice_row = voice_catalog.resolve_voice(session, tenant_id, requested)
+    if not voice_row:
+        return "La voz seleccionada no existe o no esta disponible"
+    effective_provider = clean.get("voice_provider", current_voice_provider) or voice_engines.DEFAULT_ENGINE
+    if voice_row["provider_key"] != effective_provider:
+        return "La voz seleccionada no corresponde al motor de voz de este agente"
+    account_id = voice_catalog.resolve_provider_account(session, tenant_id, voice_row["provider_key"], voice_row)
+    if not account_id:
+        return "No hay una cuenta de proveedor de voz disponible para este workspace todavia"
+    clean["voice_catalog_id"] = voice_row["id"]
+    clean["voice_id"] = voice_row["provider_voice_id"]  # cache interno, backend-managed
+    clean["voice_provider_account_id"] = account_id
+    return None
+
+
+@bp.get("/agents")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def list_agents():
+    with saas_session() as s:
+        rows = s.execute(text("""
+            SELECT a.id, a.name, a.status, a.language, a.locale, a.country, a.voice_provider,
+                   a.updated_at, vc.platform_voice_id, vc.name AS voice_name,
+                   (SELECT COUNT(*) FROM voice_campaigns c WHERE c.agent_id = a.id AND c.tenant_id = a.tenant_id) AS campaigns_count
+            FROM agents a
+            LEFT JOIN voice_catalog vc ON vc.id = a.voice_catalog_id
+            WHERE a.tenant_id = :t AND a.type = 'voice'
+            ORDER BY a.id DESC
+        """), {"t": g.tenant_id}).mappings().all()
+    return jsonify(items=[dict(r) for r in rows])
+
+
+@bp.get("/agents/<int:agent_id>")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def get_agent(agent_id):
+    with saas_session() as s:
+        row = _agent_or_404(s, agent_id, g.tenant_id)
+    return jsonify(_agent_dict(row))
+
+
+@bp.post("/agents")
+@requires_module("voice_ai")
+@requires_role("operator", "admin", "owner")
+def create_agent():
+    d = request.get_json(silent=True) or {}
+
+    status = (d.get("status") or "draft").strip().lower()
+    if status not in AGENT_CREATE_ALLOWED_STATUS:
+        return jsonify(error=f"status invalido para creacion. Permitido: {', '.join(sorted(AGENT_CREATE_ALLOWED_STATUS))}"), 400
+
+    err, clean = _validate_agent_fields(d, partial=False)
+    if err:
+        return jsonify(error=err), 400
+
+    with saas_session() as s:
+        err = _resolve_voice_selection(s, g.tenant_id, clean, clean.get("voice_provider"))
+        if err:
+            return jsonify(error=err), 400
+
+        locale = locales.build_locale(clean["language"], clean["country"])
+        res = s.execute(text("""
+            INSERT INTO agents (tenant_id, name, description, type, language, locale, country,
+                                 voice_provider, voice_id, voice_catalog_id, voice_provider_account_id,
+                                 system_prompt, first_message, status)
+            VALUES (:t, :name, :description, 'voice', :language, :locale, :country,
+                    :voice_provider, :voice_id, :voice_catalog_id, :voice_provider_account_id,
+                    :system_prompt, :first_message, :status)
+        """), {
+            "t": g.tenant_id, "name": clean["name"], "description": clean.get("description"),
+            "language": clean["language"], "locale": locale, "country": clean["country"],
+            "voice_provider": clean["voice_provider"], "voice_id": clean.get("voice_id"),
+            "voice_catalog_id": clean.get("voice_catalog_id"), "voice_provider_account_id": clean.get("voice_provider_account_id"),
+            "system_prompt": clean.get("system_prompt"), "first_message": clean.get("first_message"),
+            "status": status,
+        })
+        agent_id = res.lastrowid
+
+        # Payload SIN prompt/first_message completos y SIN ningun ID
+        # tecnico de proveedor — solo booleanos (punto J/T del bloque).
+        publish(s, g.tenant_id, "voice_ai", "voice.agent.created", "agent", agent_id, {
+            "agent_id": agent_id, "name": clean["name"], "country": clean["country"],
+            "language": clean["language"], "voice_provider": clean["voice_provider"],
+            "status": status, "has_system_prompt": bool(clean.get("system_prompt")),
+            "has_first_message": bool(clean.get("first_message")),
+            "voice_selected": bool(clean.get("voice_catalog_id")),
+        })
+        row = _agent_row(s, agent_id, g.tenant_id)
+    return jsonify(_agent_dict(row)), 201
+
+
+@bp.patch("/agents/<int:agent_id>")
+@requires_module("voice_ai")
+@requires_role("operator", "admin", "owner")
+def update_agent(agent_id):
+    d = request.get_json(silent=True) or {}
+
+    with saas_session() as s:
+        current = _agent_or_404(s, agent_id, g.tenant_id)
+
+        err, clean = _validate_agent_fields(d, partial=True, current_voice_provider=current["voice_provider"])
+        if err:
+            return jsonify(error=err), 400
+
+        if "status" in d:
+            status = (d.get("status") or "").strip().lower()
+            if status not in AGENT_EDIT_ALLOWED_STATUS:
+                return jsonify(error=f"status invalido. Permitido en este bloque: {', '.join(sorted(AGENT_EDIT_ALLOWED_STATUS))}"), 400
+            clean["status"] = status
+
+        err = _resolve_voice_selection(s, g.tenant_id, clean, current["voice_provider"])
+        if err:
+            return jsonify(error=err), 400
+
+        if not clean:
+            return jsonify(error="no se envio ningun campo para actualizar"), 400
+
+        # locale es derivado: si cambia country y/o language, se recalcula
+        # (se filtra abajo si el resultado termina siendo igual al actual).
+        if "country" in clean or "language" in clean:
+            effective_language = clean.get("language", current["language"])
+            effective_country = clean.get("country", current["country"])
+            clean["locale"] = locales.build_locale(effective_language, effective_country)
+
+        # ---- FIX del bug de changed_fields (punto O): comparar valor ----
+        # NORMALIZADO nuevo contra el valor ACTUAL en base de datos. Solo
+        # las columnas que realmente difieren entran al UPDATE, al evento,
+        # y a la respuesta — un PATCH con el mismo valor que ya tenia no
+        # genera ni UPDATE ni domain_event (idempotente de verdad).
+        allowed_columns = {"name", "description", "locale", "language", "country", "voice_provider",
+                            "voice_id", "voice_catalog_id", "voice_provider_account_id",
+                            "system_prompt", "first_message", "status"}
+        real_changes = {
+            col: new_val for col, new_val in clean.items()
+            if col in allowed_columns and new_val != current.get(col)
+        }
+
+        if not real_changes:
+            # PATCH idempotente: nada cambio de verdad respecto al valor
+            # actual. Ni UPDATE ni domain_event — evita eventos falsos.
+            row = _agent_row(s, agent_id, g.tenant_id)
+            return jsonify(_agent_dict(row))
+
+        fields = [f"{col}=:{col}" for col in real_changes]
+        params = dict(real_changes)
+        params.update({"id": agent_id, "t": g.tenant_id})
+        s.execute(text(f"UPDATE agents SET {', '.join(fields)} WHERE id=:id AND tenant_id=:t"), params)
+
+        # changed_fields = SOLO columnas con cambio real. voice_catalog_id
+        # se reporta como "voice_selected" (mas legible que el id interno).
+        changed_fields = sorted(k for k in real_changes if k not in ("locale", "voice_catalog_id", "voice_provider_account_id", "voice_id"))
+        if "voice_catalog_id" in real_changes:
+            changed_fields.append("voice_selected")
+            changed_fields.sort()
+        event_payload = {"agent_id": agent_id, "changed_fields": changed_fields}
+        if "system_prompt" in real_changes:
+            event_payload["prompt_changed"] = True
+        if "first_message" in real_changes:
+            event_payload["first_message_changed"] = True
+        for safe_field in ("name", "country", "language", "voice_provider", "status"):
+            if safe_field in real_changes:
+                event_payload[safe_field] = real_changes[safe_field]
+
+        publish(s, g.tenant_id, "voice_ai", "voice.agent.updated", "agent", agent_id, event_payload)
+        row = _agent_row(s, agent_id, g.tenant_id)
+    return jsonify(_agent_dict(row))
+
+
+# =================================================== ELEVENLABS CONFIG =====
+
+@bp.get("/voices")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def list_voices():
+    """Catalogo publico de voces — SOLO campos que el cliente puede ver
+    (punto D/G/T del bloque). provider_voice_id, provider_key y
+    provider_account_id NUNCA se seleccionan en este query, ni siquiera
+    para excluirlos despues — asi un cambio futuro en el codigo no puede
+    filtrarlos por accidente."""
+    language = (request.args.get("language") or "").strip().lower()
+    params = {}
+    where = "WHERE available = 1"
+    if language:
+        where += " AND language = :lang"
+        params["lang"] = language
+    with saas_session() as s:
+        rows = s.execute(text(f"""
+            SELECT platform_voice_id, name, language, locale, accent, gender, age, category,
+                   use_case, description, preview_url, customer_price_multiplier, pricing_tier
+            FROM voice_catalog
+            {where}
+            ORDER BY name
+        """), params).mappings().all()
+    return jsonify(items=[dict(r) for r in rows])
+
+
+@bp.get("/integrations/elevenlabs")
+@requires_module("voice_ai")
+@requires_role("viewer", "operator", "admin", "owner")
+def get_elevenlabs_config():
+    with saas_session() as s:
+        row = s.execute(text("""
+            SELECT provider_key, settings, config_ref, status, updated_at
+            FROM tenant_integrations WHERE tenant_id=:t AND provider_key=:p
+        """), {"t": g.tenant_id, "p": elevenlabs.PROVIDER_KEY}).mappings().first()
+
+    if not row:
+        return jsonify(mode=None, configured=False, config_ref=None)
+
+    settings = json.loads(row["settings"]) if row["settings"] else {}
+    mode = settings.get("mode")
+    return jsonify(
+        mode=mode,
+        configured=elevenlabs.is_configured(mode, row["config_ref"]) if mode else False,
+        config_ref=row["config_ref"],
+        updated_at=row["updated_at"],
+    )
+
+
+@bp.patch("/integrations/elevenlabs")
+@requires_module("voice_ai")
+@requires_role("admin", "owner")
+def update_elevenlabs_config():
+    """Solo guarda el MODO elegido (managed|byok) y el nombre de la variable
+    de entorno donde deberia vivir la key (BYOK). NUNCA acepta ni guarda un
+    valor de API key real en este endpoint — ver elevenlabs.py."""
+    d = request.get_json(silent=True) or {}
+    mode = (d.get("mode") or "").strip().lower()
+    if mode not in elevenlabs.VALID_MODES:
+        return jsonify(error=f"mode invalido. Permitido: {', '.join(sorted(elevenlabs.VALID_MODES))}"), 400
+    if "api_key" in d or "secret" in d or "key" in d:
+        return jsonify(error="Este endpoint no acepta valores de API key todavia — ver documentacion de seguridad"), 400
+
+    config_ref = elevenlabs.config_ref_for(g.tenant_id, mode)
+    settings = json.dumps({"mode": mode})
+
+    with saas_session() as s:
+        existing_id = s.execute(text(
+            "SELECT id FROM tenant_integrations WHERE tenant_id=:t AND provider_key=:p"
+        ), {"t": g.tenant_id, "p": elevenlabs.PROVIDER_KEY}).scalar()
+
+        if existing_id:
+            s.execute(text("""
+                UPDATE tenant_integrations SET config_ref=:ref, settings=:settings, status='active'
+                WHERE id=:id
+            """), {"ref": config_ref, "settings": settings, "id": existing_id})
+        else:
+            s.execute(text("""
+                INSERT INTO tenant_integrations (tenant_id, provider_key, label, config_ref, settings, status)
+                VALUES (:t, :p, 'ElevenLabs', :ref, :settings, 'active')
+            """), {"t": g.tenant_id, "p": elevenlabs.PROVIDER_KEY, "ref": config_ref, "settings": settings})
+
+    return jsonify(mode=mode, configured=elevenlabs.is_configured(mode, config_ref), config_ref=config_ref)

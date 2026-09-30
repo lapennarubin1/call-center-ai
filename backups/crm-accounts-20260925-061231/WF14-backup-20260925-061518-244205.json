@@ -1,0 +1,608 @@
+{
+ "id": "ap50YtvxxjErCPtq",
+ "name": "WF14 - CRM Sync (LeadStudio API → MySQL) + Stringee Call Log",
+ "description": null,
+ "active": false,
+ "activeVersionId": null,
+ "createdAt": "2026-09-18T06:42:31.976Z",
+ "updatedAt": "2026-09-24T06:04:11.001Z",
+ "isArchived": false,
+ "versionId": "81225608-1e42-4056-8bf0-22d8cde72d4c",
+ "versionCounter": 17,
+ "sourceWorkflowId": null,
+ "triggerCount": 1,
+ "nodes": [
+  {
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "minutes"
+      }
+     ]
+    }
+   },
+   "name": "⏰ Cada 5 minutos (CRM Sync)",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.3,
+   "position": [
+    -4656,
+    -1168
+   ],
+   "id": "54536117-59ce-4994-b038-aefdc367d3a8"
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "https://lead-studio-9gnl.onrender.com/api/auth/login",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={\n  \"email\": \"admin@leadstudio.com\",\n  \"password\": \"#9L33dS1udi0\"\n}",
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "json"
+      }
+     },
+     "timeout": 20000
+    }
+   },
+   "name": "🔐 Login LeadStudio (CRM)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    -4416,
+    -1360
+   ],
+   "retryOnFail": true,
+   "id": "d889a190-593b-431a-94c5-6727feabfb94",
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "tok",
+       "leftValue": "={{ !!$json.accessToken }}",
+       "rightValue": true,
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "name": "✅ Token OK?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    -4176,
+    -1360
+   ],
+   "id": "4a288b51-2211-4c06-9dc5-4dbc81ff6a94"
+  },
+  {
+   "parameters": {
+    "jsCode": "function esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction escNum(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }\n\n// Lotes acotados: un INSERT por fila revienta la conexión con miles de leads,\n// y un solo INSERT gigante también. 500 es el punto medio que ya usa WF14-Sheets.\n// provider se resuelve EN SQL: si el lead aparece en stringee_calls es Stringee,\n// si no y ya tuvo intentos es Asterisk, y si nunca se llamó queda NULL.\nconst BATCH = 500;\nconst rows = $input.all().map(i => i.json);\nconst cols = ['lead_id','full_name','phone','country','country_code','language','status','stage',\n              'call_attempts','do_not_call','last_contacted_at','next_follow_up_at','provider','synced_at'];\n\nconst out = [];\nfor (let i = 0; i < rows.length; i += BATCH) {\n  const chunk = rows.slice(i, i + BATCH);\n  const values = chunk.map(r => {\n    const providerExpr =\n      `(CASE WHEN EXISTS(SELECT 1 FROM stringee_calls sc WHERE sc.lead_id = ${esc(r.lead_id)}) ` +\n      `THEN 'stringee' WHEN ${escNum(r.call_attempts)} > 0 THEN 'asterisk' ELSE NULL END)`;\n    return '(' + [\n      esc(r.lead_id), esc(r.full_name), esc(r.phone), esc(r.country), esc(r.country_code),\n      esc(r.language), esc(r.status), esc(r.stage), escNum(r.call_attempts), escNum(r.do_not_call),\n      esc(r.last_contacted_at), esc(r.next_follow_up_at), providerExpr, esc(r.synced_at)\n    ].join(',') + ')';\n  }).join(',\\n');\n\n  const updates = cols.filter(c => c !== 'lead_id')\n    .map(c => c === 'provider' ? 'provider=COALESCE(VALUES(provider), provider)' : `${c}=VALUES(${c})`)\n    .join(',');\n\n  out.push({ json: {\n    sql: `INSERT INTO crm_leads (${cols.join(',')}) VALUES\\n${values}\\nON DUPLICATE KEY UPDATE ${updates};`,\n    batch_size: chunk.length, batch_num: Math.floor(i / BATCH) + 1\n  }});\n}\nconsole.log(`🧱 ${rows.length} leads → ${out.length} lote(s) de hasta ${BATCH}`);\nreturn out;\n"
+   },
+   "id": "2537368a-1091-4cff-b05c-81fa4964a282",
+   "name": "🧱 Lotes de 500 (crm_leads)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -3216,
+    -1456
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "{{ $json.sql }}",
+    "options": {
+     "queryBatching": "independently"
+    }
+   },
+   "name": "💾 Guardar crm_leads",
+   "type": "n8n-nodes-base.mySql",
+   "typeVersion": 2.4,
+   "position": [
+    -2976,
+    -1456
+   ],
+   "retryOnFail": true,
+   "id": "23c469f9-859e-47c8-91dd-3e78a8aa223a",
+   "credentials": {
+    "mySql": {
+     "id": "4NiWyzzJ4JbMkIjT",
+     "name": "MySQL account"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "// OJO: no sumar $input.all() acá — el nodo MySQL de arriba (Execute Query)\n// reemplaza el contenido del item con el resultado de la query, no conserva\n// batch_size. Hay que leerlo directo del nodo que arma los lotes.\nconst items = $('🧱 Lotes de 500 (crm_leads)').all();\nlet total = 0;\nfor (const it of items) total += Number(it.json.batch_size || 0);\nconst now = new Date().toISOString().slice(0, 19).replace('T', ' ');\nconsole.log(`✅ crm_leads sincronizados: ${total} fila(s) en ${items.length} lote(s)`);\nreturn [{ json: { rows_in: total, batches: items.length, synced_at: now } }];\n"
+   },
+   "id": "58dfadef-082d-40e0-948d-ff2c996daea6",
+   "name": "📝 Contar filas (crm)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -2736,
+    -1456
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "INSERT INTO panel_sync_log (source, rows_in, status, synced_at) VALUES ('crm', {{ $('🧱 Lotes de 500 (crm_leads)').all().reduce((a,i)=>a+Number(i.json.batch_size||0),0) }}, 'ok', '{{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}');",
+    "options": {}
+   },
+   "name": "🗒 Registrar sync (crm)",
+   "type": "n8n-nodes-base.mySql",
+   "typeVersion": 2.4,
+   "position": [
+    -2496,
+    -1456
+   ],
+   "retryOnFail": true,
+   "id": "21a10045-6609-4f12-bf27-2dbdfe24348c",
+   "credentials": {
+    "mySql": {
+     "id": "4NiWyzzJ4JbMkIjT",
+     "name": "MySQL account"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "// Conversión = cuenta de trader abierta. Se detecta por accountOpened=true o\n// stage=INTERESTED (que es lo que WF3 escribe tras el 201 de cashstudio-account).\nconst rows = $input.all().map(i => i.json).filter(r => r.account_opened === 1);\nconst byCountry = rows.reduce((a, r) => { a[r.country] = (a[r.country]||0)+1; return a; }, {});\nconsole.log(`📈 Conversiones detectadas: ${rows.length} | por país: ${JSON.stringify(byCountry)}`);\nif (!rows.length) return [];\nreturn rows.map(r => ({ json: r }));\n"
+   },
+   "id": "2ba5ecb9-0b7a-43a9-a2ed-dd9d60f07328",
+   "name": "⚙️ Filtrar Conversiones",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -3216,
+    -1232
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "function esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction escNum(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }\n\nconst BATCH = 500;\nconst rows = $input.all().map(i => i.json);\nconst cols = ['lead_id','full_name','phone','country','provider','stage','created_at','synced_at'];\n\nconst out = [];\nfor (let i = 0; i < rows.length; i += BATCH) {\n  const chunk = rows.slice(i, i + BATCH);\n  const values = chunk.map(r => {\n    const providerExpr =\n      `(CASE WHEN EXISTS(SELECT 1 FROM stringee_calls sc WHERE sc.lead_id = ${esc(r.lead_id)}) ` +\n      `THEN 'stringee' ELSE 'asterisk' END)`;\n    return '(' + [\n      esc(r.lead_id), esc(r.full_name), esc(r.phone), esc(r.country),\n      providerExpr, esc(r.stage), esc(r.account_opened_at), esc(r.synced_at)\n    ].join(',') + ')';\n  }).join(',\\n');\n\n  const updates = cols.filter(c => c !== 'lead_id')\n    .map(c => c === 'created_at' ? 'created_at=COALESCE(crm_conversions.created_at, VALUES(created_at))'\n                                 : `${c}=VALUES(${c})`)\n    .join(',');\n\n  out.push({ json: {\n    sql: `INSERT INTO crm_conversions (${cols.join(',')}) VALUES\\n${values}\\nON DUPLICATE KEY UPDATE ${updates};`,\n    batch_size: chunk.length\n  }});\n}\nconsole.log(`🧱 ${rows.length} conversiones → ${out.length} lote(s)`);\nreturn out;\n"
+   },
+   "id": "d72957e7-146d-413b-9e0b-5684cd533099",
+   "name": "🧱 Lotes de 500 (crm_conversions)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -2976,
+    -1232
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "{{ $json.sql }}",
+    "options": {
+     "queryBatching": "independently"
+    }
+   },
+   "name": "💾 Guardar crm_conversions",
+   "type": "n8n-nodes-base.mySql",
+   "typeVersion": 2.4,
+   "position": [
+    -2736,
+    -1232
+   ],
+   "retryOnFail": true,
+   "id": "385b6d95-4c9d-48db-8203-45620b039ee3",
+   "credentials": {
+    "mySql": {
+     "id": "4NiWyzzJ4JbMkIjT",
+     "name": "MySQL account"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "url": "http://172.18.0.1:8091/call-log",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "limit",
+       "value": "200"
+      },
+      {
+       "name": "from_start_time",
+       "value": "={{ Math.floor((Date.now() - 20*60*1000) / 1000) }}"
+      }
+     ]
+    },
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "json"
+      }
+     },
+     "timeout": 30000
+    }
+   },
+   "name": "📞 GET Call Log (Stringee Worker)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    -4416,
+    -928
+   ],
+   "retryOnFail": true,
+   "id": "2060e915-ca94-42d8-892c-4eb9b153f7c4",
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "function esc(v) {\n  if (v === null || v === undefined || v === '') return 'NULL';\n  return \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\n}\nfunction escNum(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }\n\n// Igual que el WF15 original: lee el Call Log del worker y lo vuelca en stringee_calls.\n// Esta rama NO toca el CRM — stringee_calls es la fuente de volumen/duración del\n// proveedor de cuota fija, y también es la que define provider='stringee' en crm_leads.\n// from_start_time va en SEGUNDOS (Stringee rechaza milisegundos).\nfunction detectCountry(phone) {\n  const p = String(phone || '').replace(/[^0-9]/g, '');\n  if (p.startsWith('977')) return 'nepal';\n  if (p.startsWith('52'))  return 'mexico';\n  if (p.startsWith('91'))  return 'india';\n  return 'unknown';\n}\n\nconst data = $input.all()[0]?.json || {};\nconst calls = (data.data && data.data.calls) || [];\nif (!calls.length) { console.log('Stringee: sin llamadas nuevas'); return []; }\n\nconst rows = calls.map(c => {\n  const toNumber = String(c.to_number || '').replace(/[^0-9]/g, '');\n  return {\n    call_id: String(c.id || ''), phone: toNumber, country: detectCountry(toNumber),\n    answered: Number(c.answer_time) > 0 ? 1 : 0,\n    duration_secs: Number(c.answer_duration || 0),\n    start_time: Number(c.start_time || 0),\n    answer_time: Number(c.answer_time || 0),\n    stop_time: Number(c.stop_time || 0)\n  };\n}).filter(r => r.call_id);\n\nconst BATCH = 200;\nconst out = [];\nfor (let i = 0; i < rows.length; i += BATCH) {\n  const chunk = rows.slice(i, i + BATCH);\n  const values = chunk.map(r => {\n    const last10 = r.phone.slice(-10);\n    // El lead_id sale del CRM ya sincronizado (crm_leads), no de panel_leads/Sheets.\n    const leadSub = last10\n      ? `(SELECT lead_id FROM crm_leads WHERE RIGHT(phone,10)=${esc(last10)} LIMIT 1)`\n      : 'NULL';\n    return '(' + [\n      esc(r.call_id), leadSub, esc(r.phone), esc(r.country),\n      escNum(r.answered), escNum(r.duration_secs),\n      escNum(r.start_time), escNum(r.answer_time), escNum(r.stop_time)\n    ].join(',') + ')';\n  }).join(',\\n');\n\n  out.push({ json: { sql: `INSERT INTO stringee_calls\n    (call_id, lead_id, phone, country, answered, duration_secs, start_time, answer_time, stop_time)\n    VALUES\\n${values}\\n    ON DUPLICATE KEY UPDATE\n      lead_id=COALESCE(VALUES(lead_id), lead_id), country=VALUES(country), answered=VALUES(answered),\n      duration_secs=VALUES(duration_secs), answer_time=VALUES(answer_time), stop_time=VALUES(stop_time);`,\n    batch_size: chunk.length }});\n}\nconsole.log(`📞 Stringee: ${rows.length} llamada(s) → ${out.length} lote(s)`);\nreturn out;\n"
+   },
+   "id": "00aa5a24-7d28-469b-8224-d50cdf42808f",
+   "name": "⚙️ Normalizar + SQL (stringee_calls)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -4176,
+    -928
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "{{ $json.sql }}",
+    "options": {
+     "queryBatching": "transaction"
+    }
+   },
+   "name": "💾 Guardar stringee_calls",
+   "type": "n8n-nodes-base.mySql",
+   "typeVersion": 2.4,
+   "position": [
+    -3936,
+    -928
+   ],
+   "retryOnFail": true,
+   "id": "b5d0ba80-c744-4ef9-96e9-badd5ea85ab2",
+   "credentials": {
+    "mySql": {
+     "id": "4NiWyzzJ4JbMkIjT",
+     "name": "MySQL account"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "// Mismo criterio que \"📝 Contar filas (crm)\": el nodo MySQL de arriba no\n// conserva batch_size en su salida, hay que leerlo del nodo que armó los lotes.\nconst items = $('⚙️ Normalizar + SQL (stringee_calls)').all();\nlet total = 0;\nfor (const it of items) total += Number(it.json.batch_size || 0);\nconsole.log(`✅ stringee_calls: ${total} fila(s) en ${items.length} lote(s)`);\nreturn [{ json: { stringee_rows: total, synced_at: new Date().toISOString() } }];\n"
+   },
+   "id": "dfcc72be-af07-406a-83fb-22600fde37d4",
+   "name": "📝 Log Stringee",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -3696,
+    -928
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// Un item por cada combinación status x dialCode. 7 status x 3 países = 21 requests base\n// (cada uno pagina solo si total > 200). Usamos /api/leads (reporting, SIN cupo) — nunca /queue.\nconst STATUSES  = ['NOT_CONTACTED','ATTEMPTING','NO_ANSWER','CONTACTED','SNOOZED','UNREACHABLE','CLOSED'];\nconst DIALCODES = [\n  { dialCode: '+91',  country: 'india'  },\n  { dialCode: '+977', country: 'nepal'  },\n  { dialCode: '+52',  country: 'mexico' }\n];\nconst token = $json.accessToken;\nif (!token) throw new Error('Sin accessToken — el login falló');\n\nconst out = [];\nfor (const s of STATUSES) for (const d of DIALCODES) {\n  out.push({ json: { status: s, dialCode: d.dialCode, country: d.country, accessToken: token } });\n}\nreturn out;\n"
+   },
+   "id": "a31fdc17-bcdc-4f50-b7a4-43b3dcf7c69f",
+   "name": "⚙️ Matriz Status x País1",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -3936,
+    -1360
+   ]
+  },
+  {
+   "parameters": {
+    "url": "https://lead-studio-9gnl.onrender.com/api/leads",
+    "sendQuery": true,
+    "queryParameters": {
+     "parameters": [
+      {
+       "name": "limit",
+       "value": "200"
+      },
+      {
+       "name": "status",
+       "value": "={{ $json.status }}"
+      },
+      {
+       "name": "dialCode",
+       "value": "={{ $json.dialCode }}"
+      }
+     ]
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "=Bearer {{ $json.accessToken }}"
+      }
+     ]
+    },
+    "options": {
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "json"
+      }
+     },
+     "pagination": {
+      "pagination": {
+       "parameters": {
+        "parameters": [
+         {
+          "name": "offset",
+          "value": "={{ $pageCount * 200 }}"
+         }
+        ]
+       },
+       "paginationCompleteWhen": "other",
+       "completeExpression": "={{ ($response.body.offset + $response.body.limit) >= $response.body.total }}",
+       "limitPagesFetched": true,
+       "maxRequests": 200,
+       "requestInterval": 250
+      }
+     },
+     "timeout": 30000
+    }
+   },
+   "name": "📞 GET /api/leads (paginado real)1",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    -3696,
+    -1360
+   ],
+   "retryOnFail": true,
+   "id": "1627819e-bc1f-487a-b3b1-49e14f71f252",
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "// Recibe todas las páginas de todas las combinaciones status x dialCode y las aplana.\n// El país se toma del prefijo real del teléfono (autoritativo), no del campo country\n// del lead (puede venir null si se importó sin ese dato).\nfunction detectCountry(phone) {\n  const p = String(phone || '').replace(/[^0-9]/g, '');\n  if (p.startsWith('977')) return { country: 'nepal',  code: '+977' };\n  if (p.startsWith('52'))  return { country: 'mexico', code: '+52'  };\n  if (p.startsWith('91'))  return { country: 'india',  code: '+91'  };\n  return { country: 'unknown', code: '' };\n}\nfunction toMySqlDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nconst now = new Date().toISOString().slice(0, 19).replace('T', ' ');\nconst seen = new Set();\nconst out = [];\nlet pages = 0, raw = 0, dupes = 0, noId = 0;\n\nfor (const item of $input.all()) {\n  pages++;\n  const leads = (item.json && item.json.leads) || [];\n  for (const l of leads) {\n    raw++;\n    const leadId = String(l.id || '').trim();\n    if (!leadId) { noId++; continue; }\n    if (seen.has(leadId)) { dupes++; continue; }   // un lead puede repetirse entre combos/páginas\n    seen.add(leadId);\n\n    const phone = String(l.phone || '').replace(/[^0-9+]/g, '');\n    const geo = detectCountry(phone);\n\n    out.push({ json: {\n      lead_id          : leadId.slice(0, 64),\n      full_name        : String(l.name || '').trim().slice(0, 160) || null,\n      phone            : phone.slice(0, 32) || null,\n      country          : geo.country,\n      country_code     : geo.code,\n      language         : String(l.language || '').trim().slice(0, 16) || null,\n      status           : String(l.status || '').trim().toUpperCase().slice(0, 48) || null,\n      stage            : String(l.stage || '').trim().toUpperCase().slice(0, 48) || null,\n      call_attempts    : Number(l.attempts || 0) || 0,\n      do_not_call      : l.doNotCall ? 1 : 0,\n      last_contacted_at: toMySqlDate(l.lastContactedAt),\n      next_follow_up_at: toMySqlDate(l.nextFollowUpAt),\n      account_opened   : (l.accountOpened === true || String(l.stage||'').toUpperCase() === 'INTERESTED') ? 1 : 0,\n      account_opened_at: toMySqlDate(l.accountOpenedAt || l.updatedAt),\n      synced_at        : now\n    }});\n  }\n}\n\nconst byCountry = out.reduce((a, r) => { a[r.json.country] = (a[r.json.country]||0)+1; return a; }, {});\nconsole.log(`📥 CRM: ${pages} respuesta(s) página → ${raw} filas crudas → ${out.length} leads únicos ` +\n            `(dupes ${dupes}, sin id ${noId}) | por país: ${JSON.stringify(byCountry)}`);\nif (!out.length) return [];\nreturn out;\n"
+   },
+   "id": "43e2e061-5a1c-4a83-8317-61e8219a030f",
+   "name": "⚙️ Aplanar + Normalizar1",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    -3456,
+    -1360
+   ]
+  }
+ ],
+ "connections": {
+  "⏰ Cada 5 minutos (CRM Sync)": {
+   "main": [
+    [
+     {
+      "node": "🔐 Login LeadStudio (CRM)",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "📞 GET Call Log (Stringee Worker)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "🔐 Login LeadStudio (CRM)": {
+   "main": [
+    [
+     {
+      "node": "✅ Token OK?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "✅ Token OK?": {
+   "main": [
+    [
+     {
+      "node": "⚙️ Matriz Status x País1",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "🧱 Lotes de 500 (crm_leads)": {
+   "main": [
+    [
+     {
+      "node": "💾 Guardar crm_leads",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "💾 Guardar crm_leads": {
+   "main": [
+    [
+     {
+      "node": "📝 Contar filas (crm)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "📝 Contar filas (crm)": {
+   "main": [
+    [
+     {
+      "node": "🗒 Registrar sync (crm)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "⚙️ Filtrar Conversiones": {
+   "main": [
+    [
+     {
+      "node": "🧱 Lotes de 500 (crm_conversions)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "🧱 Lotes de 500 (crm_conversions)": {
+   "main": [
+    [
+     {
+      "node": "💾 Guardar crm_conversions",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "📞 GET Call Log (Stringee Worker)": {
+   "main": [
+    [
+     {
+      "node": "⚙️ Normalizar + SQL (stringee_calls)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "⚙️ Normalizar + SQL (stringee_calls)": {
+   "main": [
+    [
+     {
+      "node": "💾 Guardar stringee_calls",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "💾 Guardar stringee_calls": {
+   "main": [
+    [
+     {
+      "node": "📝 Log Stringee",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "⚙️ Matriz Status x País1": {
+   "main": [
+    [
+     {
+      "node": "📞 GET /api/leads (paginado real)1",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "📞 GET /api/leads (paginado real)1": {
+   "main": [
+    [
+     {
+      "node": "⚙️ Aplanar + Normalizar1",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "⚙️ Aplanar + Normalizar1": {
+   "main": [
+    [
+     {
+      "node": "🧱 Lotes de 500 (crm_leads)",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "⚙️ Filtrar Conversiones",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "nodeGroups": [],
+ "settings": {
+  "executionOrder": "v1",
+  "binaryMode": "separate"
+ },
+ "staticData": {
+  "node:⏰ Cada 5 minutos (CRM Sync)": {
+   "recurrenceRules": [
+    null
+   ],
+   "recurrenceRuleSignatures": [
+    null
+   ]
+  }
+ },
+ "pinData": {},
+ "meta": null,
+ "tags": [],
+ "shared": [
+  {
+   "role": "workflow:owner",
+   "workflowId": "ap50YtvxxjErCPtq",
+   "projectId": "NUSx6gZ8GtnKjd8W",
+   "project": {
+    "id": "NUSx6gZ8GtnKjd8W",
+    "name": "Land Market <lm2026market@gmail.com>",
+    "type": "personal",
+    "icon": null,
+    "description": null,
+    "customTelemetryTags": [],
+    "creatorId": "72daa587-daf5-4699-b5d7-839ee616d8b7",
+    "createdAt": "2026-07-27T08:49:36.851Z",
+    "updatedAt": "2026-07-27T09:24:13.725Z"
+   },
+   "createdAt": "2026-09-18T06:42:31.976Z",
+   "updatedAt": "2026-09-18T06:42:31.976Z"
+  }
+ ],
+ "activeVersion": null
+}

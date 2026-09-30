@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% set active='dashboard' %}
+{% block heading %}Panel general{% endblock %}
+{% block content %}
+<div class="cards">
+  <div class="card"><div class="k">Clientes activos</div>
+    <div class="v">{{ stats.clients_active }}<small> / {{ stats.clients }}</small></div></div>
+  <div class="card"><div class="k">Proveedores</div>
+    <div class="v">{{ stats.providers }}</div></div>
+  <div class="card"><div class="k">Conexiones SIP</div>
+    <div class="v">{{ stats.connections }}</div></div>
+  <div class="card"><div class="k">Números (DID)</div>
+    <div class="v">{{ stats.dids }}</div></div>
+  <div class="card"><div class="k">Llamadas hoy</div>
+    <div class="v">{{ calls_today }}</div></div>
+  <div class="card"><div class="k">Facturado hoy</div>
+    <div class="v">{{ '%.2f'|format(spend|float) }}</div></div>
+</div>
+
+<div class="panel">
+  <div class="panel-h"><h2>Últimos eventos de fraude</h2>
+    <a class="btn btn-sm" href="{{ url_for('fraud') }}">Ver todos</a></div>
+  <div class="panel-b flush">
+    {% if fraud %}
+    <table>
+      <thead><tr><th>Fecha</th><th>Cliente</th><th>Regla</th><th>Detalle</th><th>Acción</th></tr></thead>
+      <tbody>
+      {% for e in fraud %}
+        <tr>
+          <td class="mono">{{ e.ts }}</td>
+          <td class="mono">{{ e.client }}</td>
+          <td><span class="pill pill-warn">{{ e.rule }}</span></td>
+          <td>{{ e.detail }}</td>
+          <td><span class="pill pill-off">{{ e.action }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">Sin eventos de fraude registrados. Todo en orden.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
